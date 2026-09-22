@@ -1,0 +1,59 @@
+Private License — ConectadoEmQuestoes
+
+1. Titularidade
+   Todo o código-fonte, documentação, arquivos de configuração, assets e demais materiais
+   presentes neste repositório ("Software") são propriedade exclusiva do(s) titular(es) do projeto
+   ConectadoEmQuestoes (doravante "Titular"), salvo indicação expressa em contrário.
+
+2. Concessão de Uso
+   O Titular concede ao Licenciado uma licença não exclusiva, intransferível e revogável para uso
+   interno do Software apenas para fins de desenvolvimento, testes e avaliação, conforme políticas
+   internas estipuladas pelo Titular.
+
+3. Restrições
+   Salvo autorização escrita prévia do Titular, é proibido:
+   a) Distribuir, publicar, sublicenciar, vender, alugar, transferir ou disponibilizar o Software a
+      terceiros;
+   b) Remover ou alterar avisos de propriedade, marcas ou legendas de direitos autorais;
+   c) Revelar, divulgar ou publicar partes do código-fonte ou chaves/segredos armazenados no
+      repositório;
+   d) Usar o Software para prestação de serviços comerciais oferecidos publicamente sem licença
+      adicional.
+
+4. Chaves, Segredos e Dados Sensíveis
+   Arquivos em backend/keys, variáveis de ambiente e credenciais encontradas no repositório são
+   consideradas sensíveis. Seu uso fica restrito ao ambiente autorizado pelo Titular. É proibido
+   commit ou divulgação desses dados em repositórios públicos.
+
+5. Confidencialidade
+   O Licenciado concorda em manter confidencial todo o código, documentação e informações
+   técnicas não públicas, adotando medidas razoáveis para protegê-las contra acesso ou divulgação
+   não autorizada.
+
+6. Suporte e Garantia
+   O Software é fornecido "no estado em que se encontra", sem garantias de qualquer espécie, expressas
+   ou implícitas. O Titular não assume responsabilidade por falhas, erros, perdas de dados ou danos
+   diretos/indiretos decorrentes do uso do Software.
+
+7. Limitação de Responsabilidade
+   Em nenhuma hipótese o Titular será responsável por perdas de lucro, receitas, dados ou danos
+   incidentais, especiais, consequenciais ou punitivos relacionados ao uso ou incapacidade de uso
+   do Software.
+
+8. Rescisão
+   Esta licença será rescindida automaticamente caso o Licenciado viole qualquer termo aqui previsto.
+   Após rescisão, o Licenciado deverá cessar o uso do Software e eliminar todas as cópias em sua posse.
+
+9. Vigência
+   Os termos vigentes aplicam-se desde a data de disponibilização do Software pelo Titular e
+   permanecem enquanto existirem cópias em posse do Licenciado, salvo disposição em contrário.
+
+10. Lei Aplicável e Foro
+    Esta licença será regida pelas leis do país do Titular. Para solução de controvérsias, fica eleito
+    o foro da comarca do Titular, com renúncia a qualquer outro, por mais privilegiado que seja.
+
+Contato para licenciamento e permissões:
+  - Mantenedor / Titular: responsável pelo projeto (contato interno)
+  - Para autorizações formais, encaminhar pedido por escrito ao mantenedor.
+
+Data de emissão: 2026-01-09

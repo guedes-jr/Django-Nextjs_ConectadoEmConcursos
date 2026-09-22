@@ -1,0 +1,36 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with: python-version: 3.10
+      - name: Install backend deps
+        run: |
+          python -m venv venv
+          . venv/bin/activate
+          pip install -r backend/requirements.txt
+      - name: Run backend tests
+        run: |
+          . venv/bin/activate
+          cd backend
+          python manage.py test --noinput
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with: node-version: 18
+      - name: Install and test frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build --if-present
+          npm run test --if-present

@@ -1,0 +1,76 @@
+# Python / Django
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+.python-version
+
+# Virtual environments
+venv/
+.venv/
+env/
+backend/venv/
+
+# Django
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+# secret keys / local config
+.env
+*.env
+backend/.env
+frontend/.env
+backend/keys/
+secrets/
+config/settings/local.py
+
+# Node / Next.js
+node_modules/
+frontend/node_modules/
+.next/
+out/
+build/
+dist/
+.cache/
+.vite/
+pnpm-lock.yaml
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test / coverage
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Next/React build artifacts
+.next/
+out/
+.storybook-static
+
+# Misc
+*.bak
+*.swp
+*.tmp
+*.orig
+.history/
