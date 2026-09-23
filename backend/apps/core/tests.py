@@ -4,11 +4,42 @@ from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.core import mail
 from rest_framework.test import APIClient
 
 from apps.core.models import Profile
+
+
+class AdminSsoTests(TestCase):
+    @override_settings(FRONTEND_URL="http://localhost:3000")
+    def test_admin_login_redirects_unauthenticated_users_to_frontend_login(self):
+        response = Client().get("/admin/login/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("http://localhost:3000/login"))
+
+    @override_settings(FRONTEND_URL="http://localhost:3000")
+    def test_admin_area_redirects_unauthenticated_staff_to_frontend_login(self):
+        response = Client().get("/admin/", follow=True)
+
+        final_location = response.redirect_chain[-1][0] if response.redirect_chain else ""
+        self.assertTrue(final_location.startswith("http://localhost:3000/login"))
+
+    def test_staff_user_can_open_admin_area(self):
+        staff = get_user_model().objects.create_user(
+            username="admin-user",
+            email="admin@example.com",
+            password="admin-pass-123",
+            is_staff=True,
+        )
+        client = Client()
+        client.force_login(staff)
+
+        response = client.get("/admin/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "admin-user")
 
 
 class ProfileTests(TestCase):

@@ -36,8 +36,12 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.sketches",
     "apps.questions",
+    "apps.studies",
+    "apps.workspace",
     "apps.chat",
     "apps.billing",
+    "apps.concursos",
+    "apps.backoffice",
 ]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -69,13 +73,14 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "config" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "config.context_processors.app_globals",
             ],
         },
     }
@@ -107,6 +112,9 @@ STATIC_URL = "static/"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+BACKUP_DIR = BASE_DIR / "backups"
+BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "20"))
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SITE_ID = 1
@@ -124,7 +132,7 @@ JWT_AUTH_REFRESH_COOKIE = "refresh"
 JWT_AUTH_HTTPONLY = True
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
-LOGIN_REDIRECT_URL = f"{FRONTEND_URL}/dashboard"
+LOGIN_REDIRECT_URL = f"{FRONTEND_URL}/portal"
 LOGOUT_REDIRECT_URL = FRONTEND_URL
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
@@ -149,4 +157,25 @@ SOCIALACCOUNT_PROVIDERS = {
         "SCOPE": ["profile", "email"],
         "AUTH_PARAMS": {"access_type": "online"},
     }
+}
+
+# Fontes externas de concursos e notícias (sincronizadas via `sync_sources`).
+# Valores para CONCURSOS_SOURCES: pci, google-news, rss, community
+CONCURSOS_SOURCES = os.getenv("CONCURSOS_SOURCES", "pci,google-news")
+
+CONCURSOS = {
+    "timeout": int(os.getenv("CONCURSOS_HTTP_TIMEOUT", "25")),
+    "pci": {
+        "url": os.getenv("CONCURSOS_PCI_URL", "https://www.pciconcursos.com.br/concursos/"),
+        "timeout": int(os.getenv("CONCURSOS_HTTP_TIMEOUT", "25")),
+        "delay": float(os.getenv("CONCURSOS_HTTP_DELAY", "0")),
+    },
+    "google_news": {
+        "query": os.getenv("CONCURSOS_GN_QUERY", "concurso público"),
+        "category": os.getenv("CONCURSOS_GN_CATEGORY", "Destaques"),
+        "limit": int(os.getenv("CONCURSOS_GN_LIMIT", "25")),
+        "timeout": int(os.getenv("CONCURSOS_HTTP_TIMEOUT", "25")),
+    },
+    "rss_feeds": [],       # [{url, category, filter, timeout}]
+    "community": [],       # [{"name", "url", "items_path", "fields", "status_map"}]
 }

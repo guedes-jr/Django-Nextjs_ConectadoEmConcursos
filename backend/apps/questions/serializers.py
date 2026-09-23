@@ -28,12 +28,17 @@ class QuestionSerializer(serializers.ModelSerializer):
     is_favorite = serializers.BooleanField(read_only=True)
     comment_count = serializers.IntegerField(read_only=True)
     latest_answer = serializers.IntegerField(read_only=True, allow_null=True)
+    latest_is_correct = serializers.BooleanField(read_only=True, allow_null=True)
+    is_marked = serializers.BooleanField(read_only=True)
+    review_due = serializers.BooleanField(read_only=True)
+    next_review_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
     class Meta:
         model = Question
         fields = [
             "id", "exam_id", "discipline", "banca", "year", "statement", "options",
-            "is_favorite", "comment_count", "latest_answer",
+            "is_favorite", "comment_count", "latest_answer", "latest_is_correct",
+            "is_marked", "review_due", "next_review_at", "explanation",
         ]
 
 

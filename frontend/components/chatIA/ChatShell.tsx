@@ -27,9 +27,9 @@ export function ChatShell() {
 
   useEffect(() => {
     void load();
-    void Promise.all([listExams(), listQuestions(), getSubscription()]).then(([examItems, questionItems, subscription]) => {
+    void Promise.all([listExams(), listQuestions({ page_size: 50 }), getSubscription()]).then(([examItems, questionItems, subscription]) => {
       setExams(examItems.slice(0, 30));
-      setQuestions(questionItems.slice(0, 50));
+      setQuestions(questionItems.results);
       setAdvancedTools(subscription?.status === "active" && subscription.plan.capabilities.advanced_tools);
     }).catch(() => setError("Não foi possível carregar provas e questões para o contexto."));
   }, [load]);

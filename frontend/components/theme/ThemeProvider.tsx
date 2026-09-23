@@ -21,15 +21,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Inicializar tema do localStorage ou do sistema
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    
+
     if (stored && (stored === "light" || stored === "dark")) {
       setThemeState(stored);
     } else {
       // Se não houver preferência salva, verificar preferência do sistema
-      const isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const isSystemDark = window.matchMedia(
+        "(prefers-color-scheme: dark)",
+      ).matches;
       setThemeState(isSystemDark ? "dark" : "light");
     }
-    
+
     setMounted(true);
   }, []);
 
@@ -53,11 +55,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     toggleTheme: () => setThemeState((t) => (t === "dark" ? "light" : "dark")),
   };
 
-  if (!mounted) {
-    return <>{children}</>;
-  }
-
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }
 
 export function useTheme() {

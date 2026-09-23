@@ -3,322 +3,70 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { BookOpen, Brain, CalendarDays, ChartColumn, ChevronDown, ClipboardList, CreditCard, FileText, GraduationCap, HelpCircle, History, ListChecks, Menu, MessageSquare, NotebookPen, Send, Shield, Trophy, User, Users, X } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useMe } from "@/lib/useMe";
+import { adminUrl, backendUrl } from "@/lib/admin";
 
-import {
-  Trophy,
-  Presentation,
-  MessagesSquare,
-  Library,
-  Sparkles,
-  User,
-  BarChart3,
-  CalendarClock,
-  StickyNote,
-  LogOut,
-  Medal,
-  ClipboardList,
-} from "lucide-react";
-
-
-const NAV = [
-  { label: "Meu Painel", href: "/dashboard" },
-  { label: "Questões", href: "/questions" },
-  { label: "Provas", href: "/exams" },
-  { label: "ChatIA", href: "/chatIA" },
+const primary = [
+  { label: "Painel", href: "/dashboard" }, { label: "Questões", href: "/questions" },
+  { label: "Provas", href: "/exams" }, { label: "Concursos", href: "/concursos" },
+  { label: "Notícias", href: "/noticias" }, { label: "Simulados", href: "/simulations" },
   { label: "Área de Estudos", href: "/study" },
-  { label: "Planos", href: "/plans" },
 ];
-
-function getInitialsFromText(text: string) {
-  const clean = (text || "").trim();
-  if (!clean) return "U";
-
-  const parts = clean
-    .replace(/[^a-zA-Z0-9À-ÿ\s._-]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (parts.length === 0) return "U";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-function pickDisplayName(me: any) {
-  const full =
-    [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim() || "";
-  if (full) return full;
-  if (me?.username) return String(me.username);
-  if (me?.email) return String(me.email);
-  return "Usuário";
-}
-
-function normalizeAvatarUrl(url: string | null) {
-  if (!url) return null;
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith("/")) {
-    const base =
-      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-    return `${base.replace(/\/$/, "")}${trimmed}`;
-  }
-
-  return trimmed;
-}
+const groups = [
+  { title: "Estudos & planejamento", items: [
+    { label: "Cadernos de Questões", href: "/notebooks", icon: ClipboardList },
+    { label: "Meus Flashcards", href: "/flashcards", icon: Brain },
+    { label: "Minhas Anotações", href: "/notes", icon: NotebookPen },
+    { label: "Resumos", href: "/summaries", icon: FileText },
+    { label: "ChatIA", href: "/chatIA", icon: MessageSquare },
+    { label: "Criar Planejamento de Estudos", href: "/study", icon: CalendarDays },
+    { label: "Minhas Dúvidas", href: "/chatIA", icon: HelpCircle },
+  ] },
+  { title: "Desempenho & estatísticas", items: [
+    { label: "Relatórios", href: "/reports", icon: ChartColumn },
+    { label: "Minhas Estatísticas", href: "/statistics", icon: ChartColumn },
+    { label: "Ranking de Usuários", href: "/ranking", icon: Trophy },
+  ] },
+  { title: "Comunidade", items: [
+    { label: "Pessoas", href: "/people", icon: Users },
+    { label: "Fórum", href: "/forum", icon: MessageSquare },
+    { label: "Feed de Atividades", href: "/feed", icon: ListChecks },
+  ] },
+  { title: "Quizzes", items: [
+    { label: "Quiz de Inglês", href: "/quizzes/english", icon: BookOpen },
+    { label: "Quiz de Matemática", href: "/quizzes/math", icon: BookOpen },
+    { label: "Quiz de Raciocínio Lógico", href: "/quizzes/logic", icon: BookOpen },
+  ] },
+  { title: "Simulados extras", items: [
+    { label: "Simulados Digital", href: "/simulations", icon: ClipboardList },
+    { label: "Histórico de Simulações", href: "/simulations/history", icon: History },
+    { label: "Revisão de Simulados", href: "/simulations/review", icon: ListChecks },
+  ] },
+  { title: "Conta", items: [
+    { label: "Meu Perfil", href: "/profile", icon: User },
+    { label: "Painel de Assinaturas", href: "/plans", icon: CreditCard },
+  ] },
+];
 
 export function AppHeader() {
   const pathname = usePathname();
+  const { me } = useMe();
   const [openMore, setOpenMore] = useState(false);
   const [openUser, setOpenUser] = useState(false);
-
-  const { me, isLoading, isAuthenticated } = useMe();
-
-  useEffect(() => {
-    setOpenMore(false);
-    setOpenUser(false);
-  }, [pathname]);
-
-  const displayName = useMemo(() => pickDisplayName(me), [me]);
-  const initials = useMemo(
-    () => getInitialsFromText(displayName),
-    [displayName]
-  );
-
-  const avatarUrl = useMemo(() => {
-    const social = normalizeAvatarUrl(me?.social_avatar ?? null);
-    if (social) return social;
-
-    const uploaded = normalizeAvatarUrl(me?.avatar ?? null);
-    if (uploaded) return uploaded;
-
-    return null;
-  }, [me]);
-
-  const logout = () => {
-    window.location.href = "http://localhost:8000/accounts/logout/";
-  };
-
-  return (
-    <header className="bg-blue-600 text-white h-14 flex items-center relative">
-      <div className="absolute left-4 flex items-center gap-3">
-        <div className="h-8 w-8 rounded-md bg-blue-500 flex items-center justify-center font-bold">
-          📘
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold">
-            Conectado em Concursos Públicos SE
-          </div>
-          <div className="text-[11px] text-white/80">★★★★★</div>
-        </div>
-      </div>
-
-      <nav className="mx-auto hidden lg:flex items-center gap-1 bg-white/10 px-2 py-1 rounded-md">
-        {NAV.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`px-3 py-1.5 text-sm rounded-md transition ${active
-                ? "bg-white text-blue-600 font-semibold"
-                : "hover:bg-white/20"
-                }`}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-
-        <div className="relative">
-          <button
-            onClick={() => setOpenMore((v) => !v)}
-            className="px-3 py-1.5 text-sm rounded-md hover:bg-white/20"
-            type="button"
-          >
-            Mais ▾
-          </button>
-
-          {openMore && (
-            <div className="absolute top-full right-0 mt-2 w-56 rounded-lg bg-blue-600 text-white shadow-xl ring-1 ring-black/10">
-
-              {/* GERAL */}
-              <Link
-                href="/ranking"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <Trophy className="h-5 w-5 text-white/90" />
-                Ranking de Usuários
-              </Link>
-
-              <Link
-                href="/lousa"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <Presentation className="h-5 w-5 text-white/90" />
-                Lousa Digital
-                <Sparkles className="ml-auto h-4 w-4 text-yellow-300" />
-              </Link>
-
-              <Link
-                href="/forums"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <MessagesSquare className="h-5 w-5 text-white/90" />
-                Fóruns
-              </Link>
-
-              <Link
-                href="/library"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <Library className="h-5 w-5 text-white/90" />
-                Biblioteca
-              </Link>
-
-              <div className="my-2 h-px bg-white/10" />
-
-              {/* CONCURSOS */}
-              <div className="px-4 py-1 text-xs font-semibold uppercase tracking-wide text-white/70">
-                Concursos
-              </div>
-
-              <Link
-                href="/concursos"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <Medal className="h-5 w-5 text-yellow-300" />
-                Painel de Concursos
-              </Link>
-
-              <Link
-                href="/concursos/editais"
-                className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-              >
-                <ClipboardList className="h-5 w-5 text-white/90" />
-                Editais
-              </Link>
-
-            </div>
-          )}
-        </div>
-      </nav>
-
-      <div className="absolute right-4 flex items-center gap-2">
-        <button
-          className="relative h-8 w-8 rounded-md bg-white/10 hover:bg-white/20"
-          type="button"
-        >
-          🔔
-          <span className="absolute -top-1 -right-1 h-4 w-4 text-[10px] bg-red-500 rounded-full flex items-center justify-center">
-            9+
-          </span>
-        </button>
-
-        <ThemeToggle />
-
-        <div className="relative">
-          {isLoading ? (
-            <div className="hidden sm:flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-              <div className="h-7 w-7 rounded-full bg-white/20 overflow-hidden">
-                <div className="h-7 w-7 animate-pulse bg-white/20" />
-              </div>
-              <div className="text-sm font-medium opacity-80">Carregando...</div>
-            </div>
-          ) : !isAuthenticated ? (
-            <Link
-              href="/"
-              className="hidden sm:flex items-center gap-2 bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 text-sm font-medium"
-            >
-              Entrar
-            </Link>
-          ) : (
-            <>
-              <button
-                onClick={() => setOpenUser((v) => !v)}
-                className="flex flex-col items-center"
-                type="button"
-              >
-                <div className="hidden sm:flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-                  <div className="h-7 w-7 rounded-full bg-white/20 overflow-hidden flex items-center justify-center text-xs font-bold">
-                    {avatarUrl ? (
-                      <Image
-                        src={avatarUrl}
-                        alt="Foto de perfil"
-                        width={28}
-                        height={28}
-                        className="h-7 w-7 object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <span className="text-white">{initials}</span>
-                    )}
-                  </div>
-
-                  <div className="text-sm font-medium truncate max-w-[160px]">
-                    {displayName}
-                  </div>
-                </div>
-              </button>
-
-              {openUser && (
-                <div className="absolute right-0 top-full mt-2 w-52 rounded-lg bg-blue-600 text-white shadow-xl ring-1 ring-black/10">
-
-                  <Link
-                    href="/profile"
-                    className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-                  >
-                    <User className="h-5 w-5 text-white/90" />
-                    Meu Perfil
-                  </Link>
-
-                  <Link
-                    href="/profile/stats"
-                    className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-                  >
-                    <BarChart3 className="h-5 w-5 text-white/90" />
-                    Estatísticas
-                  </Link>
-
-                  <Link
-                    href="/profile/schedule"
-                    className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-                  >
-                    <CalendarClock className="h-5 w-5 text-white/90" />
-                    Cronograma de Estudos
-                    <Sparkles className="ml-auto h-4 w-4 text-yellow-300" />
-                  </Link>
-
-                  <Link
-                    href="/profile/notes"
-                    className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-                  >
-                    <StickyNote className="h-5 w-5 text-white/90" />
-                    Anotações
-                  </Link>
-
-                  <div className="my-1 h-px bg-white/10" />
-
-                  <button
-                    onClick={logout}
-                    type="button"
-                    className="flex w-full items-center gap-3 px-4 py-2 text-sm transition hover:bg-blue-700"
-                  >
-                    <LogOut className="h-5 w-5 text-red-300" />
-                    Sair
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </header>
-  );
+  const [openMobile, setOpenMobile] = useState(false);
+  useEffect(() => { setOpenMore(false); setOpenUser(false); setOpenMobile(false); }, [pathname]);
+  const name = [me?.first_name, me?.last_name].filter(Boolean).join(" ") || me?.username || "Minha conta";
+  const avatar = me?.avatar || me?.social_avatar;
+  return <header className="relative z-[100] bg-blue-600 text-white shadow-sm">
+    <div className="mx-auto flex min-h-16 max-w-[1500px] items-center gap-3 px-4 lg:px-6">
+      <Link href="/dashboard" className="flex shrink-0 items-center gap-2.5" aria-label="Ir ao painel"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15"><GraduationCap size={21} /></span><span className="hidden text-sm font-bold leading-tight 2xl:block">Conectado em<br />Concursos Públicos</span></Link>
+      <nav className="ml-auto hidden items-center gap-1 xl:flex" aria-label="Navegação principal">{primary.map((item) => <Link key={item.href} href={item.href} className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${pathname === item.href ? "bg-blue-800 text-white" : "text-blue-50 hover:bg-white/15"}`}>{item.label}</Link>)}<button type="button" aria-expanded={openMore} onClick={() => setOpenMore(!openMore)} className={`flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-semibold ${openMore ? "bg-blue-800" : "hover:bg-white/15"}`}>Mais <ChevronDown size={16} /></button></nav>
+      <div className="ml-auto flex items-center gap-2 xl:ml-2"><Link href="/submit-exam" className="hidden items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-sm font-semibold hover:bg-blue-800 2xl:flex"><Send size={16} /> Enviar Prova</Link><ThemeToggle /><div className="relative"><button type="button" aria-label="Abrir opções da conta" aria-expanded={openUser} onClick={() => setOpenUser(!openUser)} className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-blue-800 ring-2 ring-white/30">{avatar ? <Image src={avatar} alt="Foto de perfil" width={36} height={36} className="h-9 w-9 object-cover" unoptimized /> : <User size={18} />}</button>{openUser && <div className="absolute right-0 top-full z-[120] mt-3 w-52 rounded-xl border border-blue-400 bg-blue-700 p-2 shadow-2xl"><p className="truncate px-3 py-2 text-xs text-blue-100">{name}</p><Link className="block rounded-lg px-3 py-2 text-sm hover:bg-white/15" href="/profile">Meu perfil</Link><Link className="block rounded-lg px-3 py-2 text-sm hover:bg-white/15" href="/plans">Planos</Link>{me?.is_staff && <Link className="block rounded-lg px-3 py-2 text-sm hover:bg-white/15" href="/admin">Painel de Gestão</Link>}{me?.is_staff && <a className="block rounded-lg px-3 py-2 text-sm hover:bg-white/15" href={adminUrl()}>Admin Django</a>}<a className="block rounded-lg px-3 py-2 text-sm hover:bg-white/15" href={backendUrl("accounts/logout/")}>Sair</a></div>}</div><button type="button" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/15 xl:hidden" aria-label={openMobile ? "Fechar menu" : "Abrir menu"} aria-expanded={openMobile} onClick={() => setOpenMobile(!openMobile)}>{openMobile ? <X size={22} /> : <Menu size={22} />}</button></div>
+    </div>
+    {openMore && <div className="absolute right-4 top-full z-[110] hidden w-[min(920px,calc(100vw-2rem))] rounded-b-2xl border border-blue-400 bg-blue-600 p-5 shadow-2xl xl:block"><div className="grid grid-cols-3 gap-x-8 gap-y-7">{groups.map((group) => <section key={group.title}><h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-100">{group.title}</h2><div className="space-y-1">{group.items.map(({ label, href, icon: Icon }) => <Link key={label} href={href} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition hover:bg-white/15"><Icon size={16} className="shrink-0" />{label}</Link>)}</div></section>)}</div>{me?.is_staff && <div className="mt-5 flex gap-4 border-t border-white/20 pt-4 text-sm"><Link href="/admin" className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/15"><Shield size={16} /> Painel de Gestão</Link><a href={adminUrl()} className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/15"><Shield size={16} /> Admin Geral</a><a href={adminUrl("simulationrun/")} className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/15"><Shield size={16} /> Admin Simulados Digital</a></div>}</div>}
+    {openMobile && <nav aria-label="Menu móvel" className="absolute left-0 right-0 top-full z-[110] max-h-[calc(100vh-4rem)] overflow-y-auto border-t border-blue-400 bg-blue-600 p-4 shadow-2xl xl:hidden"><div className="grid gap-1 sm:grid-cols-2">{primary.map((item) => <Link key={item.href} href={item.href} className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-white/15">{item.label}</Link>)}</div><div className="mt-4 grid gap-5 border-t border-white/20 pt-4 sm:grid-cols-2 lg:grid-cols-3">{groups.map((group) => <section key={group.title}><h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-100">{group.title}</h2>{group.items.map(({ label, href, icon: Icon }) => <Link key={label} href={href} className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-white/15"><Icon size={16} />{label}</Link>)}</section>)}</div><Link href="/submit-exam" className="mt-4 flex items-center gap-2 border-t border-white/20 px-2 py-3 text-sm font-semibold"><FileText size={16} /> Enviar Prova</Link>{me?.is_staff && <a href={adminUrl()} className="flex items-center gap-2 px-2 py-3 text-sm"><Shield size={16} /> Admin Geral</a>}</nav>}
+  </header>;
 }

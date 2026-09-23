@@ -5,6 +5,7 @@ import { http } from "@/lib/http";
 
 export type Me = {
   id: number;
+  is_staff: boolean;
   email: string;
   username: string;
   first_name?: string | null;

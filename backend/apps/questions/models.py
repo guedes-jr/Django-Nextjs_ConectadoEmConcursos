@@ -20,6 +20,7 @@ class Exam(models.Model):
 
 
 class Question(models.Model):
+    source_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
     exam = models.ForeignKey(
         Exam,
         on_delete=models.SET_NULL,
@@ -61,6 +62,21 @@ class UserAnswer(models.Model):
                 fields=["user", "question", "-created_at"],
                 name="questions_answer_user_idx",
             )
+        ]
+
+
+class QuestionReview(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="reviews")
+    next_review_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    interval_days = models.PositiveSmallIntegerField(default=0)
+    repetitions = models.PositiveSmallIntegerField(default=0)
+    is_marked = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "question"], name="unique_question_review")
         ]
 
 

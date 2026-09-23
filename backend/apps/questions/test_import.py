@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from apps.questions.models import Exam, Question
+from apps.questions.management.commands.import_content import CURATED_XML_EXPLANATIONS
 
 
 class ImportContentTests(TestCase):
@@ -34,3 +35,46 @@ class ImportContentTests(TestCase):
             path.write_text(json.dumps(payload), encoding="utf-8")
             call_command("import_content", str(path), dry_run=True)
         self.assertFalse(Question.objects.exists())
+
+    def test_xml_preserves_exam_links_and_rich_question_content(self):
+        xml = """<questions>
+          <question id="source-1"><subject>direito_administrativo</subject><institution>fgv</institution>
+            <year>2025</year><exam_name>Prova A</exam_name><statement>&lt;p&gt;Texto&lt;/p&gt;</statement>
+            <command>&lt;p&gt;QUESTÃO 20 – Qual alternativa?&lt;/p&gt;</command><correct_answer>B</correct_answer>
+            <options><option letter="A">&lt;p&gt;Não&lt;/p&gt;</option><option letter="B">&lt;p&gt;Sim&lt;/p&gt;</option></options>
+          </question>
+          <question id="source-2"><subject>direito_administrativo</subject><institution>fgv</institution>
+            <year>2025</year><exam_name>Prova B</exam_name><statement>&lt;p&gt;Texto&lt;/p&gt;</statement>
+            <command>&lt;p&gt;Qual alternativa?&lt;/p&gt;</command><correct_answer>B</correct_answer>
+            <options><option letter="A">&lt;p&gt;Não&lt;/p&gt;</option><option letter="B">&lt;p&gt;Sim&lt;/p&gt;</option></options>
+          </question>
+        </questions>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "questions.xml"
+            path.write_text(xml, encoding="utf-8")
+            call_command("import_content", str(path))
+            call_command("import_content", str(path))
+        self.assertEqual(Question.objects.count(), 2)
+        self.assertEqual(Exam.objects.count(), 2)
+        question = Question.objects.get(source_id="source-1")
+        self.assertEqual(question.statement, "Texto\n\nQual alternativa?")
+        self.assertEqual(question.correct_answer, 1)
+        self.assertEqual(question.options, ["Não", "Sim"])
+
+    def test_xml_applies_curated_comment_and_does_not_erase_existing_comment(self):
+        source_id = next(iter(CURATED_XML_EXPLANATIONS))
+        xml = f"""<questions><question id="{source_id}">
+            <subject>teste</subject><institution>fgv</institution><year>2025</year>
+            <statement>Enunciado</statement><correct_answer>A</correct_answer>
+            <options><option letter="A">Sim</option><option letter="B">Não</option></options>
+        </question></questions>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "questions.xml"
+            path.write_text(xml, encoding="utf-8")
+            call_command("import_content", str(path))
+            question = Question.objects.get(source_id=source_id)
+            self.assertEqual(question.explanation, CURATED_XML_EXPLANATIONS[source_id])
+            question.explanation = "Comentário revisado na administração."
+            question.save(update_fields=["explanation"])
+            call_command("import_content", str(path))
+        self.assertEqual(Question.objects.get(source_id=source_id).explanation, "Comentário revisado na administração.")

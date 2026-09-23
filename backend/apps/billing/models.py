@@ -17,6 +17,9 @@ class Plan(models.Model):
 
 
 class Subscription(models.Model):
+    class Gateway(models.TextChoices):
+        LOCAL = "local", "Local"
+        STRIPE = "stripe", "Stripe"
     class Cycle(models.TextChoices):
         MONTHLY = "mensal", "Mensal"
         SEMIANNUAL = "semestral", "Semestral"
@@ -33,4 +36,26 @@ class Subscription(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    gateway = models.CharField(max_length=20, choices=Gateway.choices, default=Gateway.LOCAL)
+    checkout_id = models.CharField(max_length=64, blank=True, default="")
+    provider_subscription_id = models.CharField(max_length=64, blank=True, default="")
+    current_period_end = models.DateTimeField(null=True, blank=True)
 
+
+
+class PaymentEvent(models.Model):
+    class Type(models.TextChoices):
+        SUCCEEDED = "payment.succeeded", "Pagamento confirmado"
+        FAILED = "payment.failed", "Pagamento recusado"
+        CANCELED = "subscription.canceled", "Assinatura cancelada"
+        RENEWED = "subscription.renewed", "Subscricao renovada"
+
+    event_id = models.CharField(max_length=128, unique=True)
+    type = models.CharField(max_length=40, choices=Type.choices)
+    subscription = models.ForeignKey(
+        Subscription, null=True, blank=True, on_delete=models.SET_NULL, related_name="events"
+    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    payload = models.JSONField(default=dict)
+    processed = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)

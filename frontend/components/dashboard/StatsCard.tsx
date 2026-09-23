@@ -8,9 +8,11 @@ type Props = {
 
 export function StatsCard({ title, value, subtitle, icon, iconBg }: Props) {
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-5 flex items-center justify-between">
+    <div className="dashboard-stat-card flex items-center justify-between rounded-2xl border p-5 shadow-sm">
       <div>
-        <div className="text-sm text-slate-500 dark:text-slate-400">{title}</div>
+        <div className="text-sm text-slate-500 dark:text-slate-400">
+          {title}
+        </div>
         <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
           {value}
         </div>
@@ -19,10 +21,11 @@ export function StatsCard({ title, value, subtitle, icon, iconBg }: Props) {
         </div>
       </div>
 
-      <div className={`h-11 w-11 rounded-xl flex items-center justify-center text-white ${iconBg}`}>
+      <div
+        className={`dashboard-stat-icon flex h-12 w-12 items-center justify-center rounded-xl text-white ${iconBg}`}
+      >
         <span className="text-xl">{icon}</span>
       </div>
     </div>
   );
 }
-

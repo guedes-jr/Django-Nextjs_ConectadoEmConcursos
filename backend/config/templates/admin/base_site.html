@@ -1,0 +1,27 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block nav-global %}
+  <div id="app-portal-link">
+    <a href="{{ FRONTEND_URL }}/dashboard" title="Abrir o painel do usuário">
+      ← {% translate "Ver painel do usuário" %}
+    </a>
+  </div>
+  {{ block.super }}
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+  <style>
+    #app-portal-link {
+      display: inline-block;
+      margin-left: 24px;
+    }
+    #app-portal-link a {
+      color: var(--body-quiet-color);
+      font-weight: 600;
+    }
+    #app-portal-link a:hover {
+      color: var(--accent);
+    }
+  </style>
+{% endblock %}

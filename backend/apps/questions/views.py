@@ -1,28 +1,39 @@
 from datetime import timedelta
 
-from django.db.models import Count, Exists, IntegerField, OuterRef, Q, Subquery
+from django.db import transaction
+from django.db.models import BooleanField, Count, DateTimeField, Exists, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, UserAnswer
+from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, UserAnswer
+from apps.questions.review import schedule_review
 from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer
 from apps.billing.services import capabilities_for
+from apps.workspace.models import SimulationRun
 
 
 def questions_for_user(user):
     latest_answers = UserAnswer.objects.filter(
         user=user, question=OuterRef("pk")
-    ).order_by("-created_at")
+    ).order_by("-created_at", "-id")
+    reviews = QuestionReview.objects.filter(user=user, question=OuterRef("pk"))
     return Question.objects.filter(is_active=True).annotate(
         is_favorite=Exists(Favorite.objects.filter(user=user, question=OuterRef("pk"))),
         comment_count=Count("comments", distinct=True),
         latest_answer=Subquery(
             latest_answers.values("selected_answer")[:1], output_field=IntegerField()
         ),
+        latest_is_correct=Subquery(
+            latest_answers.values("is_correct")[:1], output_field=BooleanField()
+        ),
+        is_marked=Exists(reviews.filter(is_marked=True)),
+        review_due=Exists(reviews.filter(Q(is_marked=True) | Q(next_review_at__lte=timezone.now()))),
+        next_review_at=Subquery(reviews.values("next_review_at")[:1], output_field=DateTimeField()),
     )
 
 
@@ -59,9 +70,35 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(QuestionSerializer(queryset, many=True).data)
 
 
+class QuestionPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
 class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = QuestionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = QuestionPagination
+
+    @action(detail=False, methods=["get"])
+    def disciplines(self, request):
+        values = (
+            Question.objects.filter(is_active=True)
+            .order_by("discipline")
+            .values_list("discipline", flat=True)
+            .distinct()
+        )
+        return Response(list(values))
+
+    @action(detail=False, methods=["get"])
+    def facets(self, request):
+        queryset = Question.objects.filter(is_active=True)
+        return Response({
+            "disciplines": list(queryset.order_by("discipline").values_list("discipline", flat=True).distinct()),
+            "bancas": list(queryset.order_by("banca").values_list("banca", flat=True).distinct()),
+            "years": list(queryset.order_by("-year").values_list("year", flat=True).distinct()),
+        })
 
     def get_queryset(self):
         queryset = questions_for_user(self.request.user)
@@ -72,6 +109,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
         year = self.request.query_params.get("year", "").strip()
         favorites = self.request.query_params.get("favorites", "").lower()
         exam = self.request.query_params.get("exam", "").strip()
+        progress = self.request.query_params.get("progress", "").strip()
 
         if search:
             queryset = queryset.filter(statement__icontains=search)
@@ -85,7 +123,15 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(is_favorite=True)
         if exam.isdigit():
             queryset = queryset.filter(exam_id=int(exam))
-        return queryset
+        if progress == "unanswered":
+            queryset = queryset.filter(latest_answer__isnull=True)
+        elif progress == "correct":
+            queryset = queryset.filter(latest_is_correct=True)
+        elif progress == "incorrect":
+            queryset = queryset.filter(latest_is_correct=False)
+        elif progress == "review":
+            queryset = queryset.filter(review_due=True)
+        return queryset.order_by("-year", "id")
 
     @action(detail=True, methods=["post"])
     def answer(self, request, pk=None):
@@ -107,13 +153,75 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             selected_answer=selected,
             is_correct=selected == question.correct_answer,
         )
+        review = schedule_review(request.user, question, answer.is_correct)
         return Response({
             "attempt_id": answer.id,
             "selected_answer": selected,
             "correct_answer": question.correct_answer,
             "is_correct": answer.is_correct,
             "explanation": question.explanation,
+            "next_review_at": review.next_review_at,
         }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="submit-simulation")
+    def submit_simulation(self, request):
+        entries = request.data.get("answers")
+        if not isinstance(entries, list) or not 1 <= len(entries) <= 50:
+            return Response({"detail": "Envie de 1 a 50 respostas."}, status=status.HTTP_400_BAD_REQUEST)
+        question_ids = [entry.get("question_id") for entry in entries if isinstance(entry, dict)]
+        if len(question_ids) != len(entries) or any(type(item) is not int for item in question_ids) or len(set(question_ids)) != len(entries):
+            return Response({"detail": "Questões inválidas ou repetidas."}, status=status.HTTP_400_BAD_REQUEST)
+        questions = Question.objects.filter(pk__in=question_ids, is_active=True).in_bulk()
+        if len(questions) != len(entries):
+            return Response({"detail": "Uma ou mais questões não estão disponíveis."}, status=status.HTTP_400_BAD_REQUEST)
+        validated = []
+        for entry in entries:
+            question = questions[entry["question_id"]]
+            serializer = AnswerSerializer(data={"selected_answer": entry.get("selected_answer")}, context={"question": question})
+            serializer.is_valid(raise_exception=True)
+            validated.append((question, serializer.validated_data["selected_answer"]))
+        with transaction.atomic():
+            limit = capabilities_for(request.user)["questions_daily"]
+            if limit is not None and UserAnswer.objects.filter(
+                user=request.user, created_at__date=timezone.localdate()
+            ).count() + len(validated) > limit:
+                return Response({"detail": f"Limite diário de {limit} questões atingido para seu plano."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            results = []
+            for question, selected in validated:
+                answer = UserAnswer.objects.create(
+                    user=request.user, question=question, selected_answer=selected,
+                    is_correct=selected == question.correct_answer,
+                )
+                review = schedule_review(request.user, question, answer.is_correct)
+                results.append({
+                    "question_id": question.id, "attempt_id": answer.id,
+                    "selected_answer": selected, "correct_answer": question.correct_answer,
+                    "is_correct": answer.is_correct, "explanation": question.explanation,
+                    "next_review_at": review.next_review_at,
+                })
+            run = SimulationRun.objects.create(
+                user=request.user, score=sum(item["is_correct"] for item in results),
+                total=len(results),
+                answers=[{
+                    "question_id": item["question_id"],
+                    "selected_answer": item["selected_answer"],
+                    "correct_answer": item["correct_answer"],
+                    "is_correct": item["is_correct"],
+                } for item in results],
+            )
+        return Response({"results": results, "simulation_id": run.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def review(self, request, pk=None):
+        question = self.get_object()
+        review, _ = QuestionReview.objects.get_or_create(user=request.user, question=question)
+        review.is_marked = not review.is_marked
+        review.save(update_fields=["is_marked", "updated_at"])
+        return Response({
+            "is_marked": review.is_marked,
+            "review_due": review.is_marked or bool(review.next_review_at and review.next_review_at <= timezone.now()),
+            "next_review_at": review.next_review_at,
+        })
 
     @action(detail=True, methods=["post"])
     def favorite(self, request, pk=None):
@@ -166,6 +274,18 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             description=serializer.validated_data["description"],
         )
         return Response({"id": report.id, "status": report.status}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="request-explanation")
+    def request_explanation(self, request, pk=None):
+        question = self.get_object()
+        if question.explanation.strip():
+            return Response({"detail": "Esta questão já possui comentário."}, status=status.HTTP_400_BAD_REQUEST)
+        report, created = ErrorReport.objects.get_or_create(
+            user=request.user, question=question,
+            description="Solicitação de gabarito comentado.",
+            status=ErrorReport.Status.OPEN,
+        )
+        return Response({"id": report.id, "created": created}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 @api_view(["PATCH", "DELETE"])

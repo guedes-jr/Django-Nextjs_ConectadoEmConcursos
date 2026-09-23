@@ -75,6 +75,36 @@ npm run dev
 # ou yarn dev
 ```
 
+## Acesso de demonstração (ambiente local)
+
+No banco local `backend/db.sqlite3`, use estas credenciais na tela de login:
+
+- **E-mail:** `demo@conectado.local`
+- **Usuário:** `demo.questoes`
+- **Senha:** `Demo@Concursos2026!`
+
+O banco SQLite é ignorado pelo Git. Em uma instalação nova, crie o usuário de demonstração após executar as migrações:
+
+```bash
+cd backend
+.venv/bin/python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); user, _ = User.objects.get_or_create(username='demo.questoes', defaults={'email': 'demo@conectado.local'}); user.email = 'demo@conectado.local'; user.set_password('Demo@Concursos2026!'); user.save()"
+```
+
+Essas credenciais são destinadas somente ao desenvolvimento local.
+
+## Importar questões
+
+Após aplicar as migrações, importe o XML exportado com:
+
+```bash
+cd backend
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py import_content /caminho/para/questoes.xml --dry-run
+.venv/bin/python manage.py import_content /caminho/para/questoes.xml
+```
+
+O importador também aceita JSON e CSV. A importação do XML usa o ID de origem para atualizar questões existentes sem criar duplicatas.
+
 ## Google OAuth (passos resumidos)
 1. No Google Cloud Console → APIs & Services → Credentials → Create OAuth client (Web application).
 2. Authorized JavaScript origins:
@@ -122,6 +152,12 @@ export { http };
 - Usuário autenticado (drf + dj-rest-auth): `/api/auth/user/`
 - Logout: `/accounts/logout/`
 
+## Planejamento de estudos
+
+Acesse `/study` após o login. Escolha objetivo, disciplinas, dias disponíveis e minutos por dia; a data da prova é opcional. A página cria atividades de teoria, questões e revisão, mostra até três próximos passos e permite registrar tempo, mover atividades e redistribuir pendências. Dez respostas de uma disciplina no dia concluem automaticamente o bloco correspondente de questões. O desempenho semanal é calculado a partir das respostas já registradas na plataforma.
+
+O plano fica salvo na conta do usuário. A API autenticada usa `GET/POST/PATCH/DELETE /api/study-plan/`, `PATCH /api/study-plan/blocks/{id}/`, `POST /api/study-plan/blocks/{id}/sessions/` e `POST /api/study-plan/replan/`. Execute `python manage.py migrate` para criar as tabelas.
+
 ## Troubleshooting rápido
 - SocialApp.DoesNotExist: criar Social Application no Admin e associar Site id=1.
 - redirect_uri_mismatch: adicionar redirect_uri exato no Google Console.
@@ -156,6 +192,49 @@ Campos obrigatórios: `banca`, `year`, `discipline`, `statement`, `options` e
 - O chat registra provedor, modelo e tokens, usa `store: false` e aceita uma prova e até cinco questões como contexto real.
 
 Planos pagos permanecem `pending_payment` até a integração de um gateway; nenhuma cobrança é simulada.
+
+## Concursos e notícias (fontes externas)
+
+Páginas públicas em `/concursos` e `/noticias`, alimentadas pelo app `apps.concursos`. Os dados
+são coletados de fontes abertas, normalizados e gravados no banco de forma idempotente (chave
+única `source + external_id` — rodar o comando de novo atualiza em vez de duplicar).
+
+### Sincronizar
+
+```bash
+cd backend
+python manage.py sync_sources                # PCI (concursos+notícias) e Google Notícias
+python manage.py sync_sources --source pci --no-news
+python manage.py sync_sources --dry-run      # simula sem gravar
+```
+
+Para manter atualizado automaticamente, agende o comando (ex.: cron a cada 6h):
+
+```
+0 */6 * * * cd /caminho/do/projeto/backend && .venv/bin/python manage.py sync_sources >> /var/log/sync_sources.log 2>&1
+```
+
+### Fontes
+
+- `pci` — página "Concursos abertos" do PCI Concursos (HTML). Gera registros de concurso
+  (cargos, escolaridade, vagas, salário, prazo, UF/região) e também as manchetes como notícias.
+- `google-news` — feed RSS público do Google Notícias filtrado por "concurso público".
+- `rss` — feeds RSS/Atom extras configuráveis em `settings.CONCURSOS["rss_feeds"]`.
+- `community` — APIs comunitárias JSON (instáveis); configure em `settings.CONCURSOS["community"]`
+  com `{name, url, items_path, fields, status_map}`.
+
+Variáveis de ambiente relevantes: `CONCURSOS_SOURCES`, `CONCURSOS_HTTP_TIMEOUT`,
+`CONCURSOS_PCI_URL`, `CONCURSOS_GN_QUERY`, `CONCURSOS_GN_CATEGORY`, `CONCURSOS_GN_LIMIT`.
+
+### Endpoints (públicos, sem autenticação)
+
+- `GET /api/concursos/?state=SP&status=open&region=sudeste&area=saude&search=prefeitura&limit=20&offset=0`
+  - Filtros: `state` (UF), `status` (`open`/`expected`/`closed`), `region` (ex.: `nordeste`, `nacional`, case-insensitive), `area` (`saude`, `educacao`, `juridica`…), `search`, `role`, `limit`, `offset`.
+  - `facets=1` inclui contagem por UF, região e área. Ordenação: inscrições abertas primeiro, por prazo.
+- `GET /api/news/?category=Destaques&search=edital&limit=18&offset=0`
+- `GET /api/news/<slug>/` — detalhe da notícia.
+
+Execute `python manage.py migrate` para criar as tabelas `Concurso` e `NewsArticle`.
 
 Contato / observações
 - Documentação adicional: docs/Google_Oauth.md

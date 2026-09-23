@@ -15,6 +15,7 @@ BRAZILIAN_STATES = {
 
 class ProfileSerializer(serializers.Serializer):
     id = serializers.IntegerField(source="user.id", read_only=True)
+    is_staff = serializers.BooleanField(source="user.is_staff", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     username = serializers.CharField(source="user.username", max_length=150)
     first_name = serializers.CharField(

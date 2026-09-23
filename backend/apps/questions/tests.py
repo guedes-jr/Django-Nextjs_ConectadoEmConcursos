@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from datetime import timedelta
 
-from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, UserAnswer
+from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, UserAnswer
 
 
 class QuestionAPITests(TestCase):
@@ -27,7 +27,7 @@ class QuestionAPITests(TestCase):
     def test_list_does_not_expose_correct_answer(self):
         response = self.client.get("/api/questions/")
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("correct_answer", response.data[0])
+        self.assertNotIn("correct_answer", response.data["results"][0])
 
     def test_filters_questions(self):
         Question.objects.create(
@@ -36,7 +36,33 @@ class QuestionAPITests(TestCase):
         )
         response = self.client.get("/api/questions/?discipline=Português")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
+
+    def test_filter_facets_cover_the_full_question_bank(self):
+        Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Outra questão", options=["A", "B"], correct_answer=0,
+        )
+        response = self.client.get("/api/questions/facets/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["disciplines"], ["Matemática", "Português"])
+        self.assertEqual(response.data["bancas"], ["CEBRASPE", "FGV"])
+        self.assertEqual(response.data["years"], [2025, 2024])
+
+    def test_list_is_paginated_and_filters_keep_total(self):
+        Question.objects.bulk_create([
+            Question(
+                discipline="Português", banca="CEBRASPE", year=2025,
+                statement=f"Questão extra {index}", options=["A", "B"], correct_answer=0,
+            ) for index in range(12)
+        ])
+        first = self.client.get("/api/questions/?discipline=Português&page=1")
+        second = self.client.get("/api/questions/?discipline=Português&page=2")
+        self.assertEqual(first.data["count"], 13)
+        self.assertEqual(len(first.data["results"]), 10)
+        self.assertEqual(len(second.data["results"]), 3)
+        self.assertNotEqual(first.data["results"][0]["id"], second.data["results"][0]["id"])
+        self.assertEqual(self.client.get("/api/questions/disciplines/").data, ["Português"])
 
     def test_answer_records_attempt_and_returns_correction(self):
         response = self.client.post(
@@ -47,6 +73,71 @@ class QuestionAPITests(TestCase):
         self.assertTrue(response.data["is_correct"])
         self.assertEqual(response.data["correct_answer"], 1)
         self.assertTrue(UserAnswer.objects.filter(user=self.user).exists())
+        review = QuestionReview.objects.get(user=self.user, question=self.question)
+        self.assertEqual(review.interval_days, 1)
+
+    def test_progress_filters_and_review_queue(self):
+        other = Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Outra questão", options=["A", "B"], correct_answer=0,
+        )
+        self.client.post(f"/api/questions/{self.question.id}/answer/", {"selected_answer": 0}, format="json")
+        self.assertEqual(self.client.get("/api/questions/?progress=incorrect").data["count"], 1)
+        self.assertEqual(self.client.get("/api/questions/?progress=unanswered").data["results"][0]["id"], other.id)
+        self.assertEqual(self.client.get("/api/questions/?progress=review").data["count"], 0)
+        self.client.post(f"/api/questions/{self.question.id}/review/")
+        queued = self.client.get("/api/questions/?progress=review").data["results"]
+        self.assertEqual([item["id"] for item in queued], [self.question.id])
+        self.assertTrue(queued[0]["is_marked"])
+        self.assertFalse(queued[0]["latest_is_correct"])
+
+    def test_correct_retries_extend_review_interval_and_errors_reset_it(self):
+        url = f"/api/questions/{self.question.id}/answer/"
+        self.client.post(url, {"selected_answer": 1}, format="json")
+        self.assertEqual(QuestionReview.objects.get(user=self.user, question=self.question).interval_days, 1)
+        self.client.post(url, {"selected_answer": 1}, format="json")
+        self.assertEqual(QuestionReview.objects.get(user=self.user, question=self.question).interval_days, 3)
+        self.client.post(url, {"selected_answer": 0}, format="json")
+        review = QuestionReview.objects.get(user=self.user, question=self.question)
+        self.assertEqual((review.interval_days, review.repetitions), (1, 0))
+
+    def test_simulation_submission_is_atomic_and_returns_feedback_at_end(self):
+        other = Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Outra questão", options=["A", "B"], correct_answer=0,
+        )
+        url = "/api/questions/submit-simulation/"
+        invalid = self.client.post(url, {"answers": [
+            {"question_id": self.question.id, "selected_answer": 1},
+            {"question_id": other.id, "selected_answer": 9},
+        ]}, format="json")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(UserAnswer.objects.filter(user=self.user).exists())
+        response = self.client.post(url, {"answers": [
+            {"question_id": self.question.id, "selected_answer": 1},
+            {"question_id": other.id, "selected_answer": 1},
+        ]}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.data["results"]), 2)
+        self.assertEqual(sum(item["is_correct"] for item in response.data["results"]), 1)
+        self.assertEqual(UserAnswer.objects.filter(user=self.user).count(), 2)
+        self.assertEqual(QuestionReview.objects.filter(user=self.user).count(), 2)
+
+    def test_simulation_respects_daily_limit_without_partial_save(self):
+        UserAnswer.objects.bulk_create([
+            UserAnswer(user=self.user, question=self.question, selected_answer=1, is_correct=True)
+            for _ in range(19)
+        ])
+        other = Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Outra questão", options=["A", "B"], correct_answer=0,
+        )
+        response = self.client.post("/api/questions/submit-simulation/", {"answers": [
+            {"question_id": self.question.id, "selected_answer": 1},
+            {"question_id": other.id, "selected_answer": 0},
+        ]}, format="json")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(UserAnswer.objects.filter(user=self.user).count(), 19)
 
     def test_free_plan_daily_question_limit_is_enforced(self):
         UserAnswer.objects.bulk_create([
@@ -99,6 +190,17 @@ class QuestionAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertTrue(ErrorReport.objects.filter(user=self.user).exists())
+
+    def test_missing_explanation_can_be_requested_once(self):
+        question = Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Outra questão", options=["A", "B"], correct_answer=0,
+        )
+        url = f"/api/questions/{question.id}/request-explanation/"
+        self.assertEqual(self.client.post(url).status_code, 201)
+        self.assertEqual(self.client.post(url).status_code, 200)
+        self.assertEqual(ErrorReport.objects.filter(question=question, user=self.user).count(), 1)
+        self.assertEqual(self.client.post(f"/api/questions/{self.question.id}/request-explanation/").status_code, 400)
 
 
 class ExamAPITests(TestCase):

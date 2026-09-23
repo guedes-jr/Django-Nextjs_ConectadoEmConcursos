@@ -8,10 +8,12 @@ export function AppFooter({ onResolveNow }: Props) {
   return (
     <footer className="mt-10">
       <div className="mx-auto max-w-7xl px-4">
-        <div className="rounded-2xl bg-blue-600 text-white p-10 relative overflow-hidden shadow-lg">
+        <div className="dashboard-footer rounded-2xl p-10 relative overflow-hidden shadow-lg">
           <div className="flex flex-col items-center text-center gap-4">
             <div className="text-5xl">🏆</div>
-            <h3 className="text-2xl font-bold">Continue firme na sua jornada!</h3>
+            <h3 className="text-2xl font-bold">
+              Continue firme na sua jornada!
+            </h3>
             <p className="text-white/90">
               Cada questão resolvida te aproxima mais da sua aprovação
             </p>
@@ -19,19 +21,19 @@ export function AppFooter({ onResolveNow }: Props) {
             <div className="flex flex-col sm:flex-row gap-3 mt-2">
               <button
                 onClick={onResolveNow}
-                className="h-11 px-6 rounded-xl bg-white dark:bg-slate-900 text-blue-700 font-semibold hover:bg-white/90 transition"
+                className="dashboard-footer-primary h-11 rounded-xl px-6 font-semibold"
               >
                 ✅ Resolver Questões Agora
               </button>
 
-              <button className="h-11 px-6 rounded-xl bg-white/15 hover:bg-white/20 transition font-semibold">
+              <button className="dashboard-footer-secondary h-11 rounded-xl px-6 font-semibold">
                 Ver Ranking
               </button>
             </div>
           </div>
 
           <div className="absolute right-6 top-6">
-            <button className="text-xs bg-white/15 hover:bg-white/20 px-3 py-2 rounded-xl">
+            <button className="dashboard-footer-secondary rounded-xl px-3 py-2 text-xs">
               🌙 Escuro
             </button>
           </div>

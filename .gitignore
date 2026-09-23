@@ -53,7 +53,9 @@ htmlcov/
 .pytest_cache/
 
 # IDEs / editors
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.sublime-workspace
 *.sublime-project
@@ -74,3 +76,6 @@ out/
 *.tmp
 *.orig
 .history/
+
+# Backups locais (banco + midia) - nao versionar
+backend/backups/
