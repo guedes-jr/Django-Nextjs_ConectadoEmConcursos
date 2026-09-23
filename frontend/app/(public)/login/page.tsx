@@ -55,7 +55,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await http.post("/api/auth/login/", { email, password });
-      router.push("/portal");
+      router.push("/dashboard");
     } catch {
       setError("E-mail ou senha inválidos.");
     } finally {

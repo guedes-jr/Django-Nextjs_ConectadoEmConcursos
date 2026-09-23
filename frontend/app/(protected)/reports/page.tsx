@@ -100,8 +100,8 @@ export default function ReportsPage() {
   ];
 
   const planMinutes =
-    plan?.discipline_stats.reduce((sum, item) => sum + item.actual_minutes, 0) ?? 0;
-  const planSessions = plan?.blocks.filter((block) => block.status !== "pending").length ?? 0;
+    plan?.discipline_stats?.reduce((sum, item) => sum + item.actual_minutes, 0) ?? 0;
+  const planSessions = plan?.blocks?.filter((block) => block.status !== "pending").length ?? 0;
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950">

@@ -21,6 +21,7 @@ import {
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 const navGroups = [
   {
@@ -76,7 +77,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <nav className="flex-1 space-y-5 px-3 py-4">
       {navGroups.map((group) => (
         <div key={group.label}>
-          <p className="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <p className="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
             {group.label}
           </p>
           <ul className="space-y-1">
@@ -178,12 +179,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Menu className="h-5 w-5" />
           </button>
           <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">{currentLabel ?? "Painel"}</p>
-          <p className="ml-auto text-xs text-slate-500 dark:text-slate-400">
-            {me.first_name || me.username}
-            <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              {me.is_staff ? "Staff" : "Aluno"}
-            </span>
-          </p>
+          <div className="ml-auto flex items-center gap-3">
+            <ThemeToggle />
+            <p className="text-xs text-slate-500 dark:text-slate-300">
+              {me.first_name || me.username}
+              <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                {me.is_staff ? "Staff" : "Aluno"}
+              </span>
+            </p>
+          </div>
         </header>
 
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">{children}</main>

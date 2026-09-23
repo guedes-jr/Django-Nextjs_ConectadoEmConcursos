@@ -67,7 +67,7 @@ export default function PlansPage() {
 
         <div className="mt-10 flex flex-col items-center justify-center gap-6 lg:flex-row lg:items-stretch">
           {plans.map((p) => (
-            <PlanCard key={p.key} plan={p} cycle={cycle} onSelect={() => void choose(p)} selected={subscription?.plan.slug === p.key && subscription.status === "active"} loading={loadingPlan === p.key} />
+            <PlanCard key={p.key} plan={p} cycle={cycle} onSelect={() => void choose(p)} selected={subscription?.plan?.slug === p.key && subscription?.status === "active"} loading={loadingPlan === p.key} />
           ))}
         </div>
 
