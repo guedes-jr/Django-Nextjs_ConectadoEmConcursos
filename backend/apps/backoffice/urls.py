@@ -20,4 +20,8 @@ urlpatterns = [
     path("content/concursos/", views.concursos_admin, name="concursos"),
     path("backups/", views.backups, name="backups"),
     path("backups/<path:name>/restore/", views.restore, name="restore"),
+    path("chat/", views.chat_usage, name="chat"),
+    path("staff/", views.staff, name="staff"),
+    path("staff/<int:pk>/", views.staff_detail, name="staff-detail"),
+    path("reports/study/", views.study_reports, name="study-reports"),
 ]

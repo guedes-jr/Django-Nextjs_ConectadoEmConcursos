@@ -5,42 +5,37 @@ import Link from "next/link";
 import {
   Users,
   CreditCard,
+  Package,
   FileText,
   MessageSquare,
-  Package,
   Database,
   RefreshCw,
+  Timer,
+  Target,
+  TrendingUp,
   Loader2,
-  Check,
-  AlertTriangle,
 } from "lucide-react";
-import { backoffice, Overview, formatDate, statusLabel, statusColor } from "@/lib/backoffice";
+import { backoffice, Overview, formatDate } from "@/lib/backoffice";
+import type { ChatUsageReport, StudyReport } from "@/lib/backoffice";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { StatCard } from "@/components/admin/StatCard";
+import { Notice, LoadingState } from "@/components/admin/Notice";
+import { StatusBadge, BadgeViolet } from "@/components/admin/StatusBadge";
 
-function Card({
-  title,
-  value,
-  subtitle,
-  hint,
-}: {
-  title: string;
-  value: string | number;
-  subtitle: string;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
-      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        {subtitle}
-        {hint ? <span className="ml-1 text-blue-600 dark:text-blue-400">· {hint}</span> : null}
-      </p>
-    </div>
-  );
+function hoursLabel(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h${m.toString().padStart(2, "0")}` : `${h}h`;
 }
 
 export default function AdminOverviewPage() {
-  const [data, setData] = useState<Overview | null>(null);
+  const [data, setData] = useState<{
+    overview: Overview;
+    chat: ChatUsageReport;
+    study: StudyReport;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [backingUp, setBackingUp] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -49,9 +44,14 @@ export default function AdminOverviewPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await backoffice.overview());
+      const [overview, chat, study] = await Promise.all([
+        backoffice.overview(),
+        backoffice.chatUsage(14),
+        backoffice.studyReport(14),
+      ]);
+      setData({ overview, chat, study });
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Não foi possível carregar os indicadores.");
     } finally {
       setLoading(false);
@@ -65,12 +65,12 @@ export default function AdminOverviewPage() {
   const createBackup = async () => {
     setBackingUp(true);
     setNotice(null);
+    setError(null);
     try {
       await backoffice.createBackup();
       setNotice("Backup criado com sucesso.");
       void load();
     } catch {
-      setNotice(null);
       setError("Falha ao criar o backup.");
     } finally {
       setBackingUp(false);
@@ -79,183 +79,233 @@ export default function AdminOverviewPage() {
 
   if (loading && !data) {
     return (
-      <div className="grid min-h-[50vh] place-items-center">
-        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
-      </div>
+      <Card>
+        <LoadingState label="Carregando indicadores..." />
+      </Card>
     );
   }
 
   if (error && !data) {
     return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-        <p className="flex items-center gap-2 font-medium"><AlertTriangle size={18} /> {error}</p>
-        <button type="button" onClick={load} className="mt-3 text-sm font-semibold underline">
-          Tentar novamente
-        </button>
-      </div>
+      <Card>
+        <CardContent className="p-6">
+          <Notice kind="error">{error}</Notice>
+          <Button variant="outline" className="mt-4" onClick={load}>
+            Tentar novamente
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
-  const s = data!.subscriptions;
-  const overdue = s.pending;
+  const { overview, chat, study } = data!;
+  const s = overview.subscriptions;
 
   return (
-    <div className="space-y-8">
-      {notice && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <Check size={16} /> {notice}
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <AlertTriangle size={16} /> {error}
-        </div>
-      )}
+    <div className="space-y-6">
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
 
-      <section>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Visão geral</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Métricas principais do {formatDate(new Date().toISOString()).split(",")[0]}
-        </p>
+      <section className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Visão geral</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Métricas principais em {formatDate(new Date().toISOString()).split(",")[0]}
+          </p>
+        </div>
+        <Button variant="outline" onClick={load}>
+          <RefreshCw className="h-4 w-4" /> Atualizar
+        </Button>
       </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card
+        <StatCard
           title="Usuários"
-          value={data!.users.total}
-          subtitle={`${data!.users.active} ativos · ${data!.users.staff} staff`}
-          hint="Ver usuários"
+          value={overview.users.total}
+          hint={`${overview.users.active} ativos · ${overview.users.staff} staff`}
+          icon={<Users className="h-4 w-4" />}
         />
-        <Card
+        <StatCard
           title="Assinaturas ativas"
           value={s.active}
-          subtitle={`${s.total} no total · ${s.pending} pagamento pendente`}
-          hint={overdue ? "Atenção às pendências" : undefined}
+          hint={`${s.total} no total · ${s.pending_payment} pagamento pendente`}
+          icon={<CreditCard className="h-4 w-4" />}
+          accent="emerald"
         />
-        <Card title="Planos ativos" value={`${data!.plans.active}/${data!.plans.total}`} subtitle="Publicados para venda" />
-        <Card
+        <StatCard
           title="Questões sem comentário"
-          value={data!.questions.uncommented}
-          subtitle={`${data!.questions.with_comment} com comentário de ${data!.questions.total} questões`}
-          hint="Preencher"
+          value={overview.questions.uncommented}
+          hint={`${overview.questions.total} questões cadastradas`}
+          icon={<FileText className="h-4 w-4" />}
+          accent="amber"
+        />
+        <StatCard
+          title="Minutos estudados"
+          value={hoursLabel(study.total_minutes)}
+          hint={`${study.active_users} alunos ativos em 14 dias`}
+          icon={<Timer className="h-4 w-4" />}
+          accent="sky"
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Planos ativos"
+          value={`${overview.plans.active}/${overview.plans.total}`}
+          hint="Publicados para venda"
+          icon={<Package className="h-4 w-4" />}
+          accent="violet"
+        />
+        <StatCard
+          title="Perguntas à IA (14d)"
+          value={chat.queries}
+          hint={`${chat.active_users} usuários · ${Math.round((chat.input_tokens + chat.output_tokens) / 1000)}k tokens`}
+          icon={<MessageSquare className="h-4 w-4" />}
+          accent="indigo"
+        />
+        <StatCard
+          title="Taxa de acerto"
+          value={`${study.accuracy}%`}
+          hint={`${study.correct_answers} corretas de ${study.total_answers} respostas`}
+          icon={<TrendingUp className="h-4 w-4" />}
+          accent="emerald"
+        />
+        <StatCard
+          title="Provas pendentes"
+          value={overview.proofs.pending}
+          hint={`${overview.proofs.reviewed} revisadas`}
+          icon={<Target className="h-4 w-4" />}
+          accent="rose"
         />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-            <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-              <CreditCard size={18} className="text-indigo-500" /> Assinaturas recentes
-            </h2>
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Assinaturas recentes</CardTitle>
             <Link href="/admin/assinaturas" className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
               Ver todas
             </Link>
-          </div>
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {data!.recent_subscriptions.length === 0 && (
-              <li className="px-5 py-6 text-sm text-slate-500">Nenhuma assinatura recente.</li>
-            )}
-            {data!.recent_subscriptions.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.username}</p>
-                  <p className="text-xs text-slate-500">
-                    {item.plan} · {formatDate(item.created_at)}
-                  </p>
-                </div>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusColor[item.status] ?? "bg-slate-100 text-slate-600"}`}>
-                  {statusLabel[item.status] ?? item.status}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          </CardHeader>
+          {overview.recent_subscriptions.length === 0 ? (
+            <CardContent>
+              <p className="py-8 text-center text-sm text-slate-400">Nenhuma assinatura recente.</p>
+            </CardContent>
+          ) : (
+            <CardContent className="p-0">
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {overview.recent_subscriptions.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.username}</p>
+                      <p className="text-xs text-slate-500">
+                        {item.plan} · {formatDate(item.created_at)}
+                      </p>
+                    </div>
+                    <StatusBadge status={item.status} />
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          )}
+        </Card>
 
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-            <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-              <Users size={18} className="text-indigo-500" /> Usuários recentes
-            </h2>
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Usuários recentes</CardTitle>
             <Link href="/admin/usuarios" className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
               Ver todos
             </Link>
-          </div>
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {data!.recent_users.length === 0 && (
-              <li className="px-5 py-6 text-sm text-slate-500">Nenhum usuário recente.</li>
-            )}
-            {data!.recent_users.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.username}</p>
-                  <p className="truncate text-xs text-slate-500">{item.email || "sem e-mail"}</p>
-                </div>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.is_staff ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
-                  {item.is_staff ? "Staff" : "Aluno"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {overview.recent_users.map((item) => (
+                <li key={item.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.username}</p>
+                    <p className="truncate text-xs text-slate-500">{item.email || "sem e-mail"}</p>
+                  </div>
+                  <BadgeViolet>{item.is_staff ? "Staff" : "Aluno"}</BadgeViolet>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-            <FileText size={18} className="text-indigo-500" /> Conteúdo
-          </h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between"><dt className="text-slate-500">Provas pendentes de revisão</dt><dd className="font-semibold">{data!.proofs.pending}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Notícias fora do ar</dt><dd className="font-semibold">{data!.content.news_unpublished}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Posts no fórum</dt><dd className="font-semibold">{data!.content.community_posts}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Concursos de inscrição aberta</dt><dd className="font-semibold">{data!.content.concursos_open}</dd></div>
-          </dl>
-          <Link href="/admin/conteudo" className="mt-4 inline-flex text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
-            Gerenciar conteúdo
-          </Link>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-            <Package size={18} className="text-indigo-500" /> Planos
-          </h2>
-          <p className="mt-4 text-sm text-slate-500">
-            {data!.plans.active} ativos de {data!.plans.total} planos configurados.
-          </p>
-          <Link href="/admin/planos" className="mt-4 inline-flex text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
-            Editar planos
-          </Link>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-            <Database size={18} className="text-indigo-500" /> Backups
-          </h2>
-          <p className="mt-4 text-sm text-slate-500">
-            {data!.backups.count > 0 ? (
-              <>Último backup: <span className="font-medium text-slate-700 dark:text-slate-200">{data!.backups.last}</span></>
-            ) : (
-              "Nenhum backup encontrado ainda."
-            )}
-          </p>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={createBackup}
-              disabled={backingUp}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-            >
-              {backingUp ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-              {backingUp ? "Criando..." : "Criar backup"}
-            </button>
-            <Link
-              href="/admin/backups"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-            >
-              <MessageSquare size={15} /> Gerenciar
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4 text-indigo-500" /> Conteúdo
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Notícias fora do ar</span>
+              <span className="font-semibold tabular-nums">{overview.content.news_unpublished}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Posts no fórum</span>
+              <span className="font-semibold tabular-nums">{overview.content.community_posts}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Concursos de inscrição aberta</span>
+              <span className="font-semibold tabular-nums">{overview.content.concursos_open}</span>
+            </div>
+            <Link href="/admin/conteudo" className="inline-flex pt-1 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+              Gerenciar conteúdo
             </Link>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageSquare className="h-4 w-4 text-indigo-500" /> Chat IA
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Conversas totais</span>
+              <span className="font-semibold tabular-nums">{chat.conversations}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Mensagens da IA</span>
+              <span className="font-semibold tabular-nums">{chat.messages}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Tokens consumidos</span>
+              <span className="font-semibold tabular-nums">{((chat.input_tokens + chat.output_tokens) / 1000).toFixed(1)}k</span>
+            </div>
+            <Link href="/admin/relatorios" className="inline-flex pt-1 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+              Ver relatórios de estudo
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Database className="h-4 w-4 text-indigo-500" /> Backups
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Backups salvos</span>
+              <span className="font-semibold tabular-nums">{overview.backups.count}</span>
+            </div>
+            <p className="truncate text-xs text-slate-500">
+              {overview.backups.last ? `Último: ${overview.backups.last}` : "Nenhum backup ainda."}
+            </p>
+            <div className="pt-1">
+              <Button size="sm" onClick={createBackup} disabled={backingUp}>
+                {backingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {backingUp ? "Criando..." : "Criar backup"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

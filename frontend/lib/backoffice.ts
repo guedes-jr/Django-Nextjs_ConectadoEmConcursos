@@ -2,7 +2,7 @@ import { http } from "@/lib/http";
 
 export type Overview = {
   users: { total: number; active: number; staff: number };
-  subscriptions: { total: number; active: number; pending: number; canceled: number };
+  subscriptions: { total: number; active: number; pending_payment: number; canceled: number };
   plans: { total: number; active: number };
   questions: { total: number; uncommented: number; with_comment: number };
   proofs: { pending: number; reviewed: number };
@@ -123,6 +123,56 @@ export type BackupRow = {
   created_at: string;
 };
 
+export type ChatUsageReport = {
+  conversations: number;
+  messages: number;
+  queries: number;
+  input_tokens: number;
+  output_tokens: number;
+  active_users: number;
+  daily: Array<{ date: string; queries: number; tokens: number }>;
+  top_users: Array<{
+    user_id: number;
+    username: string;
+    queries: number;
+    tokens: number;
+    last_used: string | null;
+  }>;
+};
+
+export type StudyReport = {
+  total_answers: number;
+  correct_answers: number;
+  accuracy: number;
+  total_minutes: number;
+  flashcards: number;
+  simulations: { total: number; avg_score: number; max_score: number | null };
+  active_users: number;
+  daily: Array<{ date: string; answers: number; correct: number; minutes: number }>;
+  top_students: Array<{
+    user_id: number;
+    username: string;
+    answers: number;
+    correct: number;
+    minutes: number;
+    last_activity: string | null;
+  }>;
+  by_discipline: Array<{ discipline: string; total: number; correct: number }>;
+};
+
+export type StaffRow = {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_staff: boolean;
+  is_superuser: boolean;
+  is_active: boolean;
+  last_login: string | null;
+  date_joined: string;
+};
+
 export type PlanPayload = {
   slug: string;
   name: string;
@@ -158,8 +208,14 @@ export const backoffice = {
       .get<{ results: SubscriptionRow[] }>(`/api/backoffice/subscriptions/?${params}`)
       .then((r) => r.data);
   },
-  updateSubscription: (id: number, data: Partial<Pick<SubscriptionRow, "plan_slug" | "cycle" | "status">>) =>
-    http.patch<SubscriptionRow>(`/api/backoffice/subscriptions/${id}/`, data).then((r) => r.data),
+  updateSubscription: (id: number, data: { plan_slug?: string; cycle?: string; status?: string }) =>
+    http
+      .patch<SubscriptionRow>(`/api/backoffice/subscriptions/${id}/`, {
+        ...(data.plan_slug !== undefined ? { plan: data.plan_slug } : {}),
+        ...(data.cycle !== undefined ? { cycle: data.cycle } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+      })
+      .then((r) => r.data),
 
   listPlans: () => http.get<{ results: Plan[] }>("/api/backoffice/plans/").then((r) => r.data),
   createPlan: (data: PlanPayload) => http.post<Plan>("/api/backoffice/plans/", data).then((r) => r.data),
@@ -212,6 +268,19 @@ export const backoffice = {
     http
       .post<{ restored: string; previous_db_saved_at: string }>(`/api/backoffice/backups/${encodeURIComponent(name)}/restore/`)
       .then((r) => r.data),
+
+  chatUsage: (days = 14) =>
+    http.get<ChatUsageReport>(`/api/backoffice/chat/?days=${days}`).then((r) => r.data),
+
+  studyReport: (days = 14) =>
+    http.get<StudyReport>(`/api/backoffice/reports/study/?days=${days}`).then((r) => r.data),
+
+  listStaff: () =>
+    http.get<{ results: StaffRow[] }>("/api/backoffice/staff/").then((r) => r.data),
+  createStaff: (data: { username: string; email?: string; password: string }) =>
+    http.post<StaffRow>("/api/backoffice/staff/", data).then((r) => r.data),
+  updateStaff: (id: number, data: Partial<Pick<StaffRow, "is_staff" | "is_active" | "email" | "first_name" | "last_name">>) =>
+    http.patch<StaffRow>(`/api/backoffice/staff/${id}/`, data).then((r) => r.data),
 };
 
 export function formatBytes(bytes: number) {

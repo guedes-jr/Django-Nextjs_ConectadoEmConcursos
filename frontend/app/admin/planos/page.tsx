@@ -1,33 +1,52 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, Trash2, Check, AlertTriangle } from "lucide-react";
+import { Package, Pencil, Plus, Trash2, Loader2 } from "lucide-react";
 import { backoffice, Plan, PlanPayload } from "@/lib/backoffice";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { StatusBadge } from "@/components/admin/StatusBadge";
+import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
+import { PageHeader } from "@/components/admin/PageHeader";
 
-type BlankPlan = {
-  slug: string;
-  name: string;
-  monthly_price: string;
-  semiannual_price: string;
-  annual_price: string;
-  features: string;
-};
+const emptyForm = { name: "", slug: "", monthly_price: "", semiannual_price: "", annual_price: "", features: "", is_active: true, sort_order: "0" };
 
-const blank: BlankPlan = { slug: "", name: "", monthly_price: "", semiannual_price: "", annual_price: "", features: "" };
+function formatPrice(value: string | number | null | undefined) {
+  const n = Number(value ?? 0);
+  return n === 0 ? "Grátis" : `R$ ${n.toFixed(2).replace(".", ",")}`;
+}
 
 export default function AdminPlansPage() {
-  const [plans, setPlans] = useState<Plan[]>([]);
+  const [rows, setRows] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<boolean>(false);
-  const [form, setForm] = useState<BlankPlan>(blank);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState<Plan | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [toDelete, setToDelete] = useState<Plan | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await backoffice.listPlans();
-      setPlans(res.results);
+      setRows(res.results);
     } catch {
       setError("Não foi possível carregar os planos.");
     } finally {
@@ -39,172 +58,283 @@ export default function AdminPlansPage() {
     void load();
   }, [load]);
 
-  const flash = (message: string, isError = false) => {
-    setNotice(isError ? null : message);
-    setError(isError ? message : null);
-  };
-
-  const toggle = async (plan: Plan) => {
+  const submit = async () => {
     setBusy(true);
+    setError(null);
+    setNotice(null);
+    const payload: PlanPayload = {
+      name: form.name,
+      slug: form.slug,
+      monthly_price: form.monthly_price ? Number(form.monthly_price) : 0,
+      semiannual_price: form.semiannual_price ? Number(form.semiannual_price) : 0,
+      annual_price: form.annual_price ? Number(form.annual_price) : 0,
+      features: form.features.split("\n").map((f) => f.trim()).filter(Boolean),
+      is_active: form.is_active,
+      sort_order: Number(form.sort_order) || 0,
+    };
     try {
-      await backoffice.updatePlan(plan.id, { is_active: !plan.is_active });
-      flash(plan.is_active ? "Plano desativado." : "Plano ativado.");
+      if (editing) {
+        await backoffice.updatePlan(editing.id, payload);
+        setNotice("Plano atualizado.");
+        setEditOpen(false);
+      } else {
+        await backoffice.createPlan(payload);
+        setNotice("Plano criado.");
+        setCreateOpen(false);
+      }
       void load();
     } catch {
-      flash("Falha ao atualizar o plano.", true);
+      setError(editing ? "Falha ao atualizar o plano." : "Falha ao criar o plano.");
     } finally {
       setBusy(false);
     }
   };
 
-  const remove = async (plan: Plan) => {
-    if (!window.confirm(`Excluir o plano "${plan.name}"?`)) return;
+  const toggleActive = async (plan: Plan) => {
     setBusy(true);
+    setError(null);
     try {
-      await backoffice.deletePlan(plan.id);
-      flash("Plano excluído.");
+      await backoffice.updatePlan(plan.id, { is_active: !plan.is_active });
+      void load();
+    } catch {
+      setError("Falha ao atualizar o plano.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!toDelete) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await backoffice.deletePlan(toDelete.id);
+      setNotice("Plano removido.");
+      setToDelete(null);
       void load();
     } catch (err: any) {
-      flash(err?.response?.data?.detail ?? "Não foi possível excluir.", true);
+      setError(err?.response?.data?.detail || "Falha ao remover o plano.");
     } finally {
       setBusy(false);
     }
   };
 
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const payload: PlanPayload = {
-        slug: form.slug.trim(),
-        name: form.name.trim(),
-        monthly_price: form.monthly_price || 0,
-        semiannual_price: form.semiannual_price || 0,
-        annual_price: form.annual_price || 0,
-        features: form.features.split(",").map((f) => f.trim()).filter(Boolean),
-      };
-      await backoffice.createPlan(payload);
-      setForm(blank);
-      flash("Plano criado.");
-      void load();
-    } catch (err: any) {
-      const detail = err?.response?.data;
-      flash(typeof detail === "string" ? detail : "Falha ao criar o plano.", true);
-    } finally {
-      setBusy(false);
-    }
+  const openCreate = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setCreateOpen(true);
   };
 
-  const brl = (value: string | number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value) || 0);
+  const openEdit = (plan: Plan) => {
+    setEditing(plan);
+    setForm({
+      name: plan.name,
+      slug: plan.slug,
+      monthly_price: String(plan.monthly_price || ""),
+      semiannual_price: String(plan.semiannual_price || ""),
+      annual_price: String(plan.annual_price || ""),
+      features: (plan.features ?? []).join("\n"),
+      is_active: plan.is_active,
+      sort_order: String(plan.sort_order ?? 0),
+    });
+    setEditOpen(true);
+  };
+
+  const dialogOpen = createOpen || editOpen;
+  const dialogOpener = (open: boolean) => {
+    if (editing) setEditOpen(open);
+    else setCreateOpen(open);
+  };
 
   return (
     <div className="space-y-6">
-      <section>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Planos</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Crie, edite e desative planos de assinatura.</p>
+      <PageHeader
+        title="Planos"
+        description="Configure os planos e preços disponíveis para venda."
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Novo plano
+          </Button>
+        }
+      />
+
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
+
+      {loading && (
+        <Card>
+          <CardContent className="p-6">
+            <LoadingState label="Carregando planos..." />
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && rows.length === 0 && (
+        <Card>
+          <EmptyState
+            icon={<Package className="h-5 w-5" />}
+            title="Nenhum plano cadastrado"
+            description="Crie o primeiro plano para começar a vender assinaturas."
+          />
+        </Card>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {!loading &&
+          rows.map((plan) => (
+            <Card key={plan.id}>
+              <CardHeader className="space-y-0 pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base">{plan.name}</CardTitle>
+                    <p className="mt-0.5 text-xs text-slate-500">/{plan.slug}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(plan)} aria-label="Editar">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => setToDelete(plan)} aria-label="Excluir" className="text-rose-600 hover:text-rose-600">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <StatusBadge status={plan.is_active ? "active" : "inactive"} />
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    {plan.is_active ? "Ativo" : "Inativo"}
+                    <Switch
+                      checked={plan.is_active}
+                      onCheckedChange={() => toggleActive(plan)}
+                      disabled={busy}
+                      aria-label={`Alternar ${plan.name}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500">Mensal</p>
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {formatPrice(plan.monthly_price)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500">Semestral</p>
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {formatPrice(plan.semiannual_price)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500">Anual</p>
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {formatPrice(plan.annual_price)}
+                    </p>
+                  </div>
+                </div>
+
+                <ul className="mt-4 space-y-1">
+                  {(plan.features ?? []).slice(0, 4).map((f) => (
+                    <li key={f} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <span className="h-1 w-1 rounded-full bg-indigo-500" /> {f}
+                    </li>
+                  ))}
+                  {(plan.features ?? []).length > 4 && (
+                    <li className="pl-3 text-xs text-slate-400">+{(plan.features ?? []).length - 4} itens</li>
+                  )}
+                </ul>
+              </CardContent>
+            </Card>
+          ))}
       </section>
 
-      {notice && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <Check size={16} /> {notice}
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <AlertTriangle size={16} /> {error}
-        </div>
-      )}
-
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Plano</th>
-                <th className="px-5 py-3 font-semibold">Mensal</th>
-                <th className="px-5 py-3 font-semibold">Semestral</th>
-                <th className="px-5 py-3 font-semibold">Anual</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3 text-right font-semibold">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {loading && (
-                <tr><td colSpan={6} className="px-5 py-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-500" /></td></tr>
-              )}
-              {!loading && plans.map((plan) => (
-                <tr key={plan.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3">
-                    <p className="font-medium text-slate-800 dark:text-slate-100">{plan.name}</p>
-                    <p className="text-xs text-slate-500">{plan.slug} · {plan.features.length} recursos</p>
-                  </td>
-                  <td className="px-5 py-3">{brl(plan.monthly_price)}</td>
-                  <td className="px-5 py-3">{brl(plan.semiannual_price)}</td>
-                  <td className="px-5 py-3">{brl(plan.annual_price)}</td>
-                  <td className="px-5 py-3">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => toggle(plan)}
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${plan.is_active
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                        : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                      }`}
-                    >
-                      {plan.is_active ? "Ativo" : "Inativo"}
-                    </button>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => remove(plan)}
-                      className="rounded-lg p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                      aria-label={`Excluir ${plan.name}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <form onSubmit={create} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-            <Plus size={18} className="text-indigo-500" /> Novo plano
-          </h2>
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-500">Slug</span>
-            <input required value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900" placeholder="ex.: padrao" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-500">Nome</span>
-            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900" placeholder="ex.: Padrão" />
-          </label>
-          <div className="grid grid-cols-3 gap-3">
-            {(["monthly_price", "semiannual_price", "annual_price"] as const).map((field) => (
-              <label key={field} className="block text-sm">
-                <span className="mb-1 block text-slate-500">{field === "monthly_price" ? "Mensal" : field === "semiannual_price" ? "Semestral" : "Anual"}</span>
-                <input required type="number" step="0.01" min="0" value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900" placeholder="0,00" />
-              </label>
-            ))}
+      <Dialog open={dialogOpen} onOpenChange={dialogOpener}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar plano" : "Novo plano"}</DialogTitle>
+            <DialogDescription>
+              {editing ? "Atualize as informações do plano." : "Preencha os dados do novo plano."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome</Label>
+                <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="slug">Slug</Label>
+                <Input id="slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="monthly">Mensal (R$)</Label>
+                <Input id="monthly" type="number" min="0" step="0.01" value={form.monthly_price} onChange={(e) => setForm({ ...form, monthly_price: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="semiannual">Semestral (R$)</Label>
+                <Input id="semiannual" type="number" min="0" step="0.01" value={form.semiannual_price} onChange={(e) => setForm({ ...form, semiannual_price: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="annual">Anual (R$)</Label>
+                <Input id="annual" type="number" min="0" step="0.01" value={form.annual_price} onChange={(e) => setForm({ ...form, annual_price: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <Label htmlFor="features">Benefícios</Label>
+                <span className="text-xs text-slate-400">um por linha</span>
+              </div>
+              <Textarea id="features" rows={5} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} placeholder={"Acesso ilimitado a questões\nSimulados completos\n..."} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="sort">Ordem</Label>
+                <Input id="sort" type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value })} />
+              </div>
+              <div className="flex items-end gap-2 pb-1">
+                <Switch
+                  checked={form.is_active}
+                  onCheckedChange={(v) => setForm({ ...form, is_active: v })}
+                  aria-label="Plano ativo"
+                />
+                <span className="text-sm text-slate-600 dark:text-slate-300">Publicar plano</span>
+              </div>
+            </div>
           </div>
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-500">Recursos (separados por vírgula)</span>
-            <textarea value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} rows={3} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900" placeholder="Ex.: Sem limites de questões, Provas comentadas" />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-          >
-            {busy ? "Salvando..." : "Criar plano"}
-          </button>
-        </form>
-      </section>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => (editing ? setEditOpen(false) : setCreateOpen(false))} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button onClick={submit} disabled={busy || !form.name || !form.slug}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!toDelete} onOpenChange={(open) => !open && setToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir plano</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir <strong>{toDelete?.name}</strong>? Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setToDelete(null)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={doDelete} disabled={busy}>
+              {busy ? "Aguarde..." : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

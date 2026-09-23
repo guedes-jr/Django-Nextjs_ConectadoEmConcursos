@@ -1,8 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, RotateCcw, Check, AlertTriangle, Database } from "lucide-react";
+import { Loader2, RefreshCw, RotateCcw, Database } from "lucide-react";
 import { backoffice, BackupRow, formatBytes, formatDate } from "@/lib/backoffice";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/admin/PageHeader";
+import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
 
 export default function AdminBackupsPage() {
   const [rows, setRows] = useState<BackupRow[]>([]);
@@ -63,83 +75,83 @@ export default function AdminBackupsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Backups</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Instantâneos compactados do banco (SQLite) e da mídia, salvos em <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-800">backend/backups/</code>.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={create}
-          disabled={creating}
-          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-        >
-          {creating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-          {creating ? "Criando..." : "Criar backup agora"}
-        </button>
-      </section>
+      <PageHeader
+        title="Backups"
+        description={
+          <>
+            Instantâneos compactados do banco (SQLite) e da mídia, salvos em{" "}
+            <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-800">backend/backups/</code>.
+          </>
+        }
+        actions={
+          <Button onClick={() => void create()} disabled={creating}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {creating ? "Criando..." : "Criar backup agora"}
+          </Button>
+        }
+      />
 
-      {notice && (
-        <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <Check size={16} className="mt-0.5 shrink-0" /> {notice}
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <AlertTriangle size={16} /> {error}
-        </div>
-      )}
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
 
-      <section className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
         Restaurar substitui o banco e a mídia atuais pelos contidos no backup. O sistema deve ser reiniciado após a restauração — use isso com atenção.
-      </section>
+      </div>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Arquivo</th>
-                <th className="px-5 py-3 font-semibold">Tamanho</th>
-                <th className="px-5 py-3 font-semibold">Criado em</th>
-                <th className="px-5 py-3 text-right font-semibold">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {loading && (
-                <tr><td colSpan={4} className="px-5 py-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-500" /></td></tr>
-              )}
-              {!loading && rows.length === 0 && (
-                <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-500">Nenhum backup encontrado. Crie o primeiro agora.</td></tr>
-              )}
-              {!loading && rows.map((backup) => (
-                <tr key={backup.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3">
-                    <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
-                      <Database size={15} className="text-indigo-500" /> {backup.name}
-                    </p>
-                  </td>
-                  <td className="px-5 py-3 text-slate-500">{formatBytes(backup.size)}</td>
-                  <td className="px-5 py-3 text-slate-500">{formatDate(backup.created_at)}</td>
-                  <td className="px-5 py-3 text-right">
-                    <button
-                      type="button"
-                      disabled={busy === backup.name}
-                      onClick={() => restore(backup)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-                    >
-                      {busy === backup.name ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
-                      {busy === backup.name ? "Restaurando..." : "Restaurar"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <Card className="overflow-hidden">
+        {loading ? (
+          <LoadingState label="Carregando backups..." />
+        ) : (
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Tamanho</TableHead>
+                  <TableHead>Criado em</TableHead>
+                  <TableHead className="text-right">Ação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4}>
+                      <EmptyState
+                        icon={<Database className="h-5 w-5" />}
+                        title="Nenhum backup encontrado"
+                        description="Crie o primeiro agora."
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+                {rows.map((backup) => (
+                  <TableRow key={backup.name}>
+                    <TableCell>
+                      <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
+                        <Database className="h-4 w-4 text-indigo-500" /> {backup.name}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-slate-500">{formatBytes(backup.size)}</TableCell>
+                    <TableCell className="text-slate-500">{formatDate(backup.created_at)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy === backup.name}
+                        onClick={() => void restore(backup)}
+                        className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-500 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                      >
+                        {busy === backup.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                        {busy === backup.name ? "Restaurando..." : "Restaurar"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 }

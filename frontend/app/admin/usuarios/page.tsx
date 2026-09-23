@@ -1,8 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Search, AlertTriangle, Check, ShieldCheck } from "lucide-react";
-import { backoffice, UserRow, Plan, formatDate, statusColor, statusLabel, cycleLabel } from "@/lib/backoffice";
+import { Search, ShieldCheck, UserPlus, Pencil } from "lucide-react";
+import { backoffice, UserRow, Plan, formatDate, cycleLabel } from "@/lib/backoffice";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/admin/StatusBadge";
+import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
+import { PageHeader } from "@/components/admin/PageHeader";
 
 export default function AdminUsersPage() {
   const [rows, setRows] = useState<UserRow[]>([]);
@@ -12,16 +30,16 @@ export default function AdminUsersPage() {
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [picker, setPicker] = useState<{ user: UserRow; plan: string; cycle: string } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerUser, setPickerUser] = useState<UserRow | null>(null);
+  const [pickerPlan, setPickerPlan] = useState("");
+  const [pickerCycle, setPickerCycle] = useState("mensal");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [users, allPlans] = await Promise.all([
-        backoffice.listUsers({ search }),
-        backoffice.listPlans(),
-      ]);
+      const [users, allPlans] = await Promise.all([backoffice.listUsers({ search }), backoffice.listPlans()]);
       setRows(users.results);
       setPlans(allPlans.results);
     } catch {
@@ -42,7 +60,7 @@ export default function AdminUsersPage() {
     setNotice(null);
     try {
       await backoffice.setUserActive(user.id, !user.is_active);
-      setNotice(user.is_active ? "Usuário desativado." : "Usuário ativado.");
+      setNotice(`${user.username} ${user.is_active ? "bloqueado" : "desbloqueado"}.`);
       void load();
     } catch {
       setError("Falha ao atualizar o usuário.");
@@ -51,15 +69,26 @@ export default function AdminUsersPage() {
     }
   };
 
-  const assign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!picker) return;
-    setBusy(picker.user.id);
+  const openPicker = (user: UserRow, prefillFromSub = false) => {
+    setPickerUser(user);
+    if (prefillFromSub && user.subscription) {
+      setPickerPlan(user.subscription.plan_slug);
+      setPickerCycle(user.subscription.cycle);
+    } else {
+      setPickerPlan("");
+      setPickerCycle("mensal");
+    }
+    setPickerOpen(true);
+  };
+
+  const assign = async () => {
+    if (!pickerUser || !pickerPlan) return;
+    setBusy(pickerUser.id);
     setError(null);
     setNotice(null);
     try {
-      await backoffice.assignSubscription(picker.user.id, picker.plan, picker.cycle);
-      setPicker(null);
+      await backoffice.assignSubscription(pickerUser.id, pickerPlan, pickerCycle);
+      setPickerOpen(false);
       setNotice("Assinatura atribuída.");
       void load();
     } catch {
@@ -71,144 +100,165 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Usuários</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Busque, ative/desative e atribua assinaturas.</p>
-        </div>
-        <div className="relative">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome ou e-mail..."
-            className="w-64 rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900"
-          />
-        </div>
-      </section>
+      <PageHeader
+        title="Usuários"
+        description="Busque, ative/desative e atribua assinaturas."
+      />
 
-      {notice && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <Check size={16} /> {notice}
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-          <AlertTriangle size={16} /> {error}
-        </div>
-      )}
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Usuário</th>
-                <th className="px-5 py-3 font-semibold">Assinatura</th>
-                <th className="px-5 py-3 font-semibold">Registrado em</th>
-                <th className="px-5 py-3 font-semibold">Acesso</th>
-                <th className="px-5 py-3 text-right font-semibold">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {loading && (
-                <tr><td colSpan={5} className="px-5 py-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-500" /></td></tr>
-              )}
-              {!loading && rows.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-500">Nenhum usuário encontrado.</td></tr>
-              )}
-              {!loading && rows.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3">
-                    <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
+      <div className="relative max-w-sm">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome ou e-mail..."
+          className="pl-9"
+        />
+      </div>
+
+      <Card className="overflow-hidden">
+        <Table>
+          <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Usuário</TableHead>
+              <TableHead>Assinatura</TableHead>
+              <TableHead>Registrado em</TableHead>
+              <TableHead>Acesso</TableHead>
+              <TableHead className="text-right">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-8">
+                  <LoadingState label="Carregando usuários..." />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5}>
+                  <EmptyState title="Nenhum usuário encontrado" description="Ajuste o termo de busca ou crie um novo usuário." />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading &&
+              rows.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell>
+                    <p className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-100">
                       {user.username}
-                      {user.is_staff && <ShieldCheck size={15} className="text-violet-500" aria-label="Staff" />}
+                      {user.is_staff && <ShieldCheck className="h-3.5 w-3.5 text-violet-500" />}
                     </p>
                     <p className="text-xs text-slate-500">{user.email || "sem e-mail"}</p>
-                  </td>
-                  <td className="px-5 py-3">
+                  </TableCell>
+                  <TableCell>
                     {user.subscription ? (
-                      <div>
-                        <p className="text-slate-700 dark:text-slate-200">{user.subscription.plan}</p>
-                        <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[user.subscription.status] ?? "bg-slate-100 text-slate-600"}`}>
-                          {statusLabel[user.subscription.status] ?? user.subscription.status}
-                        </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-700 dark:text-slate-200">{user.subscription.plan}</span>
+                        <StatusBadge status={user.subscription.status} />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          onClick={() => openPicker(user, true)}
+                          aria-label="Editar assinatura"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => setPicker({ user, plan: "", cycle: "mensal" })}
-                        className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-                      >
-                        Atribuir plano
-                      </button>
+                      <Button variant="outline" size="sm" onClick={() => openPicker(user)}>
+                        <UserPlus className="h-4 w-4" /> Atribuir plano
+                      </Button>
                     )}
-                  </td>
-                  <td className="px-5 py-3 text-slate-500">{formatDate(user.date_joined)}</td>
-                  <td className="px-5 py-3">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${user.is_active
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                      : "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"}`}
-                    >
-                      {user.is_active ? "Ativo" : "Bloqueado"}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <button
-                      type="button"
+                  </TableCell>
+                  <TableCell className="text-slate-500">{formatDate(user.date_joined)}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={user.is_active ? "active" : "blocked"} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant={user.is_active ? "outline" : "secondary"}
+                      size="sm"
                       disabled={busy === user.id}
                       onClick={() => toggleActive(user)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
-                        user.is_active
-                          ? "bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20"
-                          : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20"
-                      }`}
                     >
-                      {user.is_active ? "Bloquear" : "Desbloquear"}
-                    </button>
-                  </td>
-                </tr>
+                      {busy === user.id ? <Skeleton className="h-4 w-16" /> : user.is_active ? "Bloquear" : "Desbloquear"}
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          </TableBody>
+        </Table>
+      </Card>
 
-      {picker && (
-        <form onSubmit={assign} className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Atribuir assinatura para <span className="text-indigo-600 dark:text-indigo-400">{picker.user.username}</span>
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <select
-              required
-              value={picker.plan}
-              onChange={(e) => setPicker({ ...picker, plan: e.target.value })}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-            >
-              <option value="" disabled>Selecione o plano</option>
-              {plans.map((plan) => (
-                <option key={plan.id} value={plan.slug}>{plan.name}</option>
-              ))}
-            </select>
-            <select
-              value={picker.cycle}
-              onChange={(e) => setPicker({ ...picker, cycle: e.target.value })}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-            >
-              {Object.entries(cycleLabel).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <button type="submit" disabled={busy === picker.user.id} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">
-              Salvar
-            </button>
-            <button type="button" onClick={() => setPicker(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {pickerUser?.subscription ? "Editar assinatura" : "Atribuir assinatura"}
+            </DialogTitle>
+            {pickerUser && (
+              <DialogDescription>
+                {pickerUser.subscription ? `Alterar plano de ${pickerUser.username}` : `Para ${pickerUser.username}`}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void assign();
+            }}
+            className="space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="plan">Plano</Label>
+              <Select value={pickerPlan} onValueChange={setPickerPlan} required>
+                <SelectTrigger id="plan">
+                  <SelectValue placeholder="Selecione o plano" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="placeholder" disabled className="hidden">
+                    Selecione o plano
+                  </SelectItem>
+                  {plans.map((plan) => (
+                    <SelectItem key={plan.id} value={plan.slug}>
+                      {plan.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cycle">Ciclo</Label>
+              <Select value={pickerCycle} onValueChange={setPickerCycle}>
+                <SelectTrigger id="cycle">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(cycleLabel).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </form>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPickerOpen(false)} disabled={busy === pickerUser?.id}>
               Cancelar
-            </button>
-          </div>
-        </form>
-      )}
+            </Button>
+            <Button onClick={assign} disabled={busy === pickerUser?.id || !pickerPlan}>
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
