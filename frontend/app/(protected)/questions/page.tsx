@@ -26,13 +26,14 @@ import {
 
 
 type OpenPanel = "note" | "comments" | "report" | null;
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50] as const;
 type StudyMode = "practice" | "simulation";
 type ProgressFilter = "all" | "unanswered" | "correct" | "incorrect" | "review";
 type ReadingSize = "normal" | "large";
 
 type SavedSession = {
   page?: number;
+  pageSize?: number;
   search?: string;
   discipline?: string;
   banca?: string;
@@ -70,6 +71,7 @@ export default function QuestionsPage() {
   const [bancas, setBancas] = useState<string[]>([]);
   const [years, setYears] = useState<number[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
   const [total, setTotal] = useState(0);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,7 @@ export default function QuestionsPage() {
   const [progress, setProgress] = useState<ProgressFilter>("all");
   const [mode, setMode] = useState<StudyMode>("practice");
   const [focusIndex, setFocusIndex] = useState(0);
-  const [focusMode, setFocusMode] = useState(true);
+  const [focusMode, setFocusMode] = useState(false);
   const [readingSize, setReadingSize] = useState<ReadingSize>("normal");
   const [comfortableWidth, setComfortableWidth] = useState(false);
   const [selected, setSelected] = useState<Record<number, number>>({});
@@ -103,6 +105,7 @@ export default function QuestionsPage() {
   const [messages, setMessages] = useState<Record<number, string>>({});
   const [requestedComments, setRequestedComments] = useState<Record<number, boolean>>({});
   const [answering, setAnswering] = useState<Record<number, boolean>>({});
+  const [expandedExplanations, setExpandedExplanations] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     if (hydrated || meLoading || !me) return;
@@ -116,7 +119,11 @@ export default function QuestionsPage() {
     } catch { /* An invalid saved session should not block the page. */ }
     if (saved && (!urlExam || saved.examId === urlExam)) {
       setRestoredSession(true);
+      const restoredPageSize = saved.pageSize && PAGE_SIZE_OPTIONS.includes(saved.pageSize as (typeof PAGE_SIZE_OPTIONS)[number])
+        ? saved.pageSize
+        : 20;
       setPage(Number.isInteger(saved.page) && (saved.page ?? 0) > 0 ? saved.page! : 1);
+      setPageSize(restoredPageSize);
       setSearch(saved.search || "");
       setDiscipline(saved.discipline || "");
       setBanca(saved.banca || "");
@@ -124,8 +131,8 @@ export default function QuestionsPage() {
       setFavoritesOnly(Boolean(saved.favoritesOnly));
       setProgress(saved.progress || "all");
       setMode(saved.mode === "simulation" ? "simulation" : "practice");
-      setFocusIndex(Math.max(0, Math.min(PAGE_SIZE - 1, saved.focusIndex || 0)));
-      setFocusMode(saved.focusMode !== false);
+      setFocusIndex(Math.max(0, Math.min(restoredPageSize - 1, saved.focusIndex || 0)));
+      setFocusMode(saved.focusMode === true);
       setReadingSize(saved.readingSize === "large" ? "large" : "normal");
       setComfortableWidth(Boolean(saved.comfortableWidth));
       setSelected(saved.selected || {});
@@ -150,13 +157,13 @@ export default function QuestionsPage() {
   useEffect(() => {
     if (!hydrated || !me) return;
     const snapshot: SavedSession = {
-      page, search, discipline, banca, year, favoritesOnly, examId, progress, mode,
+      page, pageSize, search, discipline, banca, year, favoritesOnly, examId, progress, mode,
       focusIndex, focusMode, readingSize, comfortableWidth, selected,
       simulationSelected, results, simulationResults, simulationFinished,
     };
     try { localStorage.setItem(`cq_question_session_v2_${me.id}`, JSON.stringify(snapshot)); }
     catch { /* Studying still works when local storage is full or unavailable. */ }
-  }, [hydrated, me, page, search, discipline, banca, year, favoritesOnly, examId, progress, mode, focusIndex, focusMode, readingSize, comfortableWidth, selected, simulationSelected, results, simulationResults, simulationFinished]);
+  }, [hydrated, me, page, pageSize, search, discipline, banca, year, favoritesOnly, examId, progress, mode, focusIndex, focusMode, readingSize, comfortableWidth, selected, simulationSelected, results, simulationResults, simulationFinished]);
 
   useEffect(() => {
     if (mode === "simulation" && questions.length > 0 && questions.every((question) => simulationResults[question.id])) {
@@ -192,6 +199,7 @@ export default function QuestionsPage() {
           progress: progress === "all" ? undefined : progress,
           exam: examId,
           page,
+          page_size: pageSize,
         });
         if (cancelled) return;
         setQuestions(data.results);
@@ -209,7 +217,7 @@ export default function QuestionsPage() {
       window.clearTimeout(timer);
       cancelled = true;
     };
-  }, [banca, discipline, examId, favoritesOnly, page, progress, queryReady, refreshVersion, search, year]);
+  }, [banca, discipline, examId, favoritesOnly, page, pageSize, progress, queryReady, refreshVersion, search, year]);
 
   async function submitAnswer(question: Question) {
     const answer = selected[question.id];
@@ -280,7 +288,6 @@ export default function QuestionsPage() {
   function switchMode(nextMode: StudyMode) {
     if (nextMode === mode) return;
     setMode(nextMode);
-    setFocusMode(true);
     setFocusIndex(0);
     if (nextMode === "simulation") {
       setSimulationSelected((current) => {
@@ -377,7 +384,7 @@ export default function QuestionsPage() {
     }
   }
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const firstPageButton = Math.max(1, Math.min(page - 2, totalPages - 4));
   const visiblePages = Array.from(
     { length: Math.min(5, totalPages) },
@@ -464,6 +471,7 @@ export default function QuestionsPage() {
             <p className="text-xs text-slate-500 dark:text-slate-400">{mode === "simulation" ? "No simulado, o gabarito aparece somente após finalizar esta página." : "Na prática, cada resposta mostra a correção e o comentário imediatamente."}</p>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <button type="button" onClick={() => setFocusMode((current) => !current)} aria-pressed={focusMode} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 px-3 font-semibold dark:border-slate-700"><List size={15} /> {focusMode ? "Ver lista" : "Focar uma questão"}</button>
+              <label className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 font-semibold dark:border-slate-700"><span className="text-slate-500 dark:text-slate-400">Por página</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); setFocusIndex(0); setSimulationFinished(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="h-8 w-auto appearance-none rounded-md border-0 bg-transparent py-0 pl-1 pr-1 text-slate-800 outline-none dark:text-slate-100" aria-label="Questões por página">{PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
               <button type="button" onClick={() => setReadingSize((current) => current === "normal" ? "large" : "normal")} aria-pressed={readingSize === "large"} className="min-h-10 rounded-lg border border-slate-200 px-3 font-semibold dark:border-slate-700">Texto {readingSize === "large" ? "A+" : "A"}</button>
               <button type="button" onClick={() => setComfortableWidth((current) => !current)} aria-pressed={comfortableWidth} className="min-h-10 rounded-lg border border-slate-200 px-3 font-semibold dark:border-slate-700">{comfortableWidth ? "Largura normal" : "Leitura confortável"}</button>
             </div>
@@ -489,10 +497,23 @@ export default function QuestionsPage() {
             return (
               <article key={question.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_14px_40px_rgba(19,43,87,0.055)] dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-4 dark:border-slate-800 dark:bg-slate-900 sm:px-7">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-bold text-white">Questão {(page - 1) * PAGE_SIZE + index + 1}</span>
-                    <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-200">{question.discipline}</span>
-                    <span className="rounded-lg border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">{question.banca} · {question.year}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-bold text-white">Questão {(page - 1) * pageSize + index + 1}</span>
+                      <span className="rounded-lg bg-slate-200/80 px-2.5 py-1.5 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">ID #{question.id}</span>
+                      <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-200">{question.discipline}</span>
+                      <span className="rounded-lg border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">Ano {question.year}</span>
+                      <span className="rounded-lg border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">{question.banca}</span>
+                    </div>
+                    {(question.exam_role || question.exam_title || question.exam_institution) && (
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        {[
+                          question.exam_role ? `Cargo: ${question.exam_role}` : "",
+                          question.exam_title ? `Prova: ${question.exam_title}` : "",
+                          question.exam_institution ? `Órgão: ${question.exam_institution}` : "",
+                        ].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {mode === "practice" && (result || question.latest_answer !== null) && <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Respondida</span>}
@@ -503,16 +524,16 @@ export default function QuestionsPage() {
                 <div className="px-5 py-6 sm:px-7">
                 <div className="mb-5 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400"><CircleHelp size={15} /> Enunciado</div>
                 <QuestionContent text={question.statement} className={`font-medium leading-relaxed text-slate-800 dark:text-slate-100 ${readingSize === "large" ? "text-lg sm:text-xl" : "text-[15px] sm:text-base"}`} />
-                <div className="mt-7 space-y-2.5" role="radiogroup" aria-label={`Alternativas da questão ${(page - 1) * PAGE_SIZE + index + 1}`}>
+                <div className="mt-7 space-y-2.5" role="radiogroup" aria-label={`Alternativas da questão ${(page - 1) * pageSize + index + 1}`}>
                   {question.options.map((option, optionIndex) => {
                     const isCorrect = result?.correct_answer === optionIndex;
                     const isWrong = result && result.selected_answer === optionIndex && !result.is_correct;
                     const isSelected = currentSelection === optionIndex;
                     return (
-                      <label key={`${question.id}-${optionIndex}`} className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3.5 leading-6 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-500 ${readingSize === "large" ? "text-base sm:text-lg" : "text-sm"} ${isCorrect ? "border-emerald-400 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/50" : isWrong ? "border-red-400 bg-red-50 dark:border-red-700 dark:bg-red-950/50" : isSelected ? "border-blue-500 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-slate-800"} ${result ? "cursor-default" : ""}`}>
+                      <label key={`${question.id}-${optionIndex}`} className={`flex cursor-pointer items-baseline gap-2 rounded-2xl px-4 py-3.5 leading-6 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-500 ${readingSize === "large" ? "text-base sm:text-lg" : "text-sm"} ${isCorrect ? "bg-emerald-50 dark:bg-emerald-950/50" : isWrong ? "bg-red-50 dark:bg-red-950/50" : result ? "cursor-default" : "hover:bg-slate-100/70 dark:hover:bg-slate-800/60"}`}>
                         <input type="radio" name={`question-${question.id}`} checked={isSelected} disabled={Boolean(result)} onChange={() => mode === "practice" ? setSelected((current) => ({ ...current, [question.id]: optionIndex })) : setSimulationSelected((current) => ({ ...current, [question.id]: optionIndex }))} className="sr-only" />
-                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-extrabold ${isCorrect ? "bg-emerald-600 text-white" : isWrong ? "bg-red-600 text-white" : isSelected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{String.fromCharCode(65 + optionIndex)}</span>
-                        <QuestionContent text={option} className="min-w-0 flex-1 pt-1 text-slate-700 dark:text-slate-200" />
+                        <span className={`inline-flex h-5 shrink-0 items-center justify-center rounded-lg px-3 text-xs font-extrabold leading-none ${isCorrect ? "bg-emerald-600 text-white" : isWrong ? "bg-red-600 text-white" : isSelected ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>{String.fromCharCode(97 + optionIndex)})</span>
+                        <QuestionContent text={option} className="min-w-0 flex-1 text-slate-700 dark:text-slate-200" />
                         {isCorrect && <Check size={18} className="mt-1 shrink-0 text-emerald-700 dark:text-emerald-300" />}
                         {isWrong && <X size={18} className="mt-1 shrink-0 text-red-700 dark:text-red-300" />}
                       </label>
@@ -523,10 +544,9 @@ export default function QuestionsPage() {
                   <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">Selecione uma alternativa para conferir sua resposta.</p><button type="button" onClick={() => void submitAnswer(question)} disabled={selected[question.id] === undefined || answering[question.id]} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{answering[question.id] ? "Corrigindo..." : "Responder questão"} <ArrowRight size={17} /></button></div>
                 ) : result ? (
                   <div role="status" className={`mt-7 overflow-hidden rounded-2xl border ${result.is_correct ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/30" : "border-amber-200 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/30"}`}>
-                    <div className="flex items-center gap-3 border-b border-current/10 px-5 py-4"><span className={`flex h-9 w-9 items-center justify-center rounded-full ${result.is_correct ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{result.is_correct ? <Check size={19} /> : <X size={19} />}</span><div><strong className="block text-sm font-bold text-slate-900 dark:text-slate-100">{result.is_correct ? "Você acertou!" : "Vamos revisar esta questão"}</strong><p className="text-xs text-slate-600 dark:text-slate-300">Gabarito: alternativa {String.fromCharCode(65 + result.correct_answer)}</p></div></div>
-                    <div className="px-5 py-4"><h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-600 dark:text-slate-300">Gabarito comentado</h3>{result.explanation ? <QuestionContent text={result.explanation} className="mt-3 text-sm leading-7 text-slate-700 dark:text-slate-200" /> : <div className="mt-3 text-sm text-slate-600 dark:text-slate-300"><p>Esta questão ainda não possui comentário cadastrado.</p><button type="button" onClick={() => void askForExplanation(question.id)} disabled={requestedComments[question.id]} className="mt-2 min-h-10 rounded-lg border border-slate-300 px-3 font-semibold text-blue-700 disabled:opacity-60 dark:border-slate-700 dark:text-blue-300">{requestedComments[question.id] ? "Comentário solicitado" : "Solicitar comentário"}</button></div>}</div>
-                    {result.next_review_at && <p className="border-t border-slate-200/70 px-5 py-3 text-xs font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">Próxima revisão sugerida: {new Date(result.next_review_at).toLocaleDateString("pt-BR")}</p>}
-                  </div>
+                    <div className="flex items-center justify-between gap-3 border-b border-current/10 px-5 py-4"><div className="flex items-center gap-3"><span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${result.is_correct ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{result.is_correct ? <Check size={19} /> : <X size={19} />}</span><div><strong className="block text-sm font-bold text-slate-900 dark:text-slate-100">{result.is_correct ? "Você acertou!" : "Vamos revisar esta questão"}</strong><p className="text-xs text-slate-600 dark:text-slate-300">Gabarito: alternativa {String.fromCharCode(97 + result.correct_answer)})</p></div></div><button type="button" onClick={() => setExpandedExplanations((current) => ({ ...current, [question.id]: !current[question.id] }))} aria-expanded={Boolean(expandedExplanations[question.id])} className="flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-slate-600 transition-colors hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800"><span>Gabarito comentado</span><ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${expandedExplanations[question.id] ? "rotate-180" : ""}`} /></button></div>
+                {expandedExplanations[question.id] && (result.explanation ? <QuestionContent text={result.explanation} className="px-5 py-4 text-sm leading-7 text-slate-700 dark:text-slate-200" /> : <div className="px-5 py-4 text-sm text-slate-600 dark:text-slate-300"><p>Esta questão ainda não possui comentário cadastrado.</p><button type="button" onClick={() => void askForExplanation(question.id)} disabled={requestedComments[question.id]} className="mt-2 min-h-10 rounded-lg border border-slate-300 px-3 font-semibold text-blue-700 disabled:opacity-60 dark:border-slate-700 dark:text-blue-300">{requestedComments[question.id] ? "Comentário solicitado" : "Solicitar comentário"}</button></div>)}
+                </div>
                 ) : <p className="mt-5 text-sm text-slate-500 dark:text-slate-400">{currentSelection === undefined ? "Selecione uma alternativa. A correção virá ao finalizar o simulado." : "Resposta marcada. Continue até finalizar o simulado."}</p>}
                 {mode === "practice" && result && <button type="button" onClick={() => retryQuestion(question.id)} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-slate-800"><RotateCcw size={16} /> Tentar novamente</button>}
                 </div>
@@ -539,11 +559,11 @@ export default function QuestionsPage() {
                 </div>}
 
                 {(mode === "practice" || simulationFinished) && <div className="px-5 pb-5 sm:px-7">
-                {panel === "note" && <div className="mt-4"><textarea value={notes[question.id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Sua anotação privada" className="min-h-24 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700" /><button onClick={async () => { await saveNote(question.id, notes[question.id] ?? ""); setMessages((current) => ({ ...current, [question.id]: "Anotação salva." })); }} className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">Salvar anotação</button></div>}
+                {panel === "note" && <div className="mt-4"><textarea value={notes[question.id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Sua anotação privada" maxLength={250} wrap="soft" className="min-h-24 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700" /><div className="mt-1 text-right text-xs text-slate-400"><span>{(notes[question.id] ?? "").length}/250</span></div><button onClick={async () => { await saveNote(question.id, notes[question.id] ?? ""); setMessages((current) => ({ ...current, [question.id]: "Anotação salva." })); }} className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">Salvar anotação</button></div>}
 
-                {panel === "comments" && <div className="mt-4 space-y-3">{(comments[question.id] ?? []).map((comment) => <div key={comment.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800"><div className="flex justify-between"><strong>{comment.author}</strong>{comment.is_owner && <button onClick={() => void removeComment(question.id, comment.id)} className="text-xs text-red-600">Excluir</button>}</div><p className="mt-1">{comment.content}</p></div>)}<form onSubmit={(event) => void submitComment(event, question.id)} className="flex gap-2"><input value={commentDrafts[question.id] ?? ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Adicionar comentário" className="h-10 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 text-sm dark:border-slate-700" /><button className="rounded-lg bg-blue-600 px-4 text-sm text-white">Enviar</button></form></div>}
+                {panel === "comments" && <div className="mt-4 space-y-3">{(comments[question.id] ?? []).map((comment) => <div key={comment.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800"><div className="flex justify-between"><strong>{comment.author}</strong>{comment.is_owner && <button onClick={() => void removeComment(question.id, comment.id)} className="text-xs text-red-600">Excluir</button>}</div><p className="mt-1 whitespace-pre-wrap">{comment.content}</p></div>)}<form onSubmit={(event) => void submitComment(event, question.id)} className="space-y-2"><textarea value={commentDrafts[question.id] ?? ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Adicionar comentário" wrap="soft" maxLength={250} className="min-h-20 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700" /><div className="text-right text-xs text-slate-400"><span>{(commentDrafts[question.id] ?? "").length}/250</span></div><button className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white">Enviar</button></form></div>}
 
-                {panel === "report" && <form onSubmit={(event) => void submitReport(event, question.id)} className="mt-4"><textarea value={reportDrafts[question.id] ?? ""} onChange={(event) => setReportDrafts((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Descreva o problema encontrado (mínimo de 10 caracteres)" className="min-h-24 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700" /><button className="mt-2 rounded-lg bg-red-600 px-3 py-2 text-sm text-white">Enviar relatório</button></form>}
+                {panel === "report" && <form onSubmit={(event) => void submitReport(event, question.id)} className="mt-4"><textarea value={reportDrafts[question.id] ?? ""} onChange={(event) => setReportDrafts((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Descreva o problema encontrado (mínimo de 10 caracteres)" wrap="soft" maxLength={5000} className="min-h-24 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700" /><div className="mt-1 text-right text-xs text-slate-400"><span>{(reportDrafts[question.id] ?? "").length}/5000</span></div><button className="mt-2 rounded-lg bg-red-600 px-3 py-2 text-sm text-white">Enviar relatório</button></form>}
                 {messages[question.id] && <p role="status" className="mt-3 text-sm text-slate-600 dark:text-slate-300">{messages[question.id]}</p>}
                 </div>}
               </article>
@@ -568,7 +588,7 @@ export default function QuestionsPage() {
         {!loading && !error && total > 0 && (
           <nav aria-label="Paginação das questões" className="flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Questões {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}
+              Questões {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button type="button" onClick={() => goToPage(page - 1)} disabled={page === 1} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700">Anterior</button>

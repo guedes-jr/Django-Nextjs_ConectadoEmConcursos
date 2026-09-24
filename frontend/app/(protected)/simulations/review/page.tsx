@@ -8,9 +8,8 @@ import { ArrowLeft, CheckCircle2, History, Loader2, XCircle } from "lucide-react
 import type { Question } from "@/lib/questions";
 import { getQuestionDetails, listSimulations, SimulationRun } from "@/lib/simulations";
 
-type OptionLetter = "A" | "B" | "C" | "D" | "E";
 function letterFor(index: number) {
-  return String.fromCharCode(65 + index) as OptionLetter;
+  return `${String.fromCharCode(97 + index)})`;
 }
 
 function formatDate(value: string) {
@@ -166,7 +165,7 @@ function ReviewContent() {
                               : "text-slate-600 dark:text-slate-300"
                         }`}
                       >
-                        {letterFor(optionIndex)}. {option}
+                        {letterFor(optionIndex)} {option}
                         {isWrongPick && <span className="ml-2 text-xs text-red-600 dark:text-red-400">(sua resposta)</span>}
                       </p>
                     );
@@ -174,9 +173,9 @@ function ReviewContent() {
                 </div>
                 <div className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
                   <span className="font-semibold text-slate-800 dark:text-slate-100">Resposta correta: </span>
-                  {letterFor(answer.correct_answer)}.
+                  {letterFor(answer.correct_answer)}
                   <span className="ml-2 font-semibold text-slate-800 dark:text-slate-100">Sua resposta: </span>
-                  {letterFor(answer.selected_answer)}.
+                  {letterFor(answer.selected_answer)}
                 </div>
                 {question.explanation && (
                   <p className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">

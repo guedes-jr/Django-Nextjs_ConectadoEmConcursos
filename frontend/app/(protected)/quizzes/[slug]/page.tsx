@@ -17,7 +17,7 @@ import {
 import { getQuizBySlug, type QuizQuestion } from "@/lib/quizzes";
 
 function letterFor(index: number) {
-  return String.fromCharCode(65 + index);
+  return `${String.fromCharCode(97 + index)})`;
 }
 
 export default function QuizPage() {
@@ -111,21 +111,17 @@ export default function QuizPage() {
               type="button"
               onClick={() => choose(optionIndex)}
               disabled={answered}
-              className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition ${
-                isCorrect
-                  ? "border-emerald-500 bg-emerald-50 dark:border-emerald-500 dark:bg-emerald-950/40"
-                  : isWrongPick
-                    ? "border-red-500 bg-red-50 dark:border-red-500 dark:bg-red-950/40"
-                    : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              className={`flex w-full items-baseline gap-2 rounded-xl p-4 text-left transition ${
+                isCorrect || isWrongPick ? "" : "hover:bg-slate-50 dark:hover:bg-slate-800"
               }`}
             >
               <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                className={`inline-flex h-5 shrink-0 items-center justify-center rounded-lg px-3 text-xs font-bold leading-none ${
                   isCorrect
                     ? "bg-emerald-600 text-white"
                     : isWrongPick
                       ? "bg-red-600 text-white"
-                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 }`}
               >
                 {letterFor(optionIndex)}
@@ -279,7 +275,7 @@ export default function QuizPage() {
                                 : "text-slate-600 dark:text-slate-300"
                           }`}
                         >
-                          {letterFor(optionIndex)}. {option}
+                          {letterFor(optionIndex)} {option}
                         </p>
                       );
                     })}

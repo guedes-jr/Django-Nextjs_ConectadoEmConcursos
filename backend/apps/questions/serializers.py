@@ -25,6 +25,9 @@ class ExamSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     exam_id = serializers.IntegerField(read_only=True, allow_null=True)
+    exam_title = serializers.CharField(source="exam.title", read_only=True, allow_null=True, default="")
+    exam_role = serializers.CharField(source="exam.role", read_only=True, allow_null=True, default="")
+    exam_institution = serializers.CharField(source="exam.institution", read_only=True, allow_null=True, default="")
     is_favorite = serializers.BooleanField(read_only=True)
     comment_count = serializers.IntegerField(read_only=True)
     latest_answer = serializers.IntegerField(read_only=True, allow_null=True)
@@ -36,7 +39,8 @@ class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = [
-            "id", "exam_id", "discipline", "banca", "year", "statement", "options",
+            "id", "exam_id", "exam_title", "exam_role", "exam_institution",
+            "discipline", "banca", "year", "statement", "options",
             "is_favorite", "comment_count", "latest_answer", "latest_is_correct",
             "is_marked", "review_due", "next_review_at", "explanation",
         ]
@@ -53,7 +57,7 @@ class AnswerSerializer(serializers.Serializer):
 
 
 class NoteSerializer(serializers.Serializer):
-    content = serializers.CharField(allow_blank=True, max_length=10000)
+    content = serializers.CharField(allow_blank=True, max_length=250)
 
 
 class CommentSerializer(serializers.ModelSerializer):

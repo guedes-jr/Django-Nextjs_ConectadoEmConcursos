@@ -45,14 +45,14 @@ export default function ExamsPage() {
   }), [exams]);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950">
+    <main className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950 max-[520px]:px-3 max-[520px]:py-6">
       <div className="mx-auto max-w-6xl space-y-6">
-        <header>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Provas de concursos públicos</h1>
-          <p className="mt-1 text-slate-500 dark:text-slate-400">Encontre uma prova e acesse somente as questões vinculadas a ela.</p>
+        <header className="max-[520px]:space-y-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 max-[520px]:text-xl">Provas de concursos públicos</h1>
+          <p className="mt-1 text-slate-500 dark:text-slate-400 max-[520px]:text-sm">Encontre uma prova e acesse somente as questões vinculadas a ela.</p>
         </header>
 
-        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 md:grid-cols-2 lg:grid-cols-5">
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 md:grid-cols-2 lg:grid-cols-5 max-[520px]:gap-2 max-[520px]:p-3">
           <label className="relative md:col-span-2">
             <span className="sr-only">Buscar prova</span>
             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -66,18 +66,21 @@ export default function ExamsPage() {
         {loading && <p className="text-slate-500">Carregando provas…</p>}
         {error && <p className="rounded-lg bg-red-50 p-4 text-red-700">{error}</p>}
 
-        <section className="space-y-3">
+        <section className="space-y-3 max-[520px]:space-y-2.5">
           {exams.map((exam) => (
-            <Link key={exam.id} href={`/questions?exam=${exam.id}`} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30">
-              <div className="flex min-w-0 items-start gap-4">
-                <div className="rounded-xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-950 dark:text-blue-300"><BookOpen className="h-5 w-5" /></div>
+            <Link key={exam.id} href={`/questions?exam=${exam.id}`} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 max-[520px]:gap-3 max-[520px]:p-4">
+              <div className="flex min-w-0 items-start gap-4 max-[520px]:gap-3">
+                <div className="rounded-xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-950 dark:text-blue-300 max-[520px]:rounded-lg max-[520px]:p-2"><BookOpen className="h-5 w-5 max-[520px]:h-4 max-[520px]:w-4" /></div>
                 <div className="min-w-0">
-                  <h2 className="font-semibold text-slate-900 dark:text-slate-100">{exam.banca} — {exam.title}</h2>
-                  <p className="mt-1 text-sm text-slate-500">{exam.institution || "Instituição não informada"} · {exam.role || "Cargo não informado"} · {exam.year}</p>
+                  <h2 className="font-semibold text-slate-900 dark:text-slate-100 max-[520px]:text-[15px]">{exam.banca} — {exam.title}</h2>
+                  <p className="mt-1 text-sm text-slate-500">{exam.institution || "Instituição não informada"} · {exam.role || "Cargo não informado"} · {exam.year}<span className="sm:hidden"> · {exam.question_count} questões</span></p>
                   <div className="mt-2 flex flex-wrap gap-2">{exam.disciplines.map((item) => <span key={item} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item}</span>)}</div>
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-3 text-sm text-slate-500"><span>{exam.question_count} questões</span><ChevronRight className="h-5 w-5" /></div>
+              <div className="flex shrink-0 items-center gap-3 text-sm text-slate-500">
+                <span className="hidden whitespace-nowrap sm:inline">{exam.question_count} questões</span>
+                <ChevronRight className="h-5 w-5 max-[520px]:h-4 max-[520px]:w-4" />
+              </div>
             </Link>
           ))}
           {!loading && !error && exams.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-500 dark:border-slate-700">Nenhuma prova encontrada.</p>}

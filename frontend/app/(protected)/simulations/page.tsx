@@ -19,9 +19,8 @@ import { listSimulations, SimulationRun } from "@/lib/simulations";
 
 const COUNT_OPTIONS = [10, 20, 30, 50];
 
-type OptionLetter = "A" | "B" | "C" | "D" | "E";
 function letterFor(index: number) {
-  return String.fromCharCode(65 + index) as OptionLetter;
+  return `${String.fromCharCode(97 + index)})`;
 }
 
 function formatDate(value: string) {
@@ -214,17 +213,15 @@ export default function SimulacoesPage() {
                     type="button"
                     onClick={() => chooseOption(optionIndex)}
                     aria-pressed={selected}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition ${
-                      selected
-                        ? "border-blue-500 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40"
-                        : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                    className={`flex w-full items-baseline gap-2 rounded-xl p-4 text-left transition ${
+                      selected ? "" : "hover:bg-slate-50 dark:hover:bg-slate-800"
                     }`}
                   >
                     <span
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                      className={`inline-flex h-5 shrink-0 items-center justify-center rounded-lg px-3 text-xs font-bold leading-none ${
                         selected
                           ? "bg-blue-600 text-white"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       }`}
                     >
                       {letterFor(optionIndex)}
@@ -362,7 +359,7 @@ export default function SimulacoesPage() {
                                 : "text-slate-600 dark:text-slate-300"
                           }`}
                         >
-                          {letterFor(optionIndex)}. {option}
+                          {letterFor(optionIndex)} {option}
                         </p>
                       );
                     })}

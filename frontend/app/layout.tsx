@@ -1,5 +1,15 @@
+import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+
+export const metadata: Metadata = {
+  title: {
+    default: "Conectado em Concursos",
+    template: "%s — Conectado em Concursos",
+  },
+  description:
+    "Plataforma de estudos para concursos públicos: questões, simulados, plano de estudos, IA e acompanhamento de concursos e notícias.",
+};
 
 const themeInitScript = `
 (function() {

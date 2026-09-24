@@ -3,6 +3,10 @@ import { http } from "@/lib/http";
 
 export type Question = {
   id: number;
+  exam_id: number | null;
+  exam_title: string | null;
+  exam_role: string | null;
+  exam_institution: string | null;
   discipline: string;
   banca: string;
   year: number;

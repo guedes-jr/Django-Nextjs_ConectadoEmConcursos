@@ -143,6 +143,8 @@ export default function NotesPage() {
                           setDrafts((current) => ({ ...current, [note.question_id]: event.target.value }))
                         }
                         rows={6}
+                        maxLength={250}
+                        wrap="soft"
                         className="mt-3 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700 dark:text-slate-100"
                       />
                       <div className="mt-3 flex flex-wrap gap-2">

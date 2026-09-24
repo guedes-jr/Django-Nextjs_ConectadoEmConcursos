@@ -22,7 +22,7 @@ def questions_for_user(user):
         user=user, question=OuterRef("pk")
     ).order_by("-created_at", "-id")
     reviews = QuestionReview.objects.filter(user=user, question=OuterRef("pk"))
-    return Question.objects.filter(is_active=True).annotate(
+    return Question.objects.filter(is_active=True).select_related("exam").annotate(
         is_favorite=Exists(Favorite.objects.filter(user=user, question=OuterRef("pk"))),
         comment_count=Count("comments", distinct=True),
         latest_answer=Subquery(
@@ -307,46 +307,82 @@ def comment_detail(request, comment_id):
 @permission_classes([permissions.IsAuthenticated])
 def statistics(request):
     today = timezone.localdate()
-    start_7_days = today - timedelta(days=6)
     start_30_days = today - timedelta(days=29)
+
     answers = UserAnswer.objects.filter(user=request.user)
+
+    # Filtros opcionais (relatórios detalhados)
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+    discipline = request.query_params.get("discipline")
+    banca = request.query_params.get("banca")
+
+    if start_date:
+        answers = answers.filter(created_at__date__gte=start_date)
+    if end_date:
+        answers = answers.filter(created_at__date__lte=end_date)
+    if discipline:
+        answers = answers.filter(question__discipline__iexact=discipline)
+    if banca:
+        answers = answers.filter(question__banca__iexact=banca)
 
     total = answers.count()
     correct = answers.filter(is_correct=True).count()
+    incorrect = total - correct
     today_total = answers.filter(created_at__date=today).count()
     last_30 = answers.filter(created_at__date__gte=start_30_days)
     last_30_total = last_30.count()
     last_30_correct = last_30.filter(is_correct=True).count()
 
+    # Período do gráfico diário: intervalo filtrado ou últimos 7 dias
+    if start_date or end_date:
+        chart_start = start_date or (today - timedelta(days=6)).isoformat()
+        chart_end = end_date or today.isoformat()
+        if chart_end < chart_start:
+            chart_end = chart_start
+    else:
+        chart_start = (today - timedelta(days=6)).isoformat()
+        chart_end = today.isoformat()
+
     daily_rows = {
         row["day"]: row
-        for row in answers.filter(created_at__date__gte=start_7_days)
+        for row in answers.filter(
+            created_at__date__gte=chart_start,
+            created_at__date__lte=chart_end,
+        )
         .annotate(day=TruncDate("created_at"))
         .values("day")
         .annotate(total=Count("id"), correct=Count("id", filter=Q(is_correct=True)))
         .order_by("day")
     }
     daily = []
-    for offset in range(7):
-        day = start_7_days + timedelta(days=offset)
-        row = daily_rows.get(day, {})
+    cursor = chart_start
+    while cursor <= chart_end:
+        row = daily_rows.get(cursor, {})
         day_total = row.get("total", 0)
         day_correct = row.get("correct", 0)
         daily.append({
-            "date": day.isoformat(),
+            "date": cursor,
             "total": day_total,
             "correct": day_correct,
             "accuracy": round(day_correct * 100 / day_total) if day_total else 0,
         })
+        cursor = (timezone.datetime.fromisoformat(cursor) + timedelta(days=1)).date().isoformat()
 
-    disciplines = list(
-        answers.values("question__discipline")
-        .annotate(total=Count("id"), correct=Count("id", filter=Q(is_correct=True)))
-        .order_by("-total", "question__discipline")
-    )
-    for row in disciplines:
-        row["discipline"] = row.pop("question__discipline")
-        row["accuracy"] = round(row["correct"] * 100 / row["total"])
+    def breakdown(group_field, label_field):
+        rows = list(
+            answers.values(group_field)
+            .annotate(total=Count("id"), correct=Count("id", filter=Q(is_correct=True)))
+            .order_by("-total", group_field)
+        )
+        for row in rows:
+            row[label_field] = row.pop(group_field)
+            row["incorrect"] = row["total"] - row["correct"]
+            row["accuracy"] = round(row["correct"] * 100 / row["total"])
+        return rows
+
+    disciplines = breakdown("question__discipline", "discipline")
+    bancas = breakdown("question__banca", "banca")
 
     activity_dates = list(
         answers.annotate(day=TruncDate("created_at"))
@@ -369,6 +405,7 @@ def statistics(request):
             "date": timezone.localtime(answer.created_at).isoformat(),
             "question_id": answer.question_id,
             "discipline": answer.question.discipline,
+            "banca": answer.question.banca,
             "is_correct": answer.is_correct,
         }
         for answer in answers.select_related("question")[:10]
@@ -378,6 +415,7 @@ def statistics(request):
         "today_total": today_total,
         "total": total,
         "correct": correct,
+        "incorrect": incorrect,
         "accuracy": round(correct * 100 / total) if total else 0,
         "streak": streak,
         "last_30_total": last_30_total,
@@ -385,5 +423,12 @@ def statistics(request):
         "last_30_accuracy": round(last_30_correct * 100 / last_30_total) if last_30_total else 0,
         "daily": daily,
         "disciplines": disciplines,
+        "bancas": bancas,
         "recent_activity": recent_activity,
+        "filters": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "discipline": discipline,
+            "banca": banca,
+        },
     })

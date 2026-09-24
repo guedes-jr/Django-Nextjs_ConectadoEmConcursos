@@ -100,7 +100,7 @@ class QuestionNote(models.Model):
     question = models.ForeignKey(
         Question, on_delete=models.CASCADE, related_name="notes"
     )
-    content = models.TextField(blank=True)
+    content = models.TextField(blank=True, max_length=250)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -116,7 +116,7 @@ class Comment(models.Model):
     question = models.ForeignKey(
         Question, on_delete=models.CASCADE, related_name="comments"
     )
-    content = models.TextField()
+    content = models.TextField(max_length=250)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -134,7 +134,7 @@ class ErrorReport(models.Model):
     question = models.ForeignKey(
         Question, on_delete=models.CASCADE, related_name="error_reports"
     )
-    description = models.TextField()
+    description = models.TextField(max_length=5000)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN)
     created_at = models.DateTimeField(auto_now_add=True)
 

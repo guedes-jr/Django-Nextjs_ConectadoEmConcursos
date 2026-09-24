@@ -124,3 +124,6 @@ commit-test: _check-msg ## Adiciona tudo e cria um commit do tipo test
 commit-chore: _check-msg ## Adiciona tudo e cria um commit do tipo chore
 	@git add .
 	@git commit -m "chore: $(MSG)"
+
+push: ## Envia os commits locais para o repositório remoto
+	@git push
