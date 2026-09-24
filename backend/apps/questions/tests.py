@@ -5,7 +5,8 @@ from rest_framework.test import APIClient
 
 from datetime import timedelta
 
-from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, UserAnswer
+from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, SimulationTemplate, UserAnswer
+from apps.workspace.models import SimulationRun
 
 
 class QuestionAPITests(TestCase):
@@ -297,3 +298,224 @@ class StatisticsAPITests(TestCase):
         self.assertEqual(response.data["total"], 0)
         self.assertEqual(response.data["accuracy"], 0)
         self.assertEqual(response.data["streak"], 0)
+
+
+class SimulationSessionTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("student", password="test-password")
+        self.other_user = get_user_model().objects.create_user("other", password="test-password")
+        self.exam = Exam.objects.create(
+            title="Concurso TJ", banca="CEBRASPE", institution="TJ", role="Analista", year=2025
+        )
+        self.questions = [
+            Question.objects.create(
+                discipline="Português", banca="CEBRASPE", year=2025, exam=self.exam,
+                statement=f"Questão {i}", options=["A", "B"], correct_answer=0,
+            )
+            for i in range(5)
+        ]
+        self.other_exam = Exam.objects.create(
+            title="Outra", banca="FGV", institution="X", role="Técnico", year=2024
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def start(self, **overrides):
+        data = {"discipline": "Português", "banca": "CEBRASPE", "year": 2025, "exam_ids": [self.exam.id], "count": 3}
+        data.update(overrides)
+        return self.client.post("/api/questions/simulations/start/", data, format="json")
+
+    def test_start_creates_session_without_exposing_correct_answer(self):
+        resp = self.start()
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["question_count"], 3)
+        self.assertEqual(len(resp.data["questions"]), 3)
+        self.assertNotIn("correct_answer", resp.data["questions"][0])
+        run = SimulationRun.objects.get(pk=resp.data["simulation_id"])
+        self.assertEqual(run.status, SimulationRun.Status.IN_PROGRESS)
+        self.assertEqual(set(run.question_ids), {q["id"] for q in resp.data["questions"]})
+        self.assertIsNotNone(run.started_at)
+        self.assertEqual(run.discipline, "Português")
+        self.assertEqual(run.banca, "CEBRASPE")
+        self.assertEqual(run.year, 2025)
+        self.assertEqual(run.exam_ids, [self.exam.id])
+
+    def test_start_prioritizes_unanswered_questions(self):
+        self.client.post("/api/questions/submit-simulation/", {"answers": [
+            {"question_id": self.questions[0].id, "selected_answer": 0}
+        ]}, format="json")
+        for _ in range(12):
+            resp = self.start()
+            picked = {q["id"] for q in resp.data["questions"]}
+            self.assertNotIn(self.questions[0].id, picked)
+
+    def test_start_falls_back_to_full_pool_when_unseen_is_insufficient(self):
+        for q in self.questions[:4]:
+            self.client.post("/api/questions/submit-simulation/", {"answers": [
+                {"question_id": q.id, "selected_answer": 0}
+            ]}, format="json")
+        resp = self.start(count=4)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["question_count"], 4)
+
+    def test_start_rejects_when_pool_is_smaller_than_requested(self):
+        resp = self.start(count=6)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Apenas 5 questões", resp.data["detail"])
+        self.assertFalse(SimulationRun.objects.filter(user=self.user).exists())
+
+    def test_start_validates_count_range(self):
+        self.assertEqual(self.start(count=0).status_code, 400)
+        self.assertEqual(self.start(count=101).status_code, 400)
+
+    def test_start_without_exam_uses_other_filters(self):
+        resp = self.client.post("/api/questions/simulations/start/", {
+            "discipline": "Português",
+            "banca": "CEBRASPE",
+            "year": 2025,
+            "exam_ids": [],
+            "count": 3,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["question_count"], 3)
+        picked = {q["id"] for q in resp.data["questions"]}
+        self.assertLessEqual(len(picked), 5)
+        run = SimulationRun.objects.get(pk=resp.data["simulation_id"])
+        self.assertEqual(run.exam_ids, [])
+
+    def test_start_rejects_bogus_exam_ids(self):
+        resp = self.start(exam_ids=[999999], count=3)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("disponíveis", resp.data["detail"])
+
+    def test_full_exam_uses_all_questions_of_a_single_exam(self):
+        resp = self.start(full_exam=True, count=None)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["question_count"], 5)
+        self.assertSetEqual(
+            {q["id"] for q in resp.data["questions"]},
+            {q.id for q in self.questions},
+        )
+
+    def test_full_exam_requires_single_exam(self):
+        resp = self.start(full_exam=True, count=None, exam_ids=[self.exam.id, self.other_exam.id])
+        self.assertEqual(resp.status_code, 400)
+
+    def test_submit_session_scoring_and_metadata(self):
+        start = self.start()
+        run = SimulationRun.objects.get(pk=start.data["simulation_id"])
+        answers = [
+            {"question_id": qid, "selected_answer": 1} for qid in run.question_ids
+        ]
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": run.id, "answers": answers,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(len(resp.data["results"]), 3)
+        run.refresh_from_db()
+        self.assertEqual(run.status, SimulationRun.Status.FINISHED)
+        self.assertEqual(run.total, 3)
+        self.assertIsNotNone(run.finished_at)
+        self.assertIsNotNone(run.duration_seconds)
+        self.assertEqual(sum(a["is_correct"] for a in resp.data["results"]), run.score)
+
+    def test_submit_session_rejects_questions_outside_session(self):
+        outside = Question.objects.create(
+            discipline="Matemática", banca="FGV", year=2024,
+            statement="Fora do simulado", options=["A", "B"], correct_answer=0,
+        )
+        start = self.start()
+        run = SimulationRun.objects.get(pk=start.data["simulation_id"])
+        answered = list(run.question_ids)
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": run.id,
+            "answers": [
+                {"question_id": answered[0], "selected_answer": 0},
+                {"question_id": outside.id, "selected_answer": 0},
+            ],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(SimulationRun.objects.get(pk=run.id).status, SimulationRun.Status.IN_PROGRESS)
+
+    def test_submit_session_rejects_unknown_session(self):
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": 9999,
+            "answers": [{"question_id": self.questions[0].id, "selected_answer": 0}],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_expired_session_is_rejected_and_marked_expired(self):
+        run = SimulationRun.objects.create(
+            user=self.user, status=SimulationRun.Status.IN_PROGRESS,
+            question_ids=[q.id for q in self.questions[:2]], question_count=2,
+            time_limit_minutes=1,
+            started_at=timezone.now() - timedelta(minutes=2),
+        )
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": run.id, "answers": [
+                {"question_id": self.questions[0].id, "selected_answer": 0},
+                {"question_id": self.questions[1].id, "selected_answer": 0},
+            ],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Tempo do simulado esgotado", resp.data["detail"])
+        run.refresh_from_db()
+        self.assertEqual(run.status, SimulationRun.Status.EXPIRED)
+
+    def test_legacy_submit_still_works_without_session(self):
+        resp = self.client.post("/api/questions/submit-simulation/", {"answers": [
+            {"question_id": self.questions[0].id, "selected_answer": 0},
+            {"question_id": self.questions[1].id, "selected_answer": 0},
+        ]}, format="json")
+        self.assertEqual(resp.status_code, 201)
+        run = SimulationRun.objects.get(pk=resp.data["simulation_id"])
+        self.assertEqual(run.status, SimulationRun.Status.FINISHED)
+        self.assertEqual(run.question_count, 2)
+
+
+class SimulationTemplateTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("student", password="test-password")
+        self.other_user = get_user_model().objects.create_user("other", password="test-password")
+        self.exam = Exam.objects.create(title="Concurso TJ", banca="CEBRASPE", year=2025)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_create_list_patch_delete(self):
+        resp = self.client.post("/api/simulation-templates/", {
+            "name": "Simulado TJ",
+            "discipline": "Português",
+            "exam_ids": [self.exam.id],
+            "banca": "CEBRASPE",
+            "year": 2025,
+            "count": 20,
+            "full_exam": False,
+            "time_limit_minutes": 30,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        template = SimulationTemplate.objects.get(user=self.user)
+        self.assertEqual(template.name, "Simulado TJ")
+        self.assertEqual(template.exam_ids, [self.exam.id])
+        self.assertEqual(template.count, 20)
+
+        listed = self.client.get("/api/simulation-templates/")
+        self.assertEqual(len(listed.data), 1)
+        self.assertEqual(listed.data[0]["id"], resp.data["id"])
+
+        patched = self.client.patch(
+            f"/api/simulation-templates/{resp.data['id']}/", {"count": 40}, format="json"
+        )
+        self.assertEqual(patched.status_code, 200)
+        self.assertEqual(patched.data["count"], 40)
+
+        deleted = self.client.delete(f"/api/simulation-templates/{resp.data['id']}/")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(SimulationTemplate.objects.filter(user=self.user).exists())
+
+    def test_templates_are_isolated_per_user(self):
+        template = SimulationTemplate.objects.create(
+            user=self.other_user, name="Do outro", count=10
+        )
+        resp = self.client.get("/api/simulation-templates/")
+        self.assertEqual(resp.data, [])
+        self.assertEqual(self.client.get(f"/api/simulation-templates/{template.id}/").status_code, 404)

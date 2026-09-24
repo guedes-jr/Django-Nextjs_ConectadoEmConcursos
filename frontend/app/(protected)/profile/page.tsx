@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMe } from "@/lib/useMe";
 import { http } from "@/lib/http";
 import { getStatistics, Statistics } from "@/lib/statistics";
+import { Switch } from "@/components/ui/switch";
 
 type StudyDiscipline =
   | "Português"
@@ -115,6 +116,8 @@ type MePayload = {
   target_role?: string | null;
   study_hours_per_day?: number | null;
   disciplines?: StudyDiscipline[] | null;
+  is_public?: boolean | null;
+  show_in_ranking?: boolean | null;
 };
 
 type FormState = {
@@ -130,6 +133,8 @@ type FormState = {
   target_role: string;
   study_hours_per_day: string;
   disciplines: StudyDiscipline[];
+  is_public: boolean;
+  show_in_ranking: boolean;
 };
 
 type HistoryItem = {
@@ -259,6 +264,8 @@ export default function ProfilePage() {
     target_role: "",
     study_hours_per_day: "0",
     disciplines: [],
+    is_public: true,
+    show_in_ranking: true,
   });
 
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -288,10 +295,12 @@ export default function ProfilePage() {
       state: typed.state ?? "",
       city: typed.city ?? "",
       profession: typed.profession ?? "",
-      target_role: typed.target_role ?? "",
-      study_hours_per_day: String(typed.study_hours_per_day ?? 0),
-      disciplines: typed.disciplines ?? [],
-    });
+target_role: typed.target_role ?? "",
+    study_hours_per_day: String(typed.study_hours_per_day ?? 0),
+    disciplines: typed.disciplines ?? [],
+    is_public: typed.is_public ?? true,
+    show_in_ranking: typed.show_in_ranking ?? true,
+  });
   }, [me]);
 
   const displayName = useMemo(() => pickDisplayName(me), [me]);
@@ -336,6 +345,8 @@ export default function ProfilePage() {
         target_role: form.target_role,
         study_hours_per_day: Number(form.study_hours_per_day || 0),
         disciplines: form.disciplines,
+        is_public: form.is_public,
+        show_in_ranking: form.show_in_ranking,
       };
 
       await http.patch("/api/me/", payload);
@@ -519,7 +530,7 @@ export default function ProfilePage() {
                       Nome
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.first_name}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, first_name: e.target.value }))
@@ -532,7 +543,7 @@ export default function ProfilePage() {
                       Sobrenome
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.last_name}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, last_name: e.target.value }))
@@ -545,7 +556,7 @@ export default function ProfilePage() {
                       Username
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.username}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, username: e.target.value }))
@@ -558,7 +569,7 @@ export default function ProfilePage() {
                       Telefone
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.phone}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, phone: e.target.value }))
@@ -572,7 +583,7 @@ export default function ProfilePage() {
                       Profissão
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.profession}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, profession: e.target.value }))
@@ -586,15 +597,15 @@ export default function ProfilePage() {
                       Estado
                     </label>
                     <select
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.state}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, state: e.target.value }))
                       }
                     >
-                      <option value="">Selecione seu estado</option>
+                      <option className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100" value="">Selecione seu estado</option>
                       {UFS.map((uf) => (
-                        <option key={uf} value={uf}>
+                        <option className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100" key={uf} value={uf}>
                           {uf}
                         </option>
                       ))}
@@ -606,7 +617,7 @@ export default function ProfilePage() {
                       Cidade
                     </label>
                     <input
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                       value={form.city}
                       onChange={(e) =>
                         setForm((s) => ({ ...s, city: e.target.value }))
@@ -629,16 +640,16 @@ export default function ProfilePage() {
                       onChange={(e) =>
                         setForm((s) => ({ ...s, target_role: e.target.value }))
                       }
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                     >
-                      <option value="">Selecione o cargo</option>
+                      <option className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100" value="">Selecione o cargo</option>
                       {[
                         ...CARGO_OPTIONS,
                         ...(form.target_role && !CARGO_OPTIONS.includes(form.target_role)
                           ? [form.target_role]
                           : []),
                       ].map((option) => (
-                        <option key={option} value={option}>{option}</option>
+                        <option className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100" key={option} value={option}>{option}</option>
                       ))}
                     </select>
                     {form.target_role && !CARGO_OPTIONS.includes(form.target_role) && (
@@ -659,10 +670,10 @@ export default function ProfilePage() {
                           study_hours_per_day: e.target.value,
                         }))
                       }
-                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-800 bg-transparent px-3 text-sm text-slate-900 dark:text-slate-100"
                     >
                       {STUDY_HOUR_OPTIONS.map((hours) => (
-                        <option key={hours} value={hours}>{hours} {Number(hours) === 1 ? "hora" : "horas"}</option>
+                        <option className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100" key={hours} value={hours}>{hours} {Number(hours) === 1 ? "hora" : "horas"}</option>
                       ))}
                     </select>
                   </div>
@@ -718,6 +729,47 @@ export default function ProfilePage() {
                 </div>
               </Card>
             </div>
+
+            <Card title="Privacidade">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                    Visível para outras pessoas
+                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Quando desmarcado, seu perfil não aparece na busca de pessoas nem
+                    pode ser acessado por outros usuários.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.is_public}
+                  onCheckedChange={(checked) =>
+                    setForm((s) => ({ ...s, is_public: checked }))
+                  }
+                  aria-label="Visível para outras pessoas"
+                />
+              </div>
+
+              <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Mostrar no ranking
+                    </div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Quando desmarcado, seu nome não aparece no ranking de desempenho.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.show_in_ranking}
+                    onCheckedChange={(checked) =>
+                      setForm((s) => ({ ...s, show_in_ranking: checked }))
+                    }
+                    aria-label="Mostrar no ranking"
+                  />
+                </div>
+              </div>
+            </Card>
 
             <div className="flex items-center justify-end gap-4">
               <button

@@ -124,6 +124,26 @@ class Comment(models.Model):
         ordering = ["created_at"]
 
 
+class SimulationTemplate(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="simulation_templates")
+    name = models.CharField(max_length=120)
+    discipline = models.CharField(max_length=100, blank=True, default="")
+    exam_ids = models.JSONField(default=list)
+    banca = models.CharField(max_length=100, blank=True, default="")
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
+    count = models.PositiveSmallIntegerField(null=True, blank=True)
+    full_exam = models.BooleanField(default=False)
+    time_limit_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.name
+
+
 class ErrorReport(models.Model):
     class Status(models.TextChoices):
         OPEN = "open", "Aberto"

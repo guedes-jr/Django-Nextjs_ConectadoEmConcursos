@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { FilePlus2, Pencil, Trash2 } from "lucide-react";
 
 import {
@@ -13,9 +14,32 @@ import {
   updateSketch,
 } from "@/lib/sketches";
 
-
 const Excalidraw = dynamic(
-  async () => (await import("@excalidraw/excalidraw")).Excalidraw,
+  async () => {
+    const mod = await import("@excalidraw/excalidraw");
+    const ExcalidrawComponent = mod.Excalidraw as any;
+    const MainMenuComponent = mod.MainMenu as any;
+    return function ExcalidrawLoaded(props: { children?: ReactNode; [key: string]: unknown }) {
+      const { children, ...rest } = props;
+      return (
+        <ExcalidrawComponent {...rest}>
+          <MainMenuComponent>
+            <MainMenuComponent.DefaultItems.LoadScene />
+            <MainMenuComponent.DefaultItems.SaveToActiveFile />
+            <MainMenuComponent.DefaultItems.Export />
+            <MainMenuComponent.DefaultItems.SaveAsImage />
+            <MainMenuComponent.DefaultItems.SearchMenu />
+            <MainMenuComponent.DefaultItems.Help />
+            <MainMenuComponent.DefaultItems.ClearCanvas />
+            <MainMenuComponent.Separator />
+            <MainMenuComponent.DefaultItems.ToggleTheme />
+            <MainMenuComponent.DefaultItems.ChangeCanvasBackground />
+          </MainMenuComponent>
+          {children}
+        </ExcalidrawComponent>
+      );
+    };
+  },
   { ssr: false }
 );
 
@@ -86,6 +110,15 @@ export default function WhiteboardPage() {
 
   useEffect(() => () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (apiRef.current && pendingScene.current) {
+      const scene = pendingScene.current;
+      pendingScene.current = null;
+      apiRef.current.updateScene(scene);
+      window.setTimeout(() => { loadingScene.current = false; }, 0);
+    }
   }, []);
 
   const startNew = () => {
@@ -191,14 +224,10 @@ export default function WhiteboardPage() {
 
           <div className="h-[78vh] w-full">
             <Excalidraw
+              langCode="pt-BR"
               initialData={initialData}
               excalidrawAPI={(api: any) => {
                 apiRef.current = api;
-                if (pendingScene.current) {
-                  api.updateScene(pendingScene.current);
-                  pendingScene.current = null;
-                  window.setTimeout(() => { loadingScene.current = false; }, 0);
-                }
               }}
               onChange={(elements: any, appState: any, files: any) => {
                 queueSave({ elements, appState, files });

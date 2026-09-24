@@ -19,6 +19,8 @@ export type Me = {
   target_role: string;
   study_hours_per_day: number;
   disciplines: string[];
+  is_public: boolean;
+  show_in_ranking: boolean;
 };
 
 type UseMeResult = {

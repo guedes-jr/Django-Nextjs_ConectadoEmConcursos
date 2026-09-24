@@ -90,6 +90,7 @@ export default function SimulationsHistoryPage() {
           <div className="grid gap-3 lg:grid-cols-2">
             {runs.map((run) => {
               const percentage = run.total > 0 ? Math.round((run.score / run.total) * 100) : 0;
+              const canReview = run.status === "finished";
               return (
                 <article
                   key={run.id}
@@ -115,14 +116,46 @@ export default function SimulationsHistoryPage() {
                       {percentage}%
                     </div>
                   </div>
-                  <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+                  <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
                     <Clock size={12} /> {formatDate(run.created_at)} às {formatTime(run.created_at)}
+                  </p>
+                  {!canReview && (
+                    <p className="mt-2">
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700 dark:bg-red-950/60 dark:text-red-400">
+                        Expirado
+                      </span>
+                    </p>
+                  )}
+                  <p className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    {run.discipline && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                        {run.discipline}
+                      </span>
+                    )}
+                    {run.banca && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                        {run.banca}
+                      </span>
+                    )}
+                    {run.year && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                        {run.year}
+                      </span>
+                    )}
+                    {run.time_limit_minutes && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                        até {run.time_limit_minutes} min
+                      </span>
+                    )}
                   </p>
                   <Link
                     href={`/simulations/review?run=${run.id}`}
-                    className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-600 ring-1 ring-slate-200 transition hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:ring-slate-800 dark:hover:bg-slate-800"
+                    aria-disabled={!canReview}
+                    className={`mt-4 inline-flex w-full items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-600 ring-1 ring-slate-200 transition hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:ring-slate-800 ${
+                      canReview ? "hover:bg-blue-50 dark:hover:bg-slate-800" : "pointer-events-none opacity-60"
+                    }`}
                   >
-                    Revisar questões
+                    {canReview ? "Revisar questões" : "Sem correção"}
                   </Link>
                 </article>
               );

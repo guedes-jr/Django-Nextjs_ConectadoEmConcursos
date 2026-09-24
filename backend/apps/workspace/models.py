@@ -33,10 +33,26 @@ class CommunityPost(models.Model):
 
 
 class SimulationRun(models.Model):
+    class Status(models.TextChoices):
+        IN_PROGRESS = "in_progress", "Em andamento"
+        FINISHED = "finished", "Concluído"
+        EXPIRED = "expired", "Expirado"
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="simulation_runs")
     answers = models.JSONField(default=list)
     score = models.PositiveSmallIntegerField(default=0)
     total = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.IN_PROGRESS)
+    question_ids = models.JSONField(default=list)
+    question_count = models.PositiveSmallIntegerField(default=0)
+    time_limit_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(null=True, blank=True)
+    discipline = models.CharField(max_length=100, blank=True, default="")
+    banca = models.CharField(max_length=100, blank=True, default="")
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
+    exam_ids = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -48,6 +64,7 @@ class ExamSubmission(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=160)
     source_url = models.URLField(blank=True)
+    file = models.FileField(upload_to="exam_submissions/", blank=True, null=True)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)

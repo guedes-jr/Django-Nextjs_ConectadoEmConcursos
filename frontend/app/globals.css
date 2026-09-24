@@ -156,6 +156,23 @@ html.dark .app-mobile-menu {
   border-color: #60a5fa !important;
 }
 
+/* Lousa Mágica: oculta a aba de Bibliotecas da Excalidraw (não há prop oficial). */
+.excalidraw .default-sidebar .sidebar-triggers .sidebar-tab-trigger[data-value="library"] {
+  display: none !important;
+}
+
+.excalidraw label.sidebar-trigger__label-element[title="Biblioteca"],
+.excalidraw label.sidebar-trigger__label-element[title="Bibliotecas"],
+.excalidraw label.sidebar-trigger__label-element[title="Libraries"] {
+  display: none !important;
+}
+
+/* Lousa Mágica: oculta a opção de links da Excalidraw (não há prop oficial). */
+.excalidraw .excalidraw-hyperlinkContainer,
+.excalidraw-hyperlinkContainer {
+  display: none !important;
+}
+
 /* --- Table ---------------------------------------------------------------- */
 table { width: 100%; border-collapse: collapse; }
 thead tr { border-bottom: 1px solid #e2e8f0; background-color: #f8fafc; }
@@ -995,4 +1012,47 @@ html:not(.dark) .landing-page .testimonials-grid figcaption span {
 html:not(.dark) .landing-page .cta-premium-section {
   background: #132b57 !important;
   color: #ffffff !important;
+}
+
+/* --- Switch (estado visual via CSS puro) ------------------------------- */
+/* O variante data-[state=...] do Tailwind v4 nao gera neste projeto;
+   usamos atributos [data-state] com CSS explicito. */
+.app-switch {
+  display: inline-flex;
+  height: 1.25rem;
+  width: 2.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-color: hsl(var(--input));
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+  transition: background-color 150ms, box-shadow 150ms;
+  outline: none;
+  cursor: pointer;
+}
+.app-switch[data-state="checked"] {
+  background-color: hsl(var(--primary));
+}
+.app-switch:focus-visible {
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.35);
+}
+.app-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-switch-thumb {
+  display: block;
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  background-color: hsl(var(--background));
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  translate: 0 0;
+  transition: translate 150ms ease-in-out;
+  pointer-events: none;
+}
+.app-switch[data-state="checked"] .app-switch-thumb {
+  translate: 1rem 0;
 }

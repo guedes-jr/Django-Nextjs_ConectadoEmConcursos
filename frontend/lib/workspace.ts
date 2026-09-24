@@ -130,6 +130,28 @@ export async function listPeople(search = "") {
   return response.data;
 }
 
+export type PublicProfile = {
+  id: number;
+  username: string;
+  name: string;
+  is_owner: boolean;
+  avatar?: string | null;
+  social_avatar?: string | null;
+  profession: string;
+  target_role: string;
+  state: string;
+  city: string;
+  study_hours_per_day: number;
+  disciplines: string[];
+};
+
+export async function getPublicProfile(username: string) {
+  const response = await http.get<PublicProfile>(
+    `/api/workspace/people/${encodeURIComponent(username)}/`,
+  );
+  return response.data;
+}
+
 export type RankingEntry = {
   position: number;
   username: string;
@@ -146,6 +168,7 @@ export type ExamSubmissionItem = {
   id: number;
   title: string;
   source_url: string;
+  file_url: string | null;
   status: "pending" | "reviewed";
   created_at: string;
 };
@@ -155,7 +178,27 @@ export async function listSubmissions() {
   return response.data;
 }
 
-export async function createSubmission(data: { title: string; source_url: string; description?: string }) {
-  const response = await http.post<{ id: number; status: string }>("/api/workspace/submissions/", data);
+export async function createSubmission(data: {
+  title: string;
+  description?: string;
+  source_url?: string;
+  file?: File;
+}) {
+  if (data.file) {
+    const form = new FormData();
+    form.append("title", data.title);
+    form.append("description", data.description ?? "");
+    form.append("file", data.file);
+    const response = await http.post<{ id: number; status: string }>(
+      "/api/workspace/submissions/",
+      form,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return response.data;
+  }
+  const response = await http.post<{ id: number; status: string }>(
+    "/api/workspace/submissions/",
+    { title: data.title, source_url: data.source_url, description: data.description },
+  );
   return response.data;
 }

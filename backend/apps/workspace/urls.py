@@ -12,6 +12,7 @@ urlpatterns = [
     path("workspace/community/<int:item_id>/", views.community_detail),
     path("workspace/ranking/", views.ranking),
     path("workspace/people/", views.people),
+    path("workspace/people/<str:username>/", views.people_detail),
     path("workspace/simulations/", views.simulations),
     path("workspace/submissions/", views.submissions),
 ]

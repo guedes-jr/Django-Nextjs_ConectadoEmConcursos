@@ -39,6 +39,8 @@ class ProfileSerializer(serializers.Serializer):
         max_length=30,
         required=False,
     )
+    is_public = serializers.BooleanField(required=False)
+    show_in_ranking = serializers.BooleanField(required=False)
 
     def get_avatar(self, profile):
         if not profile.avatar:

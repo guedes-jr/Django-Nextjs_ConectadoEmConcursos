@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Search, UsersRound } from "lucide-react";
 
 import { listPeople, type Person } from "@/lib/workspace";
@@ -78,17 +79,22 @@ export default function PeoplePage() {
             {people.map((person) => (
               <article
                 key={person.id}
-                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+                className="rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-400 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-blue-100 text-base font-bold text-blue-700 dark:bg-blue-950/60 dark:text-blue-400">
-                  {initial(person.name || person.username)}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-                    {person.name || person.username}
-                  </p>
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">@{person.username}</p>
-                </div>
+                <Link
+                  href={`/profile/${encodeURIComponent(person.username)}`}
+                  className="flex items-center gap-3"
+                >
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-blue-100 text-base font-bold text-blue-700 dark:bg-blue-950/60 dark:text-blue-400">
+                    {initial(person.name || person.username)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {person.name || person.username}
+                    </p>
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">@{person.username}</p>
+                  </div>
+                </Link>
               </article>
             ))}
           </section>

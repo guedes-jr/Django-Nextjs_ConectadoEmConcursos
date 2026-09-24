@@ -1,4 +1,5 @@
 from datetime import timedelta
+from random import sample
 
 from django.db import transaction
 from django.db.models import BooleanField, Count, DateTimeField, Exists, IntegerField, OuterRef, Q, Subquery
@@ -10,9 +11,9 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, UserAnswer
+from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, SimulationTemplate, UserAnswer
 from apps.questions.review import schedule_review
-from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer
+from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer, SimulationTemplateSerializer
 from apps.billing.services import capabilities_for
 from apps.workspace.models import SimulationRun
 
@@ -163,14 +164,124 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             "next_review_at": review.next_review_at,
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["post"], url_path="simulations/start")
+    def start_simulation(self, request):
+        data = request.data
+        full_exam = bool(data.get("full_exam"))
+        time_limit = data.get("time_limit_minutes")
+        if time_limit is not None:
+            if not isinstance(time_limit, int) or not 1 <= time_limit <= 180:
+                return Response({"detail": "Tempo limite inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = Question.objects.filter(is_active=True)
+        discipline = str(data.get("discipline") or "").strip()
+        banca = str(data.get("banca") or "").strip()
+        year = data.get("year")
+        exam_ids = data.get("exam_ids") or []
+
+        if exam_ids:
+            if not isinstance(exam_ids, list) or not all(isinstance(i, int) for i in exam_ids):
+                return Response({"detail": "Provas inválidas."}, status=status.HTTP_400_BAD_REQUEST)
+            published_ids = set(Exam.objects.filter(is_published=True).values_list("id", flat=True))
+            if not set(exam_ids).issubset(published_ids):
+                return Response({"detail": "Uma ou mais provas não estão disponíveis."}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(exam__in=exam_ids)
+        if discipline:
+            queryset = queryset.filter(discipline__iexact=discipline)
+        if banca:
+            queryset = queryset.filter(banca__iexact=banca)
+        if isinstance(year, int) or (isinstance(year, str) and year.isdigit()):
+            queryset = queryset.filter(year=int(year))
+
+        if full_exam:
+            if len(exam_ids) != 1:
+                return Response({"detail": "A prova completa precisa de exatamente uma prova selecionada."}, status=status.HTTP_400_BAD_REQUEST)
+            ids = list(queryset.order_by("id").values_list("id", flat=True))
+            if not ids:
+                return Response({"detail": "Nenhuma questão disponível com esses critérios."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            try:
+                count = int(data.get("count") or 0)
+            except (TypeError, ValueError):
+                count = 0
+            if not 1 <= count <= 100:
+                return Response({"detail": "Informe a quantidade de questões (1 a 100)."}, status=status.HTTP_400_BAD_REQUEST)
+            pool = list(queryset.order_by("id").values_list("id", flat=True))
+            if len(pool) < count:
+                return Response({"detail": f"Apenas {len(pool)} questões disponíveis com esses critérios."}, status=status.HTTP_400_BAD_REQUEST)
+            answered_ids = set(
+                UserAnswer.objects.filter(user=request.user, question_id__in=pool)
+                .values_list("question_id", flat=True).distinct()
+            )
+            unseen = [qid for qid in pool if qid not in answered_ids]
+            ids = sample(unseen, count) if len(unseen) >= count else sample(pool, count)
+
+        ordered_ids = sorted(ids)
+        question_map = Question.objects.filter(pk__in=ordered_ids).select_related("exam").in_bulk()
+        ordered_ids = [qid for qid in ordered_ids if qid in question_map]
+        now = timezone.now()
+        run = SimulationRun.objects.create(
+            user=request.user,
+            status=SimulationRun.Status.IN_PROGRESS,
+            question_ids=ordered_ids,
+            question_count=len(ordered_ids),
+            time_limit_minutes=time_limit,
+            started_at=now,
+            discipline=discipline,
+            banca=banca,
+            year=int(year) if year else None,
+            exam_ids=exam_ids,
+        )
+        def build_payload(q):
+            return {
+                "id": q.id,
+                "exam_id": q.exam_id,
+                "exam_title": q.exam.title if q.exam else "",
+                "exam_role": q.exam.role if q.exam else "",
+                "exam_institution": q.exam.institution if q.exam else "",
+                "discipline": q.discipline,
+                "banca": q.banca,
+                "year": q.year,
+                "statement": q.statement,
+                "options": q.options,
+            }
+        return Response({
+            "simulation_id": run.id,
+            "started_at": now.isoformat(),
+            "time_limit_minutes": time_limit,
+            "question_count": run.question_count,
+            "questions": [build_payload(question_map[qid]) for qid in ordered_ids],
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=["post"], url_path="submit-simulation")
     def submit_simulation(self, request):
         entries = request.data.get("answers")
-        if not isinstance(entries, list) or not 1 <= len(entries) <= 50:
-            return Response({"detail": "Envie de 1 a 50 respostas."}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(entries, list) or not entries:
+            return Response({"detail": "Envie ao menos uma resposta."}, status=status.HTTP_400_BAD_REQUEST)
+        simulation_id = request.data.get("simulation_id")
+        run = None
+        if simulation_id is not None:
+            if not isinstance(simulation_id, int):
+                return Response({"detail": "Simulado inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            run = SimulationRun.objects.filter(pk=simulation_id, user=request.user).first()
+            if run is None:
+                return Response({"detail": "Simulado não encontrado."}, status=status.HTTP_400_BAD_REQUEST)
+            if run.status != SimulationRun.Status.IN_PROGRESS:
+                return Response({"detail": "Simulado já finalizado ou expirado."}, status=status.HTTP_400_BAD_REQUEST)
+            if run.time_limit_minutes:
+                elapsed = (timezone.now() - run.started_at).total_seconds()
+                if elapsed > run.time_limit_minutes * 60:
+                    run.status = SimulationRun.Status.EXPIRED
+                    run.save(update_fields=["status"])
+                    return Response({"detail": "Tempo do simulado esgotado."}, status=status.HTTP_400_BAD_REQUEST)
+        max_entries = 200 if run else 50
+        if len(entries) > max_entries:
+            return Response({"detail": f"Envie no máximo {max_entries} respostas."}, status=status.HTTP_400_BAD_REQUEST)
         question_ids = [entry.get("question_id") for entry in entries if isinstance(entry, dict)]
         if len(question_ids) != len(entries) or any(type(item) is not int for item in question_ids) or len(set(question_ids)) != len(entries):
             return Response({"detail": "Questões inválidas ou repetidas."}, status=status.HTTP_400_BAD_REQUEST)
+        if run is not None and not set(question_ids).issubset(run.question_ids):
+            return Response({"detail": "Uma ou mais questões não pertencem ao simulado."}, status=status.HTTP_400_BAD_REQUEST)
         questions = Question.objects.filter(pk__in=question_ids, is_active=True).in_bulk()
         if len(questions) != len(entries):
             return Response({"detail": "Uma ou mais questões não estão disponíveis."}, status=status.HTTP_400_BAD_REQUEST)
@@ -199,18 +310,30 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
                     "is_correct": answer.is_correct, "explanation": question.explanation,
                     "next_review_at": review.next_review_at,
                 })
-            run = SimulationRun.objects.create(
-                user=request.user, score=sum(item["is_correct"] for item in results),
-                total=len(results),
-                answers=[{
-                    "question_id": item["question_id"],
-                    "selected_answer": item["selected_answer"],
-                    "correct_answer": item["correct_answer"],
-                    "is_correct": item["is_correct"],
-                } for item in results],
-            )
+            simple_answers = [{
+                "question_id": item["question_id"],
+                "selected_answer": item["selected_answer"],
+                "correct_answer": item["correct_answer"],
+                "is_correct": item["is_correct"],
+            } for item in results]
+            if run is None:
+                run = SimulationRun.objects.create(
+                    user=request.user, status=SimulationRun.Status.FINISHED,
+                    score=sum(item["is_correct"] for item in results),
+                    total=len(results),
+                    question_ids=[item["question_id"] for item in results],
+                    question_count=len(results),
+                    answers=simple_answers,
+                )
+            else:
+                run.score = sum(item["is_correct"] for item in results)
+                run.total = len(results)
+                run.status = SimulationRun.Status.FINISHED
+                run.finished_at = timezone.now()
+                run.duration_seconds = int((timezone.now() - run.started_at).total_seconds())
+                run.answers = simple_answers
+                run.save()
         return Response({"results": results, "simulation_id": run.id}, status=status.HTTP_201_CREATED)
-
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
         question = self.get_object()
@@ -432,3 +555,14 @@ def statistics(request):
             "banca": banca,
         },
     })
+
+
+class SimulationTemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = SimulationTemplateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return SimulationTemplate.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

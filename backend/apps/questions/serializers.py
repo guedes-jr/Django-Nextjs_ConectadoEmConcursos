@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.questions.models import Comment, Exam, Question
+from apps.questions.models import Comment, Exam, Question, SimulationTemplate
 
 
 class ExamSerializer(serializers.ModelSerializer):
@@ -76,3 +76,20 @@ class CommentSerializer(serializers.ModelSerializer):
 
 class ReportSerializer(serializers.Serializer):
     description = serializers.CharField(min_length=10, max_length=5000)
+
+
+class SimulationTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SimulationTemplate
+        fields = [
+            "id", "name", "discipline", "exam_ids", "banca", "year",
+            "count", "full_exam", "time_limit_minutes", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_count(self, value):
+        if value is None:
+            return value
+        if not 1 <= value <= 100:
+            raise serializers.ValidationError("Quantidade entre 1 e 100 questões.")
+        return value

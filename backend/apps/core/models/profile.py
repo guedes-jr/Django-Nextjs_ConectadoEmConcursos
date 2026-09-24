@@ -16,6 +16,8 @@ class Profile(models.Model):
     target_role = models.CharField(max_length=120, blank=True)
     study_hours_per_day = models.PositiveSmallIntegerField(default=0)
     disciplines = models.JSONField(default=list, blank=True)
+    is_public = models.BooleanField(default=True)
+    show_in_ranking = models.BooleanField(default=True)
 
     def __str__(self) -> str:
         return f"Profile({self.user_id})"

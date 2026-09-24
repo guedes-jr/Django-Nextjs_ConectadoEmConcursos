@@ -3,10 +3,12 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from allauth.socialaccount.models import SocialAccount
 from apps.questions.models import Question, QuestionNote, UserAnswer
 from .models import CommunityPost, ExamSubmission, Flashcard, Notebook, SimulationRun
 
@@ -151,7 +153,7 @@ def community_detail(request, item_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def ranking(request):
-    users = get_user_model().objects.filter(is_active=True).annotate(total=Count("useranswer"), correct=Count("useranswer", filter=Q(useranswer__is_correct=True))).filter(total__gt=0).order_by("-correct", "-total", "id")[:50]
+    users = get_user_model().objects.filter(is_active=True, profile__show_in_ranking=True).annotate(total=Count("useranswer"), correct=Count("useranswer", filter=Q(useranswer__is_correct=True))).filter(total__gt=0).order_by("-correct", "-total", "id")[:50]
     return Response([{"position": index, "username": user.get_username(), "correct": user.correct, "total": user.total} for index, user in enumerate(users, 1)])
 
 
@@ -159,7 +161,7 @@ def ranking(request):
 @permission_classes([IsAuthenticated])
 def people(request):
     search = request.query_params.get("search", "").strip()[:60]
-    users = get_user_model().objects.filter(is_active=True)
+    users = get_user_model().objects.filter(is_active=True, profile__is_public=True)
     if search:
         users = users.filter(Q(username__icontains=search) | Q(first_name__icontains=search) | Q(last_name__icontains=search))
     return Response([{"id": user.id, "username": user.get_username(), "name": user.get_full_name() or user.get_username()} for user in users.order_by("username")[:50]])
@@ -167,20 +169,92 @@ def people(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def people_detail(request, username):
+    user = get_user_model().objects.filter(username__iexact=username).first()
+    if not user:
+        return Response({"detail": "Usuário não encontrado."}, status=404)
+    profile = getattr(user, "profile", None)
+    is_owner = request.user == user
+    if (profile is None or not profile.is_public) and not is_owner:
+        return Response({"detail": "Usuário não encontrado."}, status=404)
+
+    def local_avatar_url():
+        if not profile or not profile.avatar:
+            return None
+        url = profile.avatar.url
+        return request.build_absolute_uri(url)
+
+    account = SocialAccount.objects.filter(user=user, provider="google").first()
+    social_avatar = (account.extra_data or {}).get("picture") if account else None
+
+    return Response({
+        "id": user.id,
+        "username": user.get_username(),
+        "name": user.get_full_name() or user.get_username(),
+        "is_owner": is_owner,
+        "avatar": local_avatar_url(),
+        "social_avatar": social_avatar,
+        "profession": (profile.profession if profile else "") or "",
+        "target_role": (profile.target_role if profile else "") or "",
+        "state": (profile.state if profile else "") or "",
+        "city": (profile.city if profile else "") or "",
+        "study_hours_per_day": profile.study_hours_per_day if profile else 0,
+        "disciplines": (profile.disciplines if profile else []) or [],
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def simulations(request):
-    runs = SimulationRun.objects.filter(user=request.user).order_by("-created_at")[:50]
-    return Response([{"id": item.id, "score": item.score, "total": item.total, "created_at": item.created_at, "answers": item.answers} for item in runs])
+    runs = (
+        SimulationRun.objects.filter(user=request.user)
+        .exclude(status=SimulationRun.Status.IN_PROGRESS)
+        .order_by("-created_at")[:50]
+    )
+    return Response([{
+        "id": item.id,
+        "score": item.score,
+        "total": item.total,
+        "created_at": item.created_at,
+        "answers": item.answers,
+        "status": item.status,
+        "question_count": item.question_count,
+        "discipline": item.discipline,
+        "banca": item.banca,
+        "year": item.year,
+        "exam_ids": item.exam_ids,
+        "time_limit_minutes": item.time_limit_minutes,
+        "duration_seconds": item.duration_seconds,
+        "started_at": item.started_at,
+        "finished_at": item.finished_at,
+    } for item in runs])
 
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
 def submissions(request):
     if request.method == "GET":
-        return Response([{"id": item.id, "title": item.title, "source_url": item.source_url, "status": item.status, "created_at": item.created_at} for item in ExamSubmission.objects.filter(user=request.user).order_by("-created_at")[:50]])
+        return Response([{"id": item.id, "title": item.title, "source_url": item.source_url, "file_url": request.build_absolute_uri(item.file.url) if item.file else None, "status": item.status, "created_at": item.created_at} for item in ExamSubmission.objects.filter(user=request.user).order_by("-created_at")[:50]])
     title = str(request.data.get("title", "")).strip()
     source_url = str(request.data.get("source_url", "")).strip()
     description = str(request.data.get("description", "")).strip()
-    if not 1 <= len(title) <= 160 or not source_url.startswith("https://") or len(source_url) > 200 or len(description) > 2000:
-        return Response({"detail": "Informe o título e um link HTTPS para a prova."}, status=400)
-    item = ExamSubmission.objects.create(user=request.user, title=title, source_url=source_url, description=description)
+    uploaded = request.FILES.get("file")
+    if not 1 <= len(title) <= 160:
+        return Response({"detail": "Informe o título da prova."}, status=400)
+    if len(description) > 2000:
+        return Response({"detail": "As observações devem ter até 2000 caracteres."}, status=400)
+    if uploaded:
+        if source_url:
+            return Response({"detail": "Escolha uma opção: enviar o link OU fazer upload do arquivo."}, status=400)
+        if uploaded.size > 10 * 1024 * 1024:
+            return Response({"detail": "O arquivo deve ter no máximo 10 MB."}, status=400)
+        name = uploaded.name.lower()
+        if not name.endswith((".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg")):
+            return Response({"detail": "Formato não suportado. Envie PDF, DOC, DOCX, TXT ou imagem (PNG/JPG)."}, status=400)
+        item = ExamSubmission.objects.create(user=request.user, title=title, file=uploaded, description=description)
+    else:
+        if not source_url.startswith("https://") or len(source_url) > 200:
+            return Response({"detail": "Informe um link HTTPS para a prova."}, status=400)
+        item = ExamSubmission.objects.create(user=request.user, title=title, source_url=source_url, description=description)
     return Response({"id": item.id, "status": item.status}, status=201)
