@@ -250,7 +250,7 @@ export default function LandingPage() {
             <ThemeToggle />
             <Link
               href="/login"
-              className="inline-flex items-center gap-2 rounded-lg bg-[#ffffff] px-4 py-2 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-sm font-bold text-blue-900 shadow-sm transition hover:bg-amber-300"
             >
               Entrar <ArrowRight size={15} />
             </Link>
@@ -450,8 +450,8 @@ export default function LandingPage() {
           <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
             {plans.map((plan) => (
               <article
-                key={plan.name}
-                className={`relative flex flex-col rounded-2xl border p-6 ${plan.featured ? "border-blue-600 bg-blue-600 text-white shadow-xl lg:-translate-y-3" : "border-slate-200 bg-white text-slate-900 shadow-sm"}`}
+                key={`${plan.name}-${plan.price}`}
+                className={`relative flex flex-col rounded-2xl border p-6 ${plan.featured ? "border-blue-600 bg-white text-slate-900 shadow-xl lg:-translate-y-3" : "border-slate-200 bg-white text-slate-900 shadow-sm"}`}
               >
                 {plan.featured && (
                   <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-400 px-3 py-1 text-xs font-bold text-slate-900">
@@ -465,24 +465,24 @@ export default function LandingPage() {
                 )}
                 <div className="flex items-center gap-2">
                   <div
-                    className={`rounded-lg p-2 ${plan.featured ? "bg-white/15" : "bg-blue-50 text-blue-600"}`}
+                    className="rounded-lg bg-blue-50 p-2 text-blue-600"
                   >
                     <Trophy size={18} />
                   </div>
                   <h3 className="text-lg font-bold">{plan.name}</h3>
                 </div>
                 <p
-                  className={`mt-6 text-3xl font-extrabold ${plan.featured ? "text-white" : "text-slate-900"}`}
+                  className="mt-6 text-3xl font-extrabold text-slate-900"
                 >
                   {plan.price}
                 </p>
                 <p
-                  className={`mt-1 text-xs ${plan.featured ? "text-blue-100" : "text-slate-500"}`}
+                  className="mt-1 text-xs text-slate-500"
                 >
                   {plan.suffix}
                 </p>
                 <p
-                  className={`mt-4 min-h-10 text-sm ${plan.featured ? "text-blue-100" : "text-slate-600"}`}
+                  className="mt-4 min-h-10 text-sm text-slate-600"
                 >
                   {plan.description}
                 </p>
@@ -491,7 +491,7 @@ export default function LandingPage() {
                     <li key={feature} className="flex gap-2">
                       <Check
                         size={16}
-                        className={`mt-0.5 shrink-0 ${plan.featured ? "text-blue-100" : "text-blue-600"}`}
+                        className="mt-0.5 shrink-0 text-blue-600"
                       />
                       {feature}
                     </li>
@@ -499,7 +499,7 @@ export default function LandingPage() {
                 </ul>
                 <Link
                   href="/register"
-                  className={`mt-7 inline-flex items-center justify-center rounded-lg px-4 py-3 text-sm font-bold ${plan.featured ? "bg-[#fbbf24] text-white hover:bg-[#fcd34d]" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+                  className={`mt-7 inline-flex items-center justify-center rounded-lg px-4 py-3 text-sm font-bold ${plan.featured ? "bg-amber-400 text-slate-900 hover:bg-amber-300" : "bg-blue-600 text-white hover:bg-blue-700"}`}
                 >
                   {plan.action} <ArrowRight size={15} className="ml-2" />
                 </Link>
