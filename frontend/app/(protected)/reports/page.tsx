@@ -22,7 +22,7 @@ import {
   type Statistics,
   type StatisticsFilters,
 } from "@/lib/statistics";
-import { getStudyPlan, type StudyPlan } from "@/lib/studies";
+import { getStudyPlan, getStudyPlans, type StudyPlan } from "@/lib/studies";
 import { listSimulations, type SimulationRun } from "@/lib/simulations";
 
 function pad(n: number) {
@@ -244,11 +244,13 @@ export default function ReportsPage() {
     setLoading(true);
     void (async () => {
       try {
-        const [statistics, plan, simulations] = await Promise.all([
+        const [statistics, summaries, simulations] = await Promise.all([
           getStatistics(filters),
-          getStudyPlan(),
+          getStudyPlans(),
           listSimulations(),
         ]);
+        const chosen = summaries.find((item) => item.active) ?? summaries[0] ?? null;
+        const plan = chosen ? await getStudyPlan(chosen.id) : null;
         if (!active) return;
         setData({ statistics, plan, simulations });
         setError(null);

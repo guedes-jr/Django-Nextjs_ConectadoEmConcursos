@@ -20,11 +20,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { QuestionContent } from "@/components/QuestionContent";
+import { Explanation } from "@/components/Explanation";
 
 import { listQuestionFacets, submitSimulation, SimulationResult } from "@/lib/questions";
 import { listExams, Exam } from "@/lib/exams";
 import {
   createSimulationTemplate,
+  deleteSimulation,
   deleteSimulationTemplate,
   listSimulationTemplates,
   listSimulations,
@@ -86,6 +88,7 @@ export default function SimulacoesPage() {
   const [timeUsed, setTimeUsed] = useState(0);
   const [results, setResults] = useState<SimulationResult[]>([]);
   const [recent, setRecent] = useState<SimulationRun[]>([]);
+  const [deletingRecentId, setDeletingRecentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -198,7 +201,7 @@ export default function SimulacoesPage() {
       const payload = questions.flatMap((item, i) =>
         answers[i] === null ? [] : [{ question_id: item.id, selected_answer: answers[i] as number }],
       );
-      if (payload.length === 0) {
+      if (payload.length === 0 && !session) {
         setError("Responda pelo menos uma questão antes de concluir.");
         setSubmitting(false);
         submittingRef.current = false;
@@ -324,12 +327,28 @@ export default function SimulacoesPage() {
     }
   };
 
+  const removeRecent = async (run: SimulationRun) => {
+    if (!window.confirm("Excluir este simulado do histórico?")) return;
+    setDeletingRecentId(run.id);
+    setError(null);
+    try {
+      await deleteSimulation(run.id);
+      setRecent((current) => current.filter((item) => item.id !== run.id));
+    } catch {
+      setError("Não foi possível excluir o simulado.");
+    } finally {
+      setDeletingRecentId(null);
+    }
+  };
+
   const resultMap = useMemo(
     () => new Map(results.map((item) => [item.question_id, item])),
     [results],
   );
+  const total = questions.length;
   const score = results.filter((item) => item.is_correct).length;
-  const total = results.length;
+  const blankCount = results.filter((item) => item.selected_answer === null).length;
+  const wrongCount = results.filter((item) => !item.is_correct && item.selected_answer !== null).length;
   const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
   const message =
     percentage >= 90
@@ -339,6 +358,20 @@ export default function SimulacoesPage() {
         : percentage >= 50
           ? "Você está no caminho certo, mas ainda pode melhorar."
           : "Continue estudando: revise os conteúdos das questões erradas.";
+  const byDiscipline = useMemo(() => {
+    const map = new Map<string, { correct: number; wrong: number; blank: number }>();
+    for (const item of questions) {
+      const feedback = resultMap.get(item.id);
+      const entry = map.get(item.discipline) ?? { correct: 0, wrong: 0, blank: 0 };
+      if (!feedback || feedback.selected_answer === null) entry.blank += 1;
+      else if (feedback.is_correct) entry.correct += 1;
+      else entry.wrong += 1;
+      map.set(item.discipline, entry);
+    }
+    return [...map.entries()].sort(
+      (a, b) => (b[1].wrong + b[1].blank) - (a[1].wrong + a[1].blank),
+    );
+  }, [questions, resultMap]);
 
   if (loading) {
     return (
@@ -532,7 +565,9 @@ export default function SimulacoesPage() {
                 {confirmBlank === 1
                   ? "Você deixou 1 questão em branco."
                   : `Você deixou ${confirmBlank} questões em branco.`}{" "}
-                Enviar apenas as respondidas?
+                <span className="font-semibold text-red-600 dark:text-red-400">
+                  Questões em branco serão contadas como erradas.
+                </span>
               </p>
               <div className="mt-6 flex flex-wrap justify-end gap-2">
                 <button
@@ -602,17 +637,78 @@ export default function SimulacoesPage() {
             </div>
           </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-400">Desempenho</h2>
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="rounded-xl bg-emerald-50 p-4 text-center dark:bg-emerald-950/40">
+                <CheckCircle2 size={16} className="mx-auto text-emerald-600 dark:text-emerald-400" />
+                <p className="mt-1.5 text-2xl font-bold text-emerald-700 dark:text-emerald-400">{score}</p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-500">Acertos</p>
+              </div>
+              <div className="rounded-xl bg-red-50 p-4 text-center dark:bg-red-950/40">
+                <XCircle size={16} className="mx-auto text-red-600 dark:text-red-400" />
+                <p className="mt-1.5 text-2xl font-bold text-red-700 dark:text-red-400">{wrongCount}</p>
+                <p className="text-xs text-red-600 dark:text-red-500">Erros</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4 text-center dark:bg-slate-950/40">
+                <CircleHelp size={16} className="mx-auto text-slate-500 dark:text-slate-400" />
+                <p className="mt-1.5 text-2xl font-bold text-slate-700 dark:text-slate-300">{blankCount}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Em branco</p>
+              </div>
+            </div>
+            <div className="mt-5 h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+              <div className="flex h-full overflow-hidden rounded-full">
+                <div className="h-full bg-emerald-500" style={{ width: `${total > 0 ? (score / total) * 100 : 0}%` }} />
+                <div className="h-full bg-red-500" style={{ width: `${total > 0 ? (wrongCount / total) * 100 : 0}%` }} />
+                <div className="h-full bg-slate-300 dark:bg-slate-600" style={{ width: `${total > 0 ? (blankCount / total) * 100 : 0}%` }} />
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" /> {score} certas</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> {wrongCount} erradas</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" /> {blankCount} em branco</span>
+            </div>
+            {byDiscipline.length > 1 && (
+              <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Por disciplina</h3>
+                <div className="mt-3 space-y-3">
+                  {byDiscipline.map(([name, entry]) => {
+                    const count = entry.correct + entry.wrong + entry.blank;
+                    const accuracy = count > 0 ? Math.round((entry.correct / count) * 100) : 0;
+                    return (
+                      <div key={name}>
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{name}</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            {entry.correct}/{count} certas · {accuracy}%
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                          <div className="flex h-full overflow-hidden rounded-full">
+                            <div className="bg-emerald-500" style={{ width: `${count > 0 ? (entry.correct / count) * 100 : 0}%` }} />
+                            <div className="bg-red-500" style={{ width: `${count > 0 ? (entry.wrong / count) * 100 : 0}%` }} />
+                            <div className="bg-slate-300 dark:bg-slate-600" style={{ width: `${count > 0 ? (entry.blank / count) * 100 : 0}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="space-y-4">
             {questions.map((item) => {
               const feedback = resultMap.get(item.id);
-              const isBlank = !feedback;
+              const isBlank = !feedback || feedback.selected_answer === null;
               return (
                 <article
                   key={item.id}
                   className={`rounded-2xl border p-5 dark:border-slate-800 dark:bg-slate-900 ${
                     isBlank
-                      ? "bg-slate-50 dark:bg-slate-900"
-                      : feedback?.is_correct
+                      ? "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900"
+                      : feedback!.is_correct
                         ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/30"
                         : "border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30"
                   }`}
@@ -638,8 +734,8 @@ export default function SimulacoesPage() {
                   <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{item.statement}</p>
                   <div className="mt-4 space-y-2">
                     {item.options.map((option, optionIndex) => {
-                      const isCorrectOption = !isBlank && feedback!.correct_answer === optionIndex;
-                      const isWrongPick = !isBlank && feedback!.selected_answer === optionIndex && !feedback!.is_correct;
+                      const isCorrectOption = feedback != null && feedback.correct_answer === optionIndex;
+                      const isWrongPick = feedback != null && feedback.selected_answer === optionIndex && !feedback.is_correct;
                       return (
                         <p
                           key={optionIndex}
@@ -656,12 +752,7 @@ export default function SimulacoesPage() {
                       );
                     })}
                   </div>
-                  {!isBlank && feedback!.explanation && (
-                    <p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                      <span className="font-semibold text-slate-800 dark:text-slate-100">Explicação: </span>
-                      {feedback!.explanation}
-                    </p>
-                  )}
+                  {feedback && <Explanation text={feedback.explanation} />}
                 </article>
               );
             })}
@@ -973,41 +1064,59 @@ export default function SimulacoesPage() {
               {recent.map((run) => {
                 const canReview = run.status === "finished";
                 return (
-                  <Link
+                  <div
                     key={run.id}
-                    href={`/simulations/review?run=${run.id}`}
-                    aria-disabled={!canReview}
-                    className={`flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 ${
-                      canReview ? "transition hover:bg-slate-50 dark:hover:bg-slate-800" : "pointer-events-none opacity-70"
+                    className={`rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 ${
+                      canReview ? "" : "opacity-70"
                     }`}
                   >
-                    <div>
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                        {run.score} de {run.total} ({run.total > 0 ? Math.round((run.score / run.total) * 100) : 0}%)
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{formatDate(run.created_at)}</p>
-                      <p className="mt-1 flex flex-wrap gap-1 text-[11px]">
-                        {run.status === "expired" && (
-                          <span className="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700 dark:bg-red-950/60 dark:text-red-400">
-                            Expirado
-                          </span>
-                        )}
-                        {run.discipline && (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                            {run.discipline}
-                          </span>
-                        )}
-                        {run.banca && (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                            {run.banca}
-                          </span>
-                        )}
-                      </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                          {run.score} de {run.total} ({run.total > 0 ? Math.round((run.score / run.total) * 100) : 0}%)
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{formatDate(run.created_at)}</p>
+                        <p className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                          {run.status === "expired" && (
+                            <span className="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700 dark:bg-red-950/60 dark:text-red-400">
+                              Expirado
+                            </span>
+                          )}
+                          {run.discipline && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              {run.discipline}
+                            </span>
+                          )}
+                          {run.banca && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              {run.banca}
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                      {canReview ? "Revisar" : "Sem correção"}
-                    </span>
-                  </Link>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Link
+                        href={`/simulations/review?run=${run.id}`}
+                        aria-disabled={!canReview}
+                        className={`inline-flex h-8 flex-1 items-center justify-center rounded-lg bg-white px-3 text-xs font-semibold text-blue-600 ring-1 ring-slate-200 transition hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:ring-slate-800 ${
+                          canReview ? "hover:bg-blue-50 dark:hover:bg-slate-800" : "pointer-events-none opacity-60"
+                        }`}
+                      >
+                        {canReview ? "Revisar" : "Sem correção"}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => void removeRecent(run)}
+                        disabled={deletingRecentId === run.id}
+                        aria-label="Excluir simulado"
+                        title="Excluir simulado"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-red-500 ring-1 ring-slate-200 transition hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:bg-slate-900 dark:text-red-400 dark:ring-slate-800 dark:hover:bg-red-950 dark:hover:text-red-500"
+                      >
+                        {deletingRecentId === run.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>

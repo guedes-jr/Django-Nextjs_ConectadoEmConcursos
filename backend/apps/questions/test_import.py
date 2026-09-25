@@ -7,6 +7,32 @@ from django.test import TestCase
 
 from apps.questions.models import Exam, Question
 from apps.questions.management.commands.import_content import CURATED_XML_EXPLANATIONS
+from apps.questions.naming import normalize_discipline
+
+
+class NormalizeDisciplineTests(TestCase):
+    def test_adds_missing_accents_and_capitalization(self):
+        cases = {
+            "Portugues": "Português",
+            "Raciocinio Logico": "Raciocínio Lógico",
+            "Informatica": "Informática",
+            "Gestao De Pessoas": "Gestão de Pessoas",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_discipline(raw), expected)
+
+    def test_handles_renames_and_acronyms(self):
+        self.assertEqual(normalize_discipline("Administracao Recursos Materiais"), "Administração de Recursos Materiais")
+        self.assertEqual(normalize_discipline("Eca"), "ECA")
+        self.assertEqual(normalize_discipline("Afo"), "AFO")
+        self.assertEqual(normalize_discipline("Etica Administracao"), "Ética Administração")
+
+    def test_keeps_already_correct_names(self):
+        self.assertEqual(normalize_discipline("Direito Penal"), "Direito Penal")
+        self.assertEqual(normalize_discipline("Português"), "Português")
+        self.assertIsNone(normalize_discipline(None))
+        self.assertEqual(normalize_discipline(""), "")
 
 
 class ImportContentTests(TestCase):

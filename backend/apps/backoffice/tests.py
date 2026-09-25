@@ -36,7 +36,7 @@ class OverviewTests(Base):
         response = self.client.get("/api/backoffice/overview/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["users"]["total"], 2)
-        self.assertEqual(response.data["subscriptions"]["pending"], 1)
+        self.assertEqual(response.data["subscriptions"]["pending_payment"], 1)
         self.assertEqual(response.data["subscriptions"]["total"], 1)
 
 

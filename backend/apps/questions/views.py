@@ -256,7 +256,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["post"], url_path="submit-simulation")
     def submit_simulation(self, request):
         entries = request.data.get("answers")
-        if not isinstance(entries, list) or not entries:
+        if not isinstance(entries, list):
             return Response({"detail": "Envie ao menos uma resposta."}, status=status.HTTP_400_BAD_REQUEST)
         simulation_id = request.data.get("simulation_id")
         run = None
@@ -274,11 +274,13 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
                     run.status = SimulationRun.Status.EXPIRED
                     run.save(update_fields=["status"])
                     return Response({"detail": "Tempo do simulado esgotado."}, status=status.HTTP_400_BAD_REQUEST)
+        if run is None and not entries:
+            return Response({"detail": "Envie ao menos uma resposta."}, status=status.HTTP_400_BAD_REQUEST)
         max_entries = 200 if run else 50
         if len(entries) > max_entries:
             return Response({"detail": f"Envie no máximo {max_entries} respostas."}, status=status.HTTP_400_BAD_REQUEST)
         question_ids = [entry.get("question_id") for entry in entries if isinstance(entry, dict)]
-        if len(question_ids) != len(entries) or any(type(item) is not int for item in question_ids) or len(set(question_ids)) != len(entries):
+        if question_ids and (len(question_ids) != len(entries) or any(type(item) is not int for item in question_ids) or len(set(question_ids)) != len(entries)):
             return Response({"detail": "Questões inválidas ou repetidas."}, status=status.HTTP_400_BAD_REQUEST)
         if run is not None and not set(question_ids).issubset(run.question_ids):
             return Response({"detail": "Uma ou mais questões não pertencem ao simulado."}, status=status.HTTP_400_BAD_REQUEST)
@@ -310,6 +312,25 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
                     "is_correct": answer.is_correct, "explanation": question.explanation,
                     "next_review_at": review.next_review_at,
                 })
+            if run is not None:
+                answered_by_id = {item["question_id"]: item for item in results}
+                session_questions = Question.objects.filter(pk__in=run.question_ids, is_active=True).in_bulk()
+                full_results = []
+                for qid in run.question_ids:
+                    question = session_questions.get(qid)
+                    if question is None:
+                        continue
+                    item = answered_by_id.get(qid)
+                    if item is None:
+                        full_results.append({
+                            "question_id": qid, "attempt_id": None,
+                            "selected_answer": None, "correct_answer": question.correct_answer,
+                            "is_correct": False, "explanation": question.explanation,
+                            "next_review_at": None,
+                        })
+                    else:
+                        full_results.append(item)
+                results = full_results
             simple_answers = [{
                 "question_id": item["question_id"],
                 "selected_answer": item["selected_answer"],

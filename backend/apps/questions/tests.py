@@ -419,6 +419,42 @@ class SimulationSessionTests(TestCase):
         self.assertIsNotNone(run.duration_seconds)
         self.assertEqual(sum(a["is_correct"] for a in resp.data["results"]), run.score)
 
+    def test_submit_session_counts_unanswered_questions_as_incorrect(self):
+        start = self.start()
+        run = SimulationRun.objects.get(pk=start.data["simulation_id"])
+        answered_id = run.question_ids[0]
+        question = Question.objects.get(pk=answered_id)
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": run.id,
+            "answers": [
+                {"question_id": answered_id, "selected_answer": question.correct_answer},
+            ],
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(len(resp.data["results"]), run.question_count)
+        run.refresh_from_db()
+        self.assertEqual(run.status, SimulationRun.Status.FINISHED)
+        self.assertEqual(run.total, run.question_count)
+        self.assertEqual(run.score, 1)
+        self.assertEqual(len(run.answers), run.question_count)
+        blanks = [item for item in resp.data["results"] if item["selected_answer"] is None]
+        self.assertEqual(len(blanks), run.question_count - 1)
+        self.assertTrue(all(item["is_correct"] is False for item in blanks))
+        self.assertEqual(run.answers[1]["selected_answer"], None)
+
+    def test_submit_session_allows_empty_answers(self):
+        start = self.start()
+        run = SimulationRun.objects.get(pk=start.data["simulation_id"])
+        resp = self.client.post("/api/questions/submit-simulation/", {
+            "simulation_id": run.id, "answers": [],
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(len(resp.data["results"]), run.question_count)
+        run.refresh_from_db()
+        self.assertEqual(run.score, 0)
+        self.assertEqual(run.total, run.question_count)
+        self.assertTrue(all(item["is_correct"] is False for item in resp.data["results"]))
+
     def test_submit_session_rejects_questions_outside_session(self):
         outside = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,

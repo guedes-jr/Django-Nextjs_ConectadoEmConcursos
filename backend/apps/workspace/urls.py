@@ -14,5 +14,6 @@ urlpatterns = [
     path("workspace/people/", views.people),
     path("workspace/people/<str:username>/", views.people_detail),
     path("workspace/simulations/", views.simulations),
+    path("workspace/simulations/<int:item_id>/", views.simulation_detail),
     path("workspace/submissions/", views.submissions),
 ]

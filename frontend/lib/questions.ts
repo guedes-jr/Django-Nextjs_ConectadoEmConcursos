@@ -83,7 +83,15 @@ export async function answerQuestion(questionId: number, selectedAnswer: number)
   return response.data;
 }
 
-export type SimulationResult = AnswerResult & { question_id: number };
+export type SimulationResult = Omit<
+  AnswerResult,
+  "attempt_id" | "selected_answer" | "next_review_at"
+> & {
+  question_id: number;
+  attempt_id: number | null;
+  selected_answer: number | null;
+  next_review_at: string | null;
+};
 
 export async function submitSimulation(answers: { question_id: number; selected_answer: number }[]) {
   const response = await http.post<{ results: SimulationResult[] }>(

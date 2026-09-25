@@ -26,6 +26,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "corsheaders",
+    "channels",
+    "django_q",
     "dj_rest_auth",
     "dj_rest_auth.registration",
     "allauth",
@@ -42,6 +44,7 @@ INSTALLED_APPS = [
     "apps.billing",
     "apps.concursos",
     "apps.backoffice",
+    "apps.notifications",
 ]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -88,6 +91,28 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    },
+}
+
+Q_CLUSTER = {
+    "name": os.getenv("Q_NAME", "conectadoemconcursos"),
+    "workers": int(os.getenv("Q_WORKERS", "2")),
+    "recycle": 500,
+    "timeout": int(os.getenv("Q_TIMEOUT", "90")),
+    "retry": int(os.getenv("Q_RETRY", "1200")),
+    "compress": True,
+    "save_limit": 250,
+    "queue_limit": 500,
+    "cpu_affinity": 1,
+    "redis": {"host": os.getenv("Q_REDIS_HOST", "127.0.0.1"), "port": int(os.getenv("Q_REDIS_PORT", "6379")), "db": int(os.getenv("Q_REDIS_DB", "1"))},
+}
 
 DATABASES = {
     "default": {

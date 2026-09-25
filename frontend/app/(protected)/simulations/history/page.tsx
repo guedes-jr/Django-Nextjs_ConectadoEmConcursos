@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Clock, History, Loader2, Play, SearchX, Trophy } from "lucide-react";
+import { Clock, History, Loader2, Play, SearchX, Trash2, Trophy } from "lucide-react";
 
-import { listSimulations, SimulationRun } from "@/lib/simulations";
+import { deleteSimulation, listSimulations, SimulationRun } from "@/lib/simulations";
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("pt-BR", {
@@ -22,6 +22,7 @@ export default function SimulationsHistoryPage() {
   const [runs, setRuns] = useState<SimulationRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +40,20 @@ export default function SimulationsHistoryPage() {
       cancelled = true;
     };
   }, []);
+
+  async function removeRun(run: SimulationRun) {
+    if (!window.confirm("Excluir este simulado do histórico?")) return;
+    setDeletingId(run.id);
+    setError(null);
+    try {
+      await deleteSimulation(run.id);
+      setRuns((current) => current.filter((item) => item.id !== run.id));
+    } catch {
+      setError("Não foi possível excluir o simulado.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -148,15 +163,27 @@ export default function SimulationsHistoryPage() {
                       </span>
                     )}
                   </p>
+                  <div className="mt-4 flex items-center gap-2">
                   <Link
                     href={`/simulations/review?run=${run.id}`}
                     aria-disabled={!canReview}
-                    className={`mt-4 inline-flex w-full items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-blue-600 ring-1 ring-slate-200 transition hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:ring-slate-800 ${
+                    className={`inline-flex h-9 flex-1 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-blue-600 ring-1 ring-slate-200 transition hover:bg-blue-50 dark:bg-slate-900 dark:text-blue-400 dark:ring-slate-800 ${
                       canReview ? "hover:bg-blue-50 dark:hover:bg-slate-800" : "pointer-events-none opacity-60"
                     }`}
                   >
                     {canReview ? "Revisar questões" : "Sem correção"}
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => void removeRun(run)}
+                    disabled={deletingId === run.id}
+                    aria-label="Excluir simulado"
+                    title="Excluir simulado"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-red-500 ring-1 ring-slate-200 transition hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:bg-slate-900 dark:text-red-400 dark:ring-slate-800 dark:hover:bg-red-950 dark:hover:text-red-500"
+                  >
+                    {deletingId === run.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                  </button>
+                </div>
                 </article>
               );
             })}

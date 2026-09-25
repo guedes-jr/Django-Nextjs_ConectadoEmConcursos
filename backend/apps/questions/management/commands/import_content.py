@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.questions.models import Exam, Question
+from apps.questions.naming import normalize_discipline
 
 
 CURATED_XML_EXPLANATIONS = json.loads(
@@ -175,7 +176,7 @@ class Command(BaseCommand):
                 "statement": str(row["statement"]).strip(),
                 "banca": str(row["banca"]).strip(),
                 "year": int(row["year"]),
-                "discipline": str(row["discipline"]).strip(),
+                "discipline": normalize_discipline(str(row["discipline"]).strip()),
                 "options": options,
                 "correct_answer": correct,
                 "explanation": explanation,

@@ -3,7 +3,7 @@ import type { Question, SimulationResult } from "@/lib/questions";
 
 export type SimulationAnswer = {
   question_id: number;
-  selected_answer: number;
+  selected_answer: number | null;
   correct_answer: number;
   is_correct: boolean;
 };
@@ -76,6 +76,10 @@ export type SimulationTemplate = {
 export async function listSimulations() {
   const response = await http.get<SimulationRun[]>("/api/workspace/simulations/");
   return response.data;
+}
+
+export async function deleteSimulation(id: number) {
+  await http.delete(`/api/workspace/simulations/${id}/`);
 }
 
 export async function startSimulation(config: SimulationConfig) {

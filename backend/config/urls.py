@@ -42,6 +42,7 @@ urlpatterns = [
     path("api/", include("apps.chat.urls")),
     path("api/", include("apps.billing.urls")),
     path("api/", include("apps.concursos.urls")),
+    path("api/", include("apps.notifications.urls")),
     path("api/backoffice/", include("apps.backoffice.urls")),
 
     # Profile

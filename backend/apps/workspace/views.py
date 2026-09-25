@@ -230,6 +230,16 @@ def simulations(request):
     } for item in runs])
 
 
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def simulation_detail(request, item_id):
+    run = SimulationRun.objects.filter(user=request.user, id=item_id).first()
+    if not run:
+        return Response({"detail": "Simulado não encontrado."}, status=404)
+    run.delete()
+    return Response(status=204)
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
