@@ -19,6 +19,7 @@ BRANCH="main"
 
 DJANGO_SERVICE="conectado-concursos-django.service"
 NEXT_SERVICE="conectado-concursos-next.service"
+REDIS_SERVICE="redis-server.service"
 
 DOMAIN="https://conectadoemconcursos.com"
 
@@ -33,6 +34,7 @@ GIT="$(command -v git)"
 NPM="$(command -v npm)"
 CURL="$(command -v curl)"
 FLOCK="$(command -v flock)"
+APT_GET="$(command -v apt-get || true)"
 SYSTEMCTL="/usr/bin/systemctl"
 
 
@@ -79,6 +81,83 @@ django() {
         PATH="${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
         DJANGO_ENV="production" \
         "$PYTHON" manage.py "$@"
+}
+
+python_dependencies_installed() {
+
+    "$PYTHON" - <<'PY' >/dev/null 2>&1
+from importlib.metadata import version
+
+for package in (
+    "channels",
+    "channels-redis",
+    "cryptography",
+    "daphne",
+    "django-picklefield",
+    "django-q2",
+    "redis",
+):
+    version(package)
+PY
+}
+
+ensure_redis() {
+
+    if command -v redis-server >/dev/null 2>&1 \
+        && command -v redis-cli >/dev/null 2>&1; then
+
+        echo "Redis Server: já instalado."
+
+    else
+
+        [[ -n "$APT_GET" ]] || \
+            erro "Redis Server ausente e apt-get não encontrado."
+
+        echo "Redis Server ausente. Instalando redis-server e redis-tools..."
+
+        if ! sudo -n "$APT_GET" update; then
+            erro "Não foi possível atualizar os pacotes para instalar o Redis Server."
+        fi
+
+        if ! sudo -n "$APT_GET" install -y redis-server redis-tools; then
+            erro "Não foi possível instalar o Redis Server."
+        fi
+
+        command -v redis-server >/dev/null 2>&1 || \
+            erro "redis-server não foi instalado corretamente."
+
+        command -v redis-cli >/dev/null 2>&1 || \
+            erro "redis-cli não foi instalado corretamente."
+
+    fi
+
+    "$SYSTEMCTL" cat "$REDIS_SERVICE" >/dev/null 2>&1 || \
+        erro "Serviço $REDIS_SERVICE não encontrado."
+
+    if ! "$SYSTEMCTL" is-enabled --quiet "$REDIS_SERVICE" >/dev/null 2>&1 \
+        || ! "$SYSTEMCTL" is-active --quiet "$REDIS_SERVICE" >/dev/null 2>&1; then
+
+        sudo -n "$SYSTEMCTL" enable --now "$REDIS_SERVICE" || \
+            erro "Não foi possível habilitar e iniciar $REDIS_SERVICE."
+
+    fi
+
+    for attempt in {1..5}; do
+
+        REDIS_PING="$(redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null || true)"
+
+        if [[ "$REDIS_PING" == "PONG" ]]; then
+            break
+        fi
+
+        sleep 1
+
+    done
+
+    [[ "$REDIS_PING" == "PONG" ]] || \
+        erro "Redis Server não respondeu PONG em 127.0.0.1:6379."
+
+    echo "Redis Server: OK"
 }
 
 
@@ -271,15 +350,33 @@ echo "Commit atual...: $NEW_COMMIT"
 # 5. Backend - dependências
 # ============================================================
 
-log "5/12 - Atualizando dependências Python"
+log "5/12 - Verificando e instalando dependências"
+
+if python_dependencies_installed; then
+
+    echo "Dependências Python de notificações encontradas. Sincronizando com requirements.txt..."
+
+else
+
+    echo "Dependências Python de notificações ausentes. Instalando requirements.txt..."
+
+fi
 
 "$PYTHON" -m pip install \
     --disable-pip-version-check \
     -r "$BACKEND_DIR/requirements.txt"
 
+if ! python_dependencies_installed; then
+    erro "Dependências Python de notificações não foram instaladas corretamente."
+fi
+
+"$PYTHON" -m pip check
+
 if ! "$PYTHON" -c "import gunicorn" >/dev/null 2>&1; then
     erro "Gunicorn não está instalado no virtualenv."
 fi
+
+ensure_redis
 
 
 # ============================================================
@@ -492,6 +589,7 @@ echo "Commit atual...: $NEW_COMMIT"
 echo
 echo "Django.........: OK"
 echo "Next.js........: OK"
+echo "Redis..........: OK"
 echo "HTTPS..........: OK"
 echo
 echo "Log:"
