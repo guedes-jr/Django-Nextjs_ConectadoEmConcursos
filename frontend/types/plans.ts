@@ -1,6 +1,6 @@
 export type BillingCycle = "mensal" | "semestral" | "anual";
 
-export type PlanKey = "gratis" | "padrao" | "avancado";
+export type PlanKey = string;
 
 export type Accent = "slate" | "teal" | "blue";
 

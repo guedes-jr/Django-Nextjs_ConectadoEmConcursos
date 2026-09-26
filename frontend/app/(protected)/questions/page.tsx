@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, CircleHelp, ClipboardCheck, Filter, List, MessageSquare, RotateCcw, Search, StickyNote, X } from "lucide-react";
 import { QuestionContent } from "@/components/QuestionContent";
@@ -285,6 +286,12 @@ export default function QuestionsPage() {
     setSimulationFinished(false);
   }
 
+  function openExamQuestions(value: number) {
+    setExamId(value);
+    setBanca("");
+    resetToFirstPage();
+  }
+
   function switchMode(nextMode: StudyMode) {
     if (nextMode === mode) return;
     setMode(nextMode);
@@ -494,6 +501,12 @@ export default function QuestionsPage() {
             const result = mode === "practice" ? results[question.id] : simulationFinished ? simulationResults[question.id] : undefined;
             const currentSelection = mode === "practice" ? selected[question.id] : simulationSelected[question.id];
             const panel = openPanels[question.id];
+            const examId = question.exam_id;
+            const examDescription = [
+              question.exam_role ? `Cargo: ${question.exam_role}` : "",
+              question.exam_title ? `Prova: ${question.exam_title}` : "",
+              question.exam_institution ? `Órgão: ${question.exam_institution}` : "",
+            ].filter(Boolean).join(" · ");
             return (
               <article key={question.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_14px_40px_rgba(19,43,87,0.055)] dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-4 dark:border-slate-800 dark:bg-slate-900 sm:px-7">
@@ -505,14 +518,18 @@ export default function QuestionsPage() {
                       <span className="rounded-lg border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">Ano {question.year}</span>
                       <span className="rounded-lg border border-slate-200 px-2.5 py-1.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">{question.banca}</span>
                     </div>
-                    {(question.exam_role || question.exam_title || question.exam_institution) && (
-                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                        {[
-                          question.exam_role ? `Cargo: ${question.exam_role}` : "",
-                          question.exam_title ? `Prova: ${question.exam_title}` : "",
-                          question.exam_institution ? `Órgão: ${question.exam_institution}` : "",
-                        ].filter(Boolean).join(" · ")}
-                      </p>
+                    {examDescription && (
+                      examId !== null ? (
+                        <Link
+                          href={`/questions?exam=${examId}`}
+                          onClick={() => openExamQuestions(examId)}
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500 hover:underline dark:text-slate-400"
+                        >
+                          {examDescription} <ArrowRight size={13} />
+                        </Link>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{examDescription}</p>
+                      )
                     )}
                   </div>
                   <div className="flex items-center gap-2">

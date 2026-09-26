@@ -1066,3 +1066,22 @@ html:not(.dark) .landing-page .cta-premium-section {
 .app-switch[data-state="checked"] .app-switch-thumb {
   translate: 1rem 0;
 }
+
+/* ─── PWA / mobile ───────────────────────────────────────────────────────── */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    overscroll-behavior-y: none;
+  }
+}

@@ -2,13 +2,34 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { http } from "@/lib/http";
 import AvatarInput from "@/components/auth/AvatarInput";
 import { PasswordChecklist } from "@/components/auth/PasswordChecklist";
 
 type Mode = "login" | "register" | "forgot";
 const MODE_INDEX: Record<Mode, number> = { login: 0, register: 1, forgot: 2 };
+const backendUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
+
+function safeNextPath(value: string | null) {
+  const fallback = "/dashboard";
+
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return fallback;
+  }
+
+  try {
+    const url = new URL(value, "https://conectado.local");
+
+    if (url.origin !== "https://conectado.local") {
+      return fallback;
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallback;
+  }
+}
 
 function MailIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -112,6 +133,12 @@ function suggestUsernameFromEmail(currentEmail: string) {
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
+  const [nextPath, setNextPath] = useState("/dashboard");
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next");
+    setNextPath(safeNextPath(next));
+  }, []);
 
   const panelRefs = useRef<(HTMLElement | null)[]>([]);
   const [containerHeight, setContainerHeight] = useState<number | "auto">("auto");
@@ -148,7 +175,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await http.post("/api/auth/login/", { email, password });
-      router.push("/dashboard");
+      router.replace(nextPath);
     } catch {
       setError("E-mail ou senha inválidos.");
     } finally {
@@ -157,7 +184,8 @@ export default function LoginPage() {
   };
 
   const loginGoogle = () => {
-    window.location.href = "http://localhost:8000/accounts/google/login/";
+    const next = encodeURIComponent(nextPath);
+    window.location.href = `${backendUrl}/accounts/google/login/?next=${next}`;
   };
 
   const canSubmit = useMemo(() => {
@@ -197,7 +225,7 @@ export default function LoginPage() {
         });
       }
 
-      router.push("/dashboard");
+      router.replace(nextPath);
     } catch (e: any) {
       const { global, fields } = normalizeErrors(e?.response?.data);
       setGlobalErrors(global);
@@ -261,6 +289,7 @@ export default function LoginPage() {
                   width={80}
                   height={80}
                   className="object-cover"
+                  unoptimized
                 />
               </div>
               <h1 className="w-full text-2xl font-bold text-slate-900 dark:text-slate-100">

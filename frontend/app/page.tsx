@@ -2,13 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   ArrowUp,
   BarChart3,
+  BookOpen,
   CalendarDays,
   Check,
   ChevronDown,
+  ClipboardCheck,
   FileQuestion,
   Headphones,
   Mail,
@@ -18,9 +21,10 @@ import {
   Sparkles,
   Trophy,
   Users,
-  Video,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { listPlans, type ApiPlan } from "@/lib/plans";
+import { formatBRL } from "@/utils/format";
 
 const resources = [
   [
@@ -39,9 +43,14 @@ const resources = [
     "Acompanhe seu progresso, identifique áreas de melhoria e compare seu desempenho.",
   ],
   [
-    Video,
-    "Videoaulas, PDFs e simulados",
-    "Área de estudos completa com materiais organizados por disciplina.",
+    BookOpen,
+    "Resumos e artigos",
+    "Acesse conteúdos objetivos para revisar os principais tópicos de cada disciplina.",
+  ],
+  [
+    ClipboardCheck,
+    "Simulados",
+    "Monte simulados com questões de provas anteriores e receba a correção na hora.",
   ],
   [
     NotebookTabs,
@@ -53,94 +62,6 @@ const resources = [
     "Calendário de provas",
     "Gerencie concursos, datas de inscrição e provas em um só calendário.",
   ],
-] as const;
-
-const plans = [
-  {
-    name: "Gratuito",
-    price: "R$0,00",
-    suffix: "/mês",
-    description: "Para conhecer a plataforma",
-    featured: false,
-    badge: "",
-    features: [
-      "20 questões por dia",
-      "Estatísticas básicas",
-      "Acesso ao Meu Painel",
-    ],
-    action: "Criar conta",
-  },
-  {
-    name: "Padrão",
-    price: "R$59,90",
-    suffix: "/mês",
-    description: "Ideal para quem está começando",
-    featured: false,
-    badge: "",
-    features: [
-      "Questões ilimitadas",
-      "Provas anteriores",
-      "Comentários da comunidade",
-    ],
-    action: "Ver plano",
-  },
-  {
-    name: "Premium Anual",
-    price: "12x R$139,90",
-    suffix: "ou R$1.397,00 à vista",
-    description: "Foco total na aprovação",
-    featured: true,
-    badge: "Melhor custo-benefício",
-    features: [
-      "Tudo ilimitado",
-      "IA integrada",
-      "Resumos completos",
-      "Área de estudos exclusiva",
-      "Estatísticas avançadas",
-      "Simulado por edital",
-      "Cronograma estratégico",
-      "Fórum da comunidade",
-    ],
-    action: "Escolher Premium",
-  },
-  {
-    name: "Avançado",
-    price: "R$119,90",
-    suffix: "/mês",
-    description: "Para quem leva a preparação a sério",
-    featured: false,
-    badge: "Mais escolhido",
-    features: [
-      "Tudo do Padrão",
-      "Estatísticas detalhadas",
-      "Simulados personalizados",
-      "Flashcards ilimitados",
-      "Revisões espaçadas",
-      "IA avançada",
-    ],
-    action: "Ver plano",
-  },
-  {
-    name: "Avançado",
-    price: "R$329,90",
-    suffix: "/trimestre",
-    description: "Para quem leva a preparação a sério",
-    featured: false,
-    badge: "🔥 Economize R$29,80",
-    features: [
-      "Tudo do Padrão",
-      "Estatísticas detalhadas",
-      "Questões em PDF",
-      "Simulados personalizados",
-      "Flashcards ilimitados",
-      "Revisões espaçadas",
-      "Resumos e PDFs",
-      "Área de estudos personalizada",
-      "IA avançada",
-      "Edital verticalizado com IA",
-    ],
-    action: "Ver plano",
-  },
 ] as const;
 
 const community = [
@@ -218,10 +139,37 @@ const testimonials = [
 ] as const;
 
 export default function LandingPage() {
+  const [plans, setPlans] = useState<ApiPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState(false);
+  const [plansRequest, setPlansRequest] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+
+    setPlansLoading(true);
+    setPlansError(false);
+
+    void listPlans()
+      .then((data) => {
+        if (active) setPlans(data);
+      })
+      .catch(() => {
+        if (active) setPlansError(true);
+      })
+      .finally(() => {
+        if (active) setPlansLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [plansRequest]);
+
   return (
     <main className="landing-page min-h-screen overflow-hidden bg-slate-50 text-slate-900">
       <a
-        href="https://wa.me/5579996327084"
+        href="https://wa.me/557999546197"
         target="_blank"
         rel="noreferrer"
         className="fixed bottom-5 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition hover:bg-green-600"
@@ -290,8 +238,8 @@ export default function LandingPage() {
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-blue-100">
               A plataforma mais completa e fácil de usar para quem estuda para
-              concursos públicos em Sergipe. Questões, provas, resumos, PDFs,
-              videoaulas, comunidade e IA em um só lugar.
+              concursos públicos em Sergipe. Questões, provas, resumos, artigos,
+              simulados, comunidade e IA em um só lugar.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a
@@ -447,64 +395,112 @@ export default function LandingPage() {
               Escolha o plano ideal para o seu momento de preparação.
             </p>
           </div>
-          <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
-            {plans.map((plan) => (
-              <article
-                key={`${plan.name}-${plan.price}`}
-                className={`relative flex flex-col rounded-2xl border p-6 ${plan.featured ? "border-blue-600 bg-white text-slate-900 shadow-xl lg:-translate-y-3" : "border-slate-200 bg-white text-slate-900 shadow-sm"}`}
-              >
-                {plan.featured && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-400 px-3 py-1 text-xs font-bold text-slate-900">
-                    {plan.badge || "Mais escolhido"}
-                  </span>
-                )}
-                {plan.badge && !plan.featured && (
-                  <span className="mb-4 inline-flex w-fit rounded-full bg-amber-400/20 px-3 py-1 text-xs font-bold text-amber-300">
-                    {plan.badge}
-                  </span>
-                )}
-                <div className="flex items-center gap-2">
-                  <div
-                    className="rounded-lg bg-blue-50 p-2 text-blue-600"
-                  >
-                    <Trophy size={18} />
+          <div
+            className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3"
+            aria-live="polite"
+          >
+            {plansLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`plan-skeleton-${index}`}
+                  className="animate-pulse rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                >
+                  <div className="h-6 w-32 rounded bg-slate-200" />
+                  <div className="mt-6 h-10 w-40 rounded bg-slate-200" />
+                  <div className="mt-6 space-y-3">
+                    <div className="h-4 w-full rounded bg-slate-100" />
+                    <div className="h-4 w-5/6 rounded bg-slate-100" />
+                    <div className="h-4 w-2/3 rounded bg-slate-100" />
                   </div>
-                  <h3 className="text-lg font-bold">{plan.name}</h3>
                 </div>
-                <p
-                  className="mt-6 text-3xl font-extrabold text-slate-900"
-                >
-                  {plan.price}
+              ))
+            ) : plansError ? (
+              <div className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm md:col-span-2 xl:col-span-3">
+                <p className="font-semibold text-slate-900">
+                  Não foi possível carregar os planos.
                 </p>
-                <p
-                  className="mt-1 text-xs text-slate-500"
-                >
-                  {plan.suffix}
+                <p className="mt-2 text-sm text-slate-600">
+                  Tente novamente em alguns instantes.
                 </p>
-                <p
-                  className="mt-4 min-h-10 text-sm text-slate-600"
+                <button
+                  type="button"
+                  onClick={() => setPlansRequest((value) => value + 1)}
+                  className="mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700"
                 >
-                  {plan.description}
+                  Tentar novamente
+                </button>
+              </div>
+            ) : plans.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm md:col-span-2 xl:col-span-3">
+                <p className="font-semibold text-slate-900">
+                  Nenhum plano disponível no momento.
                 </p>
-                <ul className="mt-6 flex-1 space-y-3 text-sm">
-                  {plan.features.map((feature) => (
-                    <li key={feature} className="flex gap-2">
-                      <Check
-                        size={16}
-                        className="mt-0.5 shrink-0 text-blue-600"
-                      />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href="/register"
-                  className={`mt-7 inline-flex items-center justify-center rounded-lg px-4 py-3 text-sm font-bold ${plan.featured ? "bg-amber-400 text-slate-900 hover:bg-amber-300" : "bg-blue-600 text-white hover:bg-blue-700"}`}
-                >
-                  {plan.action} <ArrowRight size={15} className="ml-2" />
-                </Link>
-              </article>
-            ))}
+              </div>
+            ) : (
+              plans.map((plan) => {
+                const monthlyPrice = Number(plan.prices.mensal);
+                const isFree = monthlyPrice === 0;
+
+                return (
+                  <article
+                    key={plan.id}
+                    className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
+                        <Trophy size={18} />
+                      </div>
+                      <h3 className="text-lg font-bold">{plan.name}</h3>
+                    </div>
+                    <p className="mt-6 text-3xl font-extrabold text-slate-900">
+                      {isFree ? "Grátis" : formatBRL(monthlyPrice)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">por mês</p>
+                    <dl className="mt-5 space-y-2 rounded-xl bg-slate-50 p-4 text-sm">
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-slate-500">Semestral</dt>
+                        <dd className="font-semibold text-slate-900">
+                          {formatBRL(Number(plan.prices.semestral))}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-slate-500">Anual</dt>
+                        <dd className="font-semibold text-slate-900">
+                          {formatBRL(Number(plan.prices.anual))}
+                        </dd>
+                      </div>
+                    </dl>
+                    {plan.features.length > 0 ? (
+                      <ul className="mt-6 flex-1 space-y-3 text-sm">
+                        {plan.features.map((feature, index) => (
+                          <li
+                            key={`${feature}-${index}`}
+                            className="flex gap-2"
+                          >
+                            <Check
+                              size={16}
+                              className="mt-0.5 shrink-0 text-blue-600"
+                            />
+                            {feature}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-6 flex-1 text-sm text-slate-500">
+                        Nenhum benefício cadastrado.
+                      </p>
+                    )}
+                    <Link
+                      href="/register"
+                      className="mt-7 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700"
+                    >
+                      {isFree ? "Criar conta" : "Escolher plano"}{" "}
+                      <ArrowRight size={15} className="ml-2" />
+                    </Link>
+                  </article>
+                );
+              })
+            )}
           </div>
         </div>
       </section>
@@ -546,7 +542,7 @@ export default function LandingPage() {
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-lg">
             <Image
-              src="/landing/simulado-edital.png"
+              src="/landing/landingPage-system.png"
               alt="Simulado baseado no edital com análise automática por IA"
               width={1901}
               height={944}
@@ -787,8 +783,8 @@ export default function LandingPage() {
           <div>
             <h3 className="font-bold text-slate-900">Contato</h3>
             <div className="mt-4 grid gap-3 text-sm text-slate-600">
-              <a href="tel:+5579996327084" className="hover:text-blue-600">
-                (79) 9 9632-7084
+              <a href="tel:+557999546197" className="hover:text-blue-600">
+                (79) 9954-6197
               </a>
               <a
                 href="mailto:conectadoemconcursos@gmail.com"

@@ -13,10 +13,10 @@ class BillingAPITests(TestCase):
         self.free = Plan.objects.get(slug="gratis")
         self.paid = Plan.objects.get(slug="padrao")
 
-    def test_lists_active_plans_only(self):
+    def test_lists_active_plans_for_anonymous_users(self):
         Plan.objects.create(slug="retired", name="Antigo", is_active=False)
 
-        response = self.client.get("/api/plans/")
+        response = APIClient().get("/api/plans/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual({item["slug"] for item in response.data}, {"gratis", "padrao", "avancado"})

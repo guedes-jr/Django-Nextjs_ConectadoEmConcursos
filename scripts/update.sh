@@ -22,6 +22,10 @@ NEXT_SERVICE="conectado-concursos-next.service"
 REDIS_SERVICE="redis-server.service"
 
 DOMAIN="https://conectadoemconcursos.com"
+NEXT_PORT="${NEXT_PORT:-3001}"
+DJANGO_PORT="${DJANGO_PORT:-8001}"
+NEXT_LOCAL_URL="http://127.0.0.1:${NEXT_PORT}"
+DJANGO_LOCAL_URL="http://127.0.0.1:${DJANGO_PORT}"
 
 LOCK_FILE="/tmp/conectado-concursos-update.lock"
 
@@ -160,6 +164,95 @@ ensure_redis() {
     echo "Redis Server: OK"
 }
 
+frontend_backend_configured() {
+
+    local variable
+    local env_file
+    local configured
+
+    for variable in NEXT_PUBLIC_API_BASE_URL NEXT_PUBLIC_BACKEND_URL; do
+
+        if [[ -n "${!variable:-}" ]]; then
+            continue
+        fi
+
+        configured=0
+
+        for env_file in \
+            "$FRONTEND_DIR/.env.production.local" \
+            "$FRONTEND_DIR/.env.local" \
+            "$FRONTEND_DIR/.env.production"; do
+
+            if [[ -f "$env_file" ]] \
+                && grep -q "^${variable}=." "$env_file"; then
+
+                configured=1
+                break
+
+            fi
+
+        done
+
+        [[ "$configured" == "1" ]] || return 1
+
+    done
+
+    return 0
+}
+
+check_next_admin_route() {
+
+    local label="$1"
+    local url="$2"
+    local headers=""
+    local status=""
+    local location=""
+    local line
+
+    if ! headers="$(
+        "$CURL" \
+            --silent \
+            --show-error \
+            --dump-header - \
+            --output /dev/null \
+            --max-time 15 \
+            "$url"
+    )"; then
+
+        echo "$label: sem resposta"
+        return 1
+
+    fi
+
+    while IFS= read -r line; do
+
+        line="${line%$'\r'}"
+
+        if [[ "$line" =~ ^HTTP/[0-9.]+[[:space:]]+([0-9]{3}) ]]; then
+            status="${BASH_REMATCH[1]}"
+
+        elif [[ "$line" =~ ^[[:space:]]*[Ll]ocation:[[:space:]]*(.*)$ ]]; then
+            location="${BASH_REMATCH[1]}"
+
+        fi
+
+    done <<< "$headers"
+
+    echo "$label: HTTP ${status:-000}${location:+ -> $location}"
+
+    case "$status" in
+
+        301|302|303|307|308)
+            if [[ "$location" == *"/?next="* || "$location" == "?next="* ]]; then
+                return 0
+            fi
+            ;;
+
+    esac
+
+    return 1
+}
+
 
 # ============================================================
 # Log
@@ -239,12 +332,16 @@ fi
 [[ -n "$CURL" ]] || erro "curl não encontrado."
 [[ -n "$FLOCK" ]] || erro "flock não encontrado."
 
+frontend_backend_configured || \
+    erro "NEXT_PUBLIC_API_BASE_URL e NEXT_PUBLIC_BACKEND_URL precisam estar configurados para o build do frontend."
+
 echo "Projeto.....: $PROJECT_DIR"
 echo "Backend.....: $BACKEND_DIR"
 echo "Frontend....: $FRONTEND_DIR"
 echo "Branch......: $BRANCH"
 echo "Django......: $DJANGO_SERVICE"
 echo "Next.js.....: $NEXT_SERVICE"
+echo "Portas......: Next $NEXT_PORT / Django $DJANGO_PORT"
 echo "Domínio.....: $DOMAIN"
 
 
@@ -287,7 +384,11 @@ fi
 # Não sobrescrever alterações locais em arquivos versionados.
 #
 # Arquivos não versionados são ignorados propositalmente.
-if [[ -n "$("$GIT" status --porcelain --untracked-files=no)" ]]; then
+if ! TRACKED_STATUS="$("$GIT" status --porcelain --untracked-files=no)"; then
+    erro "Não foi possível verificar alterações locais no Git."
+fi
+
+if [[ -n "$TRACKED_STATUS" ]]; then
 
     echo
     "$GIT" status --short
@@ -340,6 +441,9 @@ else
 fi
 
 NEW_COMMIT="$("$GIT" rev-parse HEAD)"
+
+[[ "$NEW_COMMIT" == "$REMOTE_COMMIT" ]] || \
+    erro "O commit implantado ($NEW_COMMIT) não corresponde ao remoto ($REMOTE_COMMIT)."
 
 echo
 echo "Commit anterior: $OLD_COMMIT"
@@ -404,6 +508,7 @@ log "7/12 - Instalando dependências do frontend"
 cd "$FRONTEND_DIR"
 
 "$NPM" ci \
+    --include=dev \
     --no-audit \
     --no-fund
 
@@ -417,6 +522,18 @@ log "8/12 - Gerando build do Next.js"
 cd "$FRONTEND_DIR"
 
 "$NPM" run build
+
+[[ -f "$FRONTEND_DIR/.next/BUILD_ID" ]] || \
+    erro "Build do Next.js não gerou .next/BUILD_ID."
+
+if grep -R -qE 'https?://(localhost|127\.0\.0\.1):8000' \
+    "$FRONTEND_DIR/.next/static" 2>/dev/null; then
+
+    erro "O build do frontend contém NEXT_PUBLIC_API_BASE_URL apontando para localhost. Configure a URL pública da API."
+
+fi
+
+echo "Build ID.....: $(<"$FRONTEND_DIR/.next/BUILD_ID")"
 
 
 # ============================================================
@@ -495,7 +612,7 @@ NEXT_CODE="$(
         --output /dev/null \
         --write-out '%{http_code}' \
         --max-time 10 \
-        http://127.0.0.1:3001/ \
+        "$NEXT_LOCAL_URL/" \
         || true
 )"
 
@@ -504,6 +621,14 @@ if [[ "$NEXT_CODE" != "200" ]]; then
 fi
 
 echo "Next.js local: HTTP $NEXT_CODE"
+
+if ! check_next_admin_route "Next.js local /admin" "$NEXT_LOCAL_URL/admin"; then
+    erro "A rota local /admin não está sendo servida pelo Next.js."
+fi
+
+if ! check_next_admin_route "Next.js local /admin/usuarios" "$NEXT_LOCAL_URL/admin/usuarios"; then
+    erro "A rota local /admin/usuarios não está sendo servida pelo Next.js."
+fi
 
 
 # ------------------------------------------------------------
@@ -518,13 +643,13 @@ DJANGO_CODE="$(
         --max-time 10 \
         -H "Host: conectadoemconcursos.com" \
         -H "X-Forwarded-Proto: https" \
-        http://127.0.0.1:8001/admin/ \
+        "$DJANGO_LOCAL_URL/api/health/" \
         || true
 )"
 
 case "$DJANGO_CODE" in
 
-    200|301|302)
+    200)
         echo "Django local: HTTP $DJANGO_CODE"
         ;;
 
@@ -573,6 +698,16 @@ fi
 
 echo "HTTPS público: HTTP $PUBLIC_CODE"
 
+if ! check_next_admin_route "Admin público /admin" "$DOMAIN/admin"; then
+    erro "A rota pública /admin não está sendo encaminhada ao Next.js. Revise o proxy de produção."
+fi
+
+if ! check_next_admin_route "Admin público /admin/usuarios" "$DOMAIN/admin/usuarios"; then
+    erro "A rota pública /admin/usuarios não está sendo encaminhada ao Next.js. Revise o proxy de produção."
+fi
+
+echo "Admin custom: OK"
+
 
 # ============================================================
 # Final
@@ -590,6 +725,7 @@ echo
 echo "Django.........: OK"
 echo "Next.js........: OK"
 echo "Redis..........: OK"
+echo "Admin custom...: OK"
 echo "HTTPS..........: OK"
 echo
 echo "Log:"

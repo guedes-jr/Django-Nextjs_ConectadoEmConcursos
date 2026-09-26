@@ -17,7 +17,9 @@ export default function WhoWeAre() {
           <span className="text-lg">▶</span>
         </a>
         <a
-          href="#"
+          href="https://wa.me/557999546197"
+          target="_blank"
+          rel="noreferrer"
           className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 dark:bg-slate-900 dark:ring-slate-800"
           aria-label="WhatsApp"
         >

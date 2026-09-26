@@ -8,8 +8,12 @@ export function proxy(request: NextRequest) {
 
   if (!hasAuthenticationCookie) {
     const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.searchParams.set("next", request.nextUrl.pathname);
+    url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set(
+      "next",
+      `${request.nextUrl.pathname}${request.nextUrl.search}`,
+    );
     return NextResponse.redirect(url);
   }
 

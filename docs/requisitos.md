@@ -24,6 +24,15 @@
 - [x] Ferramenta avançada de contexto de provas/questões restrita ao plano Avançado
 - [ ] Simulados completos com IA e biblioteca de materiais (expansões futuras)
 
+### PWA (ver `docs/plano-pwa.md`)
+- [x] Manifesto, ícones (any/maskable) e metadados de instalação (`viewport`, `appleWebApp`)
+- [x] Service worker com precache, cache de assets, página offline e atualização de versão
+- [x] Prompt de instalação (Chromium/Edge/Android/desktop) e instruções manuais no iOS
+- [x] Safe-area e ajustes de UX mobile
+- [x] Headers de cache do service worker e do manifesto
+- [ ] Regras de cache do `/sw.js` no nginx do servidor de produção
+- [ ] Validação em devices reais (iOS Safari e Android Chrome)
+
 ### Produção
 - [ ] Provedor SMTP/API transacional
 - [ ] PostgreSQL, armazenamento de mídia e backups
