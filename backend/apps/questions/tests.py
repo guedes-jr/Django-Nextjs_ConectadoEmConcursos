@@ -22,7 +22,6 @@ class QuestionAPITests(TestCase):
             correct_answer=1,
             explanation="A alternativa B é a correta.",
             status=Question.Status.APPROVED,
-            is_active=True,
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
@@ -36,7 +35,7 @@ class QuestionAPITests(TestCase):
         Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         response = self.client.get("/api/questions/?discipline=Português")
         self.assertEqual(response.status_code, 200)
@@ -46,7 +45,7 @@ class QuestionAPITests(TestCase):
         Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         response = self.client.get("/api/questions/facets/")
         self.assertEqual(response.status_code, 200)
@@ -59,7 +58,7 @@ class QuestionAPITests(TestCase):
             Question(
                 discipline="Português", banca="CEBRASPE", year=2025,
                 statement=f"Questão extra {index}", options=["A", "B"], correct_answer=0,
-                status=Question.Status.APPROVED, is_active=True,
+                status=Question.Status.APPROVED,
             ) for index in range(12)
         ])
         first = self.client.get("/api/questions/?discipline=Português&page=1")
@@ -86,7 +85,7 @@ class QuestionAPITests(TestCase):
         other = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         self.client.post(f"/api/questions/{self.question.id}/answer/", {"selected_answer": 0}, format="json")
         self.assertEqual(self.client.get("/api/questions/?progress=incorrect").data["count"], 1)
@@ -112,7 +111,7 @@ class QuestionAPITests(TestCase):
         other = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         url = "/api/questions/submit-simulation/"
         invalid = self.client.post(url, {"answers": [
@@ -139,7 +138,7 @@ class QuestionAPITests(TestCase):
         other = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         response = self.client.post("/api/questions/submit-simulation/", {"answers": [
             {"question_id": self.question.id, "selected_answer": 1},
@@ -204,7 +203,7 @@ class QuestionAPITests(TestCase):
         question = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Outra questão", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         url = f"/api/questions/{question.id}/request-explanation/"
         self.assertEqual(self.client.post(url).status_code, 201)
@@ -232,7 +231,6 @@ class ExamAPITests(TestCase):
             options=["A", "B"],
             correct_answer=0,
             status=Question.Status.APPROVED,
-            is_active=True,
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
@@ -252,7 +250,7 @@ class ExamAPITests(TestCase):
         Question.objects.create(
             discipline="Matemática", banca="Outra", year=2024,
             statement="Questão sem prova", options=["A", "B"], correct_answer=1,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         response = self.client.get(f"/api/exams/{self.exam.id}/questions/")
         self.assertEqual(response.status_code, 200)
@@ -266,12 +264,12 @@ class StatisticsAPITests(TestCase):
         self.portuguese = Question.objects.create(
             discipline="Português", banca="FGV", year=2025,
             statement="Português", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         self.math = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2025,
             statement="Matemática", options=["A", "B"], correct_answer=1,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
@@ -325,7 +323,7 @@ class SimulationSessionTests(TestCase):
             Question.objects.create(
                 discipline="Português", banca="CEBRASPE", year=2025, exam=self.exam,
                 statement=f"Questão {i}", options=["A", "B"], correct_answer=0,
-                status=Question.Status.APPROVED, is_active=True,
+                status=Question.Status.APPROVED,
             )
             for i in range(5)
         ]
@@ -474,7 +472,7 @@ class SimulationSessionTests(TestCase):
         outside = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Fora do simulado", options=["A", "B"], correct_answer=0,
-            status=Question.Status.APPROVED, is_active=True,
+            status=Question.Status.APPROVED,
         )
         start = self.start()
         run = SimulationRun.objects.get(pk=start.data["simulation_id"])

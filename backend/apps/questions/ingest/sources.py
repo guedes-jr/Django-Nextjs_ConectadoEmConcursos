@@ -139,6 +139,10 @@ class OpenDatasetAdapter(BaseAdapter):
         if not raw:
             raise AdapterNotConfigured("Configure `path` da fonte em QUESTIONS_SOURCES.")
         path = Path(raw)
+        if not path.is_absolute():
+            # Caminho relativo ao `BASE_DIR` (backend/): o mesmo `QUESTIONS_SOURCES`
+            # funciona em qualquer máquina, sem depender de onde o comando rodou.
+            path = Path(settings.BASE_DIR) / path
         if not path.is_file():
             raise AdapterNotConfigured(f"Dataset não encontrado: {raw}")
         return path

@@ -5,9 +5,11 @@ from pathlib import Path
 from django.core.management import call_command
 from django.test import TestCase
 
+from apps.questions.ingest.parsers import parse_content, parse_csv_text, parse_json_text, parse_xml_text
 from apps.questions.models import Exam, Question
 from apps.questions.management.commands.import_content import CURATED_XML_EXPLANATIONS
 from apps.questions.naming import normalize_discipline
+from apps.questions.visibility import visible
 
 
 class NormalizeDisciplineTests(TestCase):
@@ -66,7 +68,7 @@ class ImportContentTests(TestCase):
         # Toda questão importada nasce PENDING e fora do ar.
         q = Question.objects.get()
         self.assertEqual(q.status, Question.Status.PENDING)
-        self.assertFalse(q.is_active)
+        self.assertFalse(visible().filter(pk=q.pk).exists())
 
     def test_dry_run_validates_without_saving(self):
         payload = [
@@ -111,7 +113,7 @@ class ImportContentTests(TestCase):
         self.assertEqual(question.options, ["Não", "Sim"])
         # Questões importadas via XML também nascem PENDING e fora do ar.
         self.assertEqual(question.status, Question.Status.PENDING)
-        self.assertFalse(question.is_active)
+        self.assertFalse(visible().filter(pk=question.pk).exists())
         other = Question.objects.get(external_id="source-2")
         self.assertEqual(other.statement, "Outro texto\n\nAssinale a correta.")
         self.assertEqual(other.correct_answer, 0)
@@ -136,4 +138,56 @@ class ImportContentTests(TestCase):
         self.assertEqual(
             Question.objects.get(external_id=source_id).explanation,
             "Comentário revisado na administração.",
+        )
+
+
+class ParseContentTests(TestCase):
+    """O formulário de conversão de prova entrega texto, não caminho de arquivo."""
+
+    JSON = '{"questions": [{"statement": "Enunciado", "options": ["a", "b"], "correct_answer": 0, "banca": "CEBRASPE", "year": 2024, "discipline": "Direito"}]}'
+    XML = """<questions><question id="x1"><statement>Enunciado</statement>
+        <options><option letter="A">a</option><option letter="B">b</option></options>
+        <correct_answer>A</correct_answer><institution>CEBRASPE</institution><year>2024</year>
+        <subject>direito</subject></question></questions>"""
+    # Em CSV a coluna `options` é JSON, como no `parse_csv` de sempre.
+    CSV = (
+        "statement,options,correct_answer,banca,year,discipline\n"
+        'Enunciado,"[""a"", ""b""]",0,CEBRASPE,2024,Direito\n'
+    )
+
+    def test_format_is_sniffed_from_the_text_itself(self):
+        self.assertEqual(parse_content(self.JSON)[0].banca, "CEBRASPE")
+        self.assertEqual(parse_content(self.XML)[0].banca, "CEBRASPE")
+        self.assertEqual(parse_content(self.CSV)[0].discipline, "Direito")
+
+    def test_the_filename_suffix_wins_over_the_guess(self):
+        self.assertEqual(parse_content(self.JSON, filename="prova.txt")[0].banca, "CEBRASPE")
+
+    def test_empty_and_unrecognized_content_say_what_to_do(self):
+        with self.assertRaisesMessage(ValueError, "Cole o XML ou o JSON"):
+            parse_content("   ")
+        with self.assertRaisesMessage(ValueError, "Não reconheci o formato"):
+            parse_content("isto aqui não é prova nenhuma")
+
+    def test_broken_xml_is_a_value_error_not_a_syntax_error(self):
+        with self.assertRaisesMessage(ValueError, "XML inválido"):
+            parse_content("<questions><question>")
+
+    def test_json_that_is_not_a_question_list_is_refused(self):
+        with self.assertRaisesMessage(ValueError, "chave"):
+            parse_content('{"banca": "CEBRASPE"}')
+        with self.assertRaisesMessage(ValueError, "lista"):
+            parse_content('{"questions": {"statement": "x"}}')
+
+    def test_text_and_file_parsers_agree(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+            handle.write(self.JSON)
+            path = handle.name
+        from pathlib import Path
+
+        from apps.questions.ingest.parsers import parse_file
+
+        self.assertEqual(
+            [item.statement for item in parse_file(Path(path))],
+            [item.statement for item in parse_json_text(self.JSON)],
         )

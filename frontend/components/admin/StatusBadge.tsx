@@ -11,6 +11,7 @@ const colorByVariant: Record<string, string> = {
 
 const variantByStatus: Record<string, keyof typeof colorByVariant> = {
   active: "success",
+  approved: "success",
   reviewed: "info",
   open: "success",
   resolved: "info",
@@ -28,6 +29,7 @@ const variantByStatus: Record<string, keyof typeof colorByVariant> = {
 
 export const statusLabels: Record<string, string> = {
   active: "Ativo",
+  approved: "Aprovada",
   pending_payment: "Pagamento pendente",
   pending: "Pendente",
   reviewed: "Revisada",

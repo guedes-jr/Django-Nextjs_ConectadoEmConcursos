@@ -557,6 +557,15 @@ export default function QuestionsPage() {
                     );
                   })}
                 </div>
+                {question.attribution && (
+                  <p className="mt-5 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    {question.source_url ? (
+                      <a href={question.source_url} target="_blank" rel="noreferrer" className="underline">{question.attribution}</a>
+                    ) : (
+                      question.attribution
+                    )}
+                  </p>
+                )}
                 {mode === "practice" && !result ? (
                   <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">Selecione uma alternativa para conferir sua resposta.</p><button type="button" onClick={() => void submitAnswer(question)} disabled={selected[question.id] === undefined || answering[question.id]} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{answering[question.id] ? "Corrigindo..." : "Responder questão"} <ArrowRight size={17} /></button></div>
                 ) : result ? (

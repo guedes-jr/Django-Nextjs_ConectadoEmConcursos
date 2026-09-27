@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Search, Eye, EyeOff, Trash2, PenLine } from "lucide-react";
 import {
   backoffice,
   ProofRow,
   NewsAdminRow,
-  QuestionAdminRow,
   CommunityPostRow,
   ConcursoRow,
   formatDate,
@@ -22,9 +22,9 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/admin/PageHeader";
+import { ConvertProofDialog } from "@/components/admin/content/ConvertProofDialog";
 import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
 import { StatusBadge, BadgeViolet } from "@/components/admin/StatusBadge";
 
@@ -54,16 +54,13 @@ export default function AdminContentPage() {
   const [tab, setTab] = useState<TabKey>("proofs");
   const [proofs, setProofs] = useState<ProofRow[]>([]);
   const [news, setNews] = useState<NewsAdminRow[]>([]);
-  const [questions, setQuestions] = useState<QuestionAdminRow[]>([]);
   const [community, setCommunity] = useState<CommunityPostRow[]>([]);
   const [concursos, setConcursos] = useState<ConcursoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [questionSearch, setQuestionSearch] = useState("");
   const [concursSearch, setConcursSearch] = useState("");
-  const [explaining, setExplaining] = useState<number | null>(null);
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [converting, setConverting] = useState<ProofRow | null>(null);
 
   const loadTab = useCallback(async () => {
     setLoading(true);
@@ -71,7 +68,6 @@ export default function AdminContentPage() {
     try {
       if (tab === "proofs") setProofs((await backoffice.listProofs()).results);
       else if (tab === "news") setNews((await backoffice.listNews()).results);
-      else if (tab === "questions") setQuestions((await backoffice.listQuestions({ onlyUncommented: true, search: questionSearch })).results);
       else if (tab === "community") setCommunity((await backoffice.listCommunity()).results);
       else if (tab === "concursos") setConcursos((await backoffice.listConcursos({ search: concursSearch })).results);
     } catch {
@@ -79,12 +75,12 @@ export default function AdminContentPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, questionSearch, concursSearch]);
+  }, [tab, concursSearch]);
 
   useEffect(() => {
-    const timer = setTimeout(() => void loadTab(), questionSearch || concursSearch ? 300 : 0);
+    const timer = setTimeout(() => void loadTab(), concursSearch ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [tab, questionSearch, concursSearch, loadTab]);
+  }, [tab, concursSearch, loadTab]);
 
   const flash = (message: string, isError = false) => {
     setNotice(isError ? null : message);
@@ -109,20 +105,6 @@ export default function AdminContentPage() {
       void loadTab();
     } catch {
       flash("Falha ao atualizar a notícia.", true);
-    }
-  };
-
-  const saveExplanation = async (question: QuestionAdminRow) => {
-    const text = drafts[question.id]?.trim();
-    if (!text) return;
-    try {
-      await backoffice.updateQuestion(question.id, { explanation: text });
-      setDrafts((d) => ({ ...d, [question.id]: "" }));
-      setExplaining(null);
-      flash("Comentário salvo.");
-      void loadTab();
-    } catch {
-      flash("Falha ao salvar o comentário.", true);
     }
   };
 
@@ -187,8 +169,18 @@ export default function AdminContentPage() {
                         <TableCell className="font-medium text-slate-800 dark:text-slate-100">{proof.title}</TableCell>
                         <TableCell className="text-slate-600 dark:text-slate-300">{proof.username}</TableCell>
                         <TableCell className="text-slate-500">{formatDate(proof.created_at)}</TableCell>
-                        <TableCell><StatusBadge status={proof.status} /></TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
+                          <StatusBadge status={proof.status} />
+                          {proof.converted_questions > 0 && (
+                            <p className="mt-1 text-xs text-slate-500">{proof.converted_questions} questões geradas</p>
+                          )}
+                        </TableCell>
+                        <TableCell className="space-x-2 text-right">
+                          {proof.status === "reviewed" && (
+                            <Button size="sm" variant="outline" onClick={() => setConverting(proof)}>
+                              Converter em questões
+                            </Button>
+                          )}
                           <Button size="sm" onClick={() => void setProofStatus(proof)}>
                             {proof.status === "reviewed" ? "Marcar pendente" : "Marcar revisada"}
                           </Button>
@@ -199,6 +191,22 @@ export default function AdminContentPage() {
                 </Table>
               </CardContent>
             </CardTable>
+          )}
+
+          {converting && (
+            <ConvertProofDialog
+              proof={converting}
+              onOpenChange={(open) => !open && setConverting(null)}
+              onConverted={(result) => {
+                const created = result.counts.created ?? 0;
+                flash(
+                  result.status === "running"
+                    ? `Execução #${result.id} iniciada.`
+                    : `Prova convertida: ${created} questão${created === 1 ? "" : "ões"} na fila de aprovação.`,
+                );
+                void loadTab();
+              }}
+            />
           )}
 
           {tab === "news" && (
@@ -249,47 +257,17 @@ export default function AdminContentPage() {
 
           {tab === "questions" && (
             <Card>
-              <div className="flex flex-wrap items-center gap-3 p-5">
-                <div className="relative min-w-56 flex-1 sm:max-w-xs">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={questionSearch}
-                    onChange={(e) => setQuestionSearch(e.target.value)}
-                    placeholder="Buscar por enunciado ou disciplina..."
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-              <CardContent className="p-0 md:p-0">
-                {questions.length === 0 && (
-                  <EmptyState title="Nenhuma questão sem comentário." />
-                )}
-                <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {questions.map((question) => (
-                    <div key={question.id} className="p-5">
-                      <p className="text-xs text-slate-500">{question.banca} · {question.discipline}{question.exam_title ? ` · ${question.exam_title}` : ""} · #{question.id}</p>
-                      <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{question.statement}{question.statement.length >= 160 ? "…" : ""}</p>
-                      {explaining === question.id ? (
-                        <div className="mt-3 flex flex-col gap-2">
-                          <Textarea
-                            value={drafts[question.id] ?? ""}
-                            onChange={(e) => setDrafts((d) => ({ ...d, [question.id]: e.target.value }))}
-                            rows={4}
-                            placeholder="Escreva o comentário da questão..."
-                          />
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => void saveExplanation(question)}>Salvar comentário</Button>
-                            <Button size="sm" variant="outline" onClick={() => setExplaining(null)}>Cancelar</Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <Button size="sm" variant="ghost" className="mt-2 pl-0 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400" onClick={() => setExplaining(question.id)}>
-                          <PenLine className="h-4 w-4" /> Escrever comentário
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+              <CardContent className="space-y-3 p-5">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  A curadoria de questões foi para a tela própria: filtro por fonte, busca, duplicatas e
+                  comentário com atalhos. Ela não pode ficar aqui, porque duas telas de revisão divergem
+                  e o revisor passa a decidir em uma e commentar na outra.
+                </p>
+                <Button asChild>
+                  <Link href="/admin/questoes">
+                    <PenLine className="h-4 w-4" /> Abrir a curadoria
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           )}

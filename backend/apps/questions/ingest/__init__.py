@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "run",
+    "run_items_record",
     "fingerprint",
     "legacy_source",
     "AdapterNotConfigured",
@@ -111,6 +112,7 @@ def run(
         fingerprint=fingerprint(source.slug, filters),
         status=SearchRun.Status.RUNNING,
         next_page=result.next_page,
+        limit=limit,
         started_by=started_by,
         parent=parent,
     )
@@ -125,7 +127,11 @@ def run(
 
 
 def _finish(run_record: SearchRun, counts: PipelineCounts, result, started: float, dry_run: bool) -> None:
-    """Fecha o `SearchRun`: parcial quando algum item falhou, concluída quando não."""
+    """Fecha o `SearchRun`: parcial quando algum item falhou, concluída quando não.
+
+    `result` é o `FetchResult` do adapter, quando existe; `run_items_record` não tem
+    adapter e por isso passa `None` — o `next_page` já veio gravado na criação.
+    """
     if counts.errors and counts.seen == counts.errors:
         status = SearchRun.Status.FAILED
     elif counts.errors:
@@ -151,6 +157,53 @@ def _finish(run_record: SearchRun, counts: PipelineCounts, result, started: floa
         logger.error("Importação %s falhou em todos os itens.", run_record.pk)
 
 
+def run_items_record(
+    source,
+    items,
+    *,
+    name: str,
+    filters: dict | None = None,
+    started_by=None,
+    dry_run: bool = False,
+    parent: SearchRun | None = None,
+    limit: int | None = None,
+    force_duplicates: bool = False,
+) -> SearchRun:
+    """Grava itens já lidos como `SearchRun`, com a mesma finalização de `run()`.
+
+    `run()` busca na fonte; este aqui recebe a lista pronta — é o caminho do
+    `import_content` e da conversão de prova enviada pelo aluno, onde não existe
+    adapter: o conteúdo vem colado no formulário. Criar o `SearchRun` e fechar os
+    contadores em um lugar só é o que mantém `partial`/`failed` igual em todos os
+    caminhos de entrada.
+    """
+    filters = normalize_filters(filters or {})
+    run_record = SearchRun.objects.create(
+        source=source,
+        name=name,
+        filters=filters,
+        fingerprint=fingerprint(source.slug, filters),
+        status=SearchRun.Status.RUNNING,
+        limit=int(limit or settings.QUESTIONS_IMPORT_LIMIT),
+        started_by=started_by,
+        parent=parent,
+    )
+    started = time.monotonic()
+    counts = PipelineCounts()
+    try:
+        run_items(
+            source,
+            items,
+            dry_run=dry_run,
+            counts=counts,
+            search_run=run_record,
+            force_duplicates=force_duplicates,
+        )
+    finally:
+        _finish(run_record, counts, None, started, dry_run=dry_run)
+    return run_record
+
+
 def run_file(
     path: Path,
     source=None,
@@ -159,8 +212,6 @@ def run_file(
     filters: dict | None = None,
 ) -> SearchRun:
     """Atalho do `import_content`: lê um arquivo e joga no pipeline."""
-    from .parsers import parse_file
-
     source = source or legacy_source()
     filters = dict(filters or {})
     filters.setdefault("file", str(path))
@@ -171,19 +222,11 @@ def run_file(
         result = adapter.fetch_questions(filters, settings.QUESTIONS_IMPORT_LIMIT, 1)
     except ValueError as exc:
         raise ValidationError({"file": [str(exc)]}) from exc
-
-    run_record = SearchRun.objects.create(
-        source=source,
+    return run_items_record(
+        source,
+        result.items,
         name=Path(path).name,
         filters={"file": Path(path).name},
-        fingerprint=fingerprint(source.slug, {"file": Path(path).name}),
-        status=SearchRun.Status.RUNNING,
         started_by=started_by,
+        dry_run=dry_run,
     )
-    started = time.monotonic()
-    counts = PipelineCounts()
-    try:
-        run_items(source, result.items, dry_run=dry_run, counts=counts, search_run=run_record)
-    finally:
-        _finish(run_record, counts, result, started, dry_run=dry_run)
-    return run_record

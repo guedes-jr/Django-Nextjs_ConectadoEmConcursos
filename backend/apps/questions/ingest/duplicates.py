@@ -200,7 +200,12 @@ class DuplicateChecker:
 
     TOKEN_CACHE_LIMIT = 5000
 
-    def __init__(self, threshold: float | None = None, suspicious: float | None = None):
+    def __init__(
+        self,
+        threshold: float | None = None,
+        suspicious: float | None = None,
+        with_hash_index: bool = True,
+    ):
         self.threshold = (
             threshold
             if threshold is not None
@@ -212,7 +217,9 @@ class DuplicateChecker:
             else settings.QUESTIONS_SUSPICIOUS_THRESHOLD
         )
         self.frequencies = self._load_frequencies()
-        self._hashes = HashIndex.from_db()
+        # A leitura da fila só precisa de parecido, não de igualdade exata: pular o
+        # índice de hash evita varrer `content_hash` da base inteira a cada página.
+        self._hashes = HashIndex.from_db() if with_hash_index else HashIndex()
         self._tokens: dict[int, frozenset] = {}
 
     def _load_frequencies(self) -> dict[str, int]:
@@ -249,35 +256,46 @@ class DuplicateChecker:
         for token in tokens:
             self.frequencies[token] = self.frequencies.get(token, 0) + 1
 
-    def check(
-        self, statement, options=None, correct_answer=None, exclude_ids=()
-    ) -> DuplicateMatch | None:
-        """Retorna a pior correspondência relevante, ou `None` se o item é inédito."""
+    def matches(
+        self,
+        statement,
+        options=None,
+        correct_answer=None,
+        exclude_ids=(),
+        limit: int = 5,
+    ) -> list[DuplicateMatch]:
+        """Todas as perguntas parecidas, da mais parecida para a menos.
+
+        Igualdade exata vem primeiro e encerra a busca: o hash é conclusivo, e um
+        enunciado idêntico não precisa de uma segunda opinião por similaridade.
+        """
         tokens = tokenize(statement)
         digest = content_hash(statement, options)
 
-        exact = self._hashes.find(digest)
+        exact = [pk for pk in self._hashes.find(digest) if pk not in set(exclude_ids)]
         if exact:
             question = (
                 Question.objects.filter(pk=exact[0]).only("correct_answer").first()
             )
             if question:
-                return DuplicateMatch(
-                    question.pk,
-                    1.0,
-                    exact_hash=True,
-                    answer_conflict=self._conflict(question, correct_answer),
-                )
+                return [
+                    DuplicateMatch(
+                        question.pk,
+                        1.0,
+                        exact_hash=True,
+                        answer_conflict=self._conflict(question, correct_answer),
+                    )
+                ]
 
         # Enunciado curto não entra na regra de similaridade: "Julgue o item a
         # seguir" casaria com qualquer coisa.
         if len(tokens) < MIN_TOKENS:
-            return None
+            return []
 
-        best = None
-        signature = signature_tokens(tokens, self.frequencies)
+        found: list[DuplicateMatch] = []
         for question_id in stem_candidates(
-            signature, exclude_ids=list(exclude_ids) + list(self._hashes.find(digest))
+            signature_tokens(tokens, self.frequencies),
+            exclude_ids=[*exclude_ids, *exact],
         ):
             other = self.tokens_of(question_id)
             if not other:
@@ -297,10 +315,18 @@ class DuplicateChecker:
                     and answer is not None
                     and answer != correct_answer
                 )
-            candidate = DuplicateMatch(question_id, score, answer_conflict=conflict)
-            if best is None or candidate.score > best.score:
-                best = candidate
-        return best
+            found.append(DuplicateMatch(question_id, score, answer_conflict=conflict))
+        found.sort(key=lambda match: match.score, reverse=True)
+        return found[:limit]
+
+    def check(
+        self, statement, options=None, correct_answer=None, exclude_ids=()
+    ) -> DuplicateMatch | None:
+        """A correspondência mais parecida que merece atenção, ou `None` se é inédita."""
+        matches = self.matches(
+            statement, options, correct_answer, exclude_ids, limit=1
+        )
+        return matches[0] if matches else None
 
     @staticmethod
     def _conflict(question, correct_answer) -> bool:

@@ -1,7 +1,12 @@
 from django.contrib import admin, messages
-from django.db.models import Count, Q
+from django.core.exceptions import ValidationError
+from django.db.models import Q
+from django.shortcuts import redirect, render
+from django.urls import path
 
 from apps.questions import moderation
+from apps.questions.ingest import run as run_question_search
+from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
 from apps.questions.models import (
     Comment,
     ErrorReport,
@@ -14,6 +19,11 @@ from apps.questions.models import (
     QuestionStemToken,
     SearchRun,
     UserAnswer,
+)
+from apps.questions.queue import (
+    COMMENT_REQUEST_DESCRIPTION,
+    QUEUE_PRIORITY_ORDER,
+    annotate_queue_priority,
 )
 
 
@@ -33,26 +43,39 @@ class CommentStatusFilter(admin.SimpleListFilter):
             return queryset.exclude(explanation="")
         return queryset
 
+def _bulk_action(modeladmin, request, queryset, action, label: str, **kwargs) -> tuple[int, int]:
+    """Aplica `moderation.<action>` item a item e devolve (aplicados, ignorados).
 
-def _approve_selected(modeladmin, request, queryset):
-    """Aprova em lote — só questões com explicação já gravada (≥ 120 chars)."""
-    ok = skipped = 0
+    Um item que viola a regra (aprovação sem explicação, motivo inválido) não
+    interrompe o lote: ele é contado e o admin recebe o aviso com o motivo.
+    """
+    applied = skipped = 0
+    reason = ""
     for question in queryset.select_related():
         try:
-            moderation.approve(question, request.user)
-            ok += 1
-        except Exception:
+            action(question, request.user, **kwargs)
+        except ValidationError as exc:
             skipped += 1
-    if ok:
+            reason = "; ".join(exc.messages)
+        else:
+            applied += 1
+    if applied:
         modeladmin.message_user(
-            request, f"{ok} questão(ões) aprovada(s).", messages.SUCCESS
+            request, f"{applied} questão(ões) {label}.", messages.SUCCESS
         )
     if skipped:
         modeladmin.message_user(
             request,
-            f"{skipped} questão(ões) ignorada(s): explicação ausente ou curta demais (mín. {moderation.MIN_EXPLANATION_CHARS} chars).",
+            f"{skipped} questão(ões) ignorada(s): {reason}"
+            f" (mínimo de {moderation.MIN_EXPLANATION_CHARS} caracteres na explicação).",
             messages.WARNING,
         )
+    return applied, skipped
+
+
+def _approve_selected(modeladmin, request, queryset):
+    """Aprova em lote — só questões com explicação já gravada (≥ 120 chars)."""
+    _bulk_action(modeladmin, request, queryset, moderation.approve, "aprovada(s)")
 
 
 _approve_selected.short_description = (
@@ -62,20 +85,14 @@ _approve_selected.short_description = (
 
 def _reject_selected(modeladmin, request, queryset):
     """Rejeita em lote com código 'fora_do_escopo'. Use para descartes óbvios."""
-    count = 0
-    for question in queryset.select_related():
-        try:
-            moderation.reject(
-                question,
-                request.user,
-                reason="Rejeitada em lote pelo administrador.",
-                reason_code="fora_do_escopo",
-            )
-            count += 1
-        except Exception:
-            pass
-    modeladmin.message_user(
-        request, f"{count} questão(ões) rejeitada(s).", messages.SUCCESS
+    _bulk_action(
+        modeladmin,
+        request,
+        queryset,
+        moderation.reject,
+        "rejeitada(s)",
+        reason="Rejeitada em lote pelo administrador.",
+        reason_code="fora_do_escopo",
     )
 
 
@@ -84,26 +101,45 @@ _reject_selected.short_description = "❌ Rejeitar selecionadas (fora_do_escopo)
 
 def _reopen_selected(modeladmin, request, queryset):
     """Devolve à fila — útil quando o conteúdo mudou na fonte."""
-    count = 0
-    for question in queryset.select_related():
-        try:
-            moderation.reopen(question, request.user, note="Reabertura em lote.")
-            count += 1
-        except Exception:
-            pass
-    modeladmin.message_user(
-        request, f"{count} questão(ões) devolvida(s) à fila.", messages.SUCCESS
+    _bulk_action(
+        modeladmin,
+        request,
+        queryset,
+        moderation.reopen,
+        "devolvida(s) à fila",
+        note="Reabertura em lote.",
     )
 
 
 _reopen_selected.short_description = "🔄 Reabrir selecionadas (volta a PENDING)"
 
 
+def _mark_duplicate_selected(modeladmin, request, queryset):
+    """Marca como duplicada o enunciado que já existe na base.
+
+    É o atalho para quando a fila deixou passar um enunciado repetido: a questão
+    sai da fila com o motivo estruturado `duplicada`, que alimenta o relatório de
+    fonte ruim.
+    """
+    _bulk_action(
+        modeladmin,
+        request,
+        queryset,
+        moderation.reject,
+        "marcada(s) como duplicada(s)",
+        reason="Marcada como duplicada pelo administrador.",
+        reason_code="duplicada",
+    )
+
+
+_mark_duplicate_selected.short_description = "♻️ Marcar selecionadas como duplicada"
+
+
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "status",
+        "queue_status",
         "discipline",
         "banca",
         "year",
@@ -111,13 +147,11 @@ class QuestionAdmin(admin.ModelAdmin):
         "has_comment",
         "comment_requests",
         "error_count",
-        "is_active",
     )
     list_filter = (
         CommentStatusFilter,
         "status",
         "source",
-        "is_active",
         "discipline",
         "banca",
         "year",
@@ -126,25 +160,27 @@ class QuestionAdmin(admin.ModelAdmin):
     search_fields = ("statement", "explanation", "external_id")
     autocomplete_fields = ("exam", "source", "reviewed_by")
     readonly_fields = ("content_hash", "reviewed_at", "created_at", "updated_at")
-    actions = [_approve_selected, _reject_selected, _reopen_selected]
+    actions = [
+        _approve_selected,
+        _reject_selected,
+        _reopen_selected,
+        _mark_duplicate_selected,
+    ]
 
     def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .annotate(
-                error_count=Count(
-                    "answers", filter=Q(answers__is_correct=False), distinct=True
-                ),
-                comment_requests_count=Count(
-                    "error_reports",
-                    filter=Q(
-                        error_reports__description="Solicitação de gabarito comentado."
-                    ),
-                    distinct=True,
-                ),
-            )
-        )
+        # A ordenação depende das annotations, então o `super()` (que ordena antes
+        # de existir `status_order`) não pode ser usado aqui.
+        queryset = annotate_queue_priority(self.model._default_manager.get_queryset())
+        ordering = self.get_ordering(request)
+        return queryset.order_by(*ordering) if ordering else queryset
+
+    def get_ordering(self, request):
+        """Fila primeiro, e dentro dela o que mais rende: pedidos de comentário e erros."""
+        return list(QUEUE_PRIORITY_ORDER)
+
+    @admin.display(ordering="status_order", description="status")
+    def queue_status(self, obj):
+        return obj.get_status_display()
 
     @admin.display(boolean=True, description="Comentada")
     def has_comment(self, obj):
@@ -185,6 +221,15 @@ class QuestionSourceAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug", "license_name")
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("facets_at", "last_sync_at", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        # Ativar uma fonte é autorizar o uso do conteúdo dela: sem licença
+        # declarada, a proveniência some e não dá para responder "de onde veio".
+        if obj.is_active and not obj.license_name.strip():
+            raise ValidationError(
+                {"license_name": "Informe a licença antes de ativar a fonte."}
+            )
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(SearchRun)
@@ -230,15 +275,20 @@ admin.site.register(QuestionNote)
 admin.site.register(Comment)
 admin.site.register(ErrorReport)
 
+
 # Fluxo operacional da Fase 2: busca por fonte e histórico de execuções.
 # Mantido junto aos ModelAdmins para continuar protegido por `admin_view` e não
 # duplicar o pipeline em uma segunda camada HTTP.
-from django.core.exceptions import ValidationError
-from django.shortcuts import redirect, render
-from django.urls import path, reverse
 
-from apps.questions.ingest import run as run_question_search
-from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
+
+def _error_text(exc: Exception) -> str:
+    """Mensagem legível no admin: `ValidationError` de filtro vem como dicionário."""
+    if isinstance(exc, ValidationError) and hasattr(exc, "message_dict"):
+        return "; ".join(
+            f"{field}: {', '.join(items)}"
+            for field, items in exc.message_dict.items()
+        )
+    return str(exc)
 
 
 def _source_search_context(request, source=None):
@@ -269,7 +319,7 @@ def _question_source_search(request):
         limit = max(1, min(int(request.POST.get("limit", 200)), 1000))
         run = run_question_search(source, filters, limit=limit, started_by=request.user, dry_run=request.POST.get("dry_run") == "on")
     except (ValidationError, AdapterNotConfigured, ValueError) as exc:
-        messages.error(request, str(exc))
+        messages.error(request, _error_text(exc))
         return render(request, "admin/questions/questionsource/search.html", context)
     messages.success(request, f"Busca #{run.pk} concluída: {run.counts.get('created', 0)} questão(ões) na fila.")
     return redirect("admin:questions_searchrun_history")
@@ -284,15 +334,15 @@ def _run_operation(request, pk, operation):
         if operation == "continue":
             if not run.next_page:
                 raise ValidationError("Esta busca não possui próxima página.")
-            result = run_question_search(run.source, run.filters, page=run.next_page, limit=200, started_by=request.user, parent=run)
+            result = run_question_search(run.source, run.filters, page=run.next_page, limit=run.limit, started_by=request.user, parent=run)
         elif operation == "import-skipped":
             if not (run.duplicates_preview or (run.counts or {}).get("duplicates_skipped")):
                 raise ValidationError("Esta busca não possui duplicatas descartadas.")
-            result = run_question_search(run.source, run.filters, limit=200, started_by=request.user, parent=run, force_duplicates=True)
+            result = run_question_search(run.source, run.filters, limit=run.limit, started_by=request.user, parent=run, force_duplicates=True)
         else:
-            result = run_question_search(run.source, run.filters, page=1, limit=200, started_by=request.user, parent=run)
+            result = run_question_search(run.source, run.filters, page=1, limit=run.limit, started_by=request.user, parent=run)
     except (ValidationError, AdapterNotConfigured, ValueError) as exc:
-        messages.error(request, str(exc))
+        messages.error(request, _error_text(exc))
     else:
         messages.success(request, f"Busca #{result.pk} concluída: {result.counts.get('created', 0)} criada(s), {result.counts.get('duplicates_skipped', 0)} duplicata(s) pulada(s).")
     return redirect("admin:questions_searchrun_history")

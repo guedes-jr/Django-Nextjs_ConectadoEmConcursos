@@ -273,7 +273,7 @@ def plan_detail(request, pk):
 def proofs(request):
     if request.method == "GET":
         status_filter = request.query_params.get("status", "").strip()
-        qs = ExamSubmission.objects.select_related("user").order_by("-created_at")
+        qs = ExamSubmission.objects.select_related("user", "converted_run").order_by("-created_at")
         if status_filter:
             qs = qs.filter(status=status_filter)
         return Response(
@@ -284,6 +284,14 @@ def proofs(request):
                         "username": p.user.username,
                         "title": p.title,
                         "status": p.status,
+                        # O arquivo e a descrição são o insumo da conversão: sem eles
+                        # o admin não sabe o que colar no formulário.
+                        "file_url": request.build_absolute_uri(p.file.url) if p.file else None,
+                        "source_url": p.source_url,
+                        "description": p.description,
+                        "rights_confirmed": p.rights_confirmed,
+                        "converted_questions": p.converted_questions,
+                        "converted_run": p.converted_run_id,
                         "created_at": p.created_at.isoformat(),
                     }
                     for p in qs[:200]
@@ -370,7 +378,6 @@ def questions_admin(request):
                         "reviewed_at": q.reviewed_at.isoformat()
                         if q.reviewed_at
                         else None,
-                        "is_active": q.is_active,
                     }
                     for q in page_qs
                 ],
@@ -402,11 +409,7 @@ def questions_admin(request):
                 return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(
-            {
-                "id": question.id,
-                "status": question.status,
-                "is_active": question.is_active,
-            }
+            {"id": question.id, "status": question.status}
         )
 
     if mod_action == "reject":
@@ -424,22 +427,14 @@ def questions_admin(request):
                 return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(
-            {
-                "id": question.id,
-                "status": question.status,
-                "is_active": question.is_active,
-            }
+            {"id": question.id, "status": question.status}
         )
 
     if mod_action == "reopen":
         note = (request.data.get("review_note") or "").strip()
         moderation.reopen(question, request.user, note)
         return Response(
-            {
-                "id": question.id,
-                "status": question.status,
-                "is_active": question.is_active,
-            }
+            {"id": question.id, "status": question.status}
         )
 
     # Sem action: edição de rascunho de explicação antes de aprovar

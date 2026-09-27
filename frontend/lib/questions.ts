@@ -15,6 +15,9 @@ export type Question = {
   is_favorite: boolean;
   comment_count: number;
   explanation: string | null;
+  /** Crédito da fonte, só quando a licença exige. Vazio = não mostrar nada. */
+  attribution?: string;
+  source_url?: string;
   latest_answer: number | null;
   latest_is_correct: boolean | null;
   is_marked: boolean;

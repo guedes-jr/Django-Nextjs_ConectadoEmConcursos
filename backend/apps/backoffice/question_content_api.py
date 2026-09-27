@@ -3,16 +3,23 @@
 import json
 
 from django.core.exceptions import ValidationError
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.db.models import Q
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from apps.questions import moderation
 from apps.questions.ingest import run as run_search
+from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
 from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
 from apps.questions.models import Question, QuestionSource, SearchRun
+from apps.questions.queue import QUEUE_PRIORITY_ORDER, annotate_queue_priority
+from apps.questions.submissions import convert_submission
+from apps.workspace.models import ExamSubmission
 
 
 def _number(value, default=50, maximum=200):
@@ -53,6 +60,7 @@ def _run_payload(run):
         "fingerprint": run.fingerprint,
         "status": run.status,
         "next_page": run.next_page,
+        "limit": run.limit,
         "counts": run.counts,
         "duplicates_preview": run.duplicates_preview,
         "log_path": run.log_path,
@@ -65,8 +73,35 @@ def _run_payload(run):
     }
 
 
-def _question_payload(question):
+def _duplicates(checker, question) -> list[dict]:
+    """Questões parecidas com a que está em revisão, com score e conflito de gabarito.
+
+    É a mesma comparação do pipeline (`DuplicateChecker`), sem gravar nada: a fila
+    precisa mostrar "87% igual a #123, gabarito C ≠ E" para o admin decidir.
+    """
+    if checker is None:
+        return []
+    matches = checker.matches(
+        question.statement,
+        question.options,
+        question.correct_answer,
+        exclude_ids=[question.pk],
+    )
+    return [
+        {
+            "id": match.question_id,
+            "score": round(match.score, 4),
+            "percent": match.percent,
+            "exact": match.exact_hash,
+            "answer_conflict": match.answer_conflict,
+        }
+        for match in matches
+    ]
+
+
+def _question_payload(question, duplicates: list[dict] | None = None):
     source = question.source
+    duplicates = duplicates if duplicates is not None else _duplicates(_checker(), question)
     return {
         "id": question.id,
         "search_run": question.search_run_id,
@@ -81,15 +116,24 @@ def _question_payload(question):
         "number": question.number,
         "exam": question.exam.title if question.exam else None,
         "external_id": question.external_id,
-        "content_hash": question.content_hash,
+        "content_hash": question.content_hash
+        or content_hash(question.statement, question.options),
         "source_url": question.source_url,
         "source": _source_payload(source) if source else None,
         "review_note": question.review_note,
+        "duplicates": duplicates,
+        "conflict": any(item["answer_conflict"] for item in duplicates),
         "rejection_reason": question.rejection_reason,
         "rejection_reason_code": question.rejection_reason_code,
         "reviewed_by": question.reviewed_by.username if question.reviewed_by else None,
         "reviewed_at": question.reviewed_at,
+        "updated_at": question.updated_at,
     }
+
+
+def _checker():
+    """Um `DuplicateChecker` por requisição: as frequências de token são carregadas uma vez."""
+    return DuplicateChecker(with_hash_index=True)
 
 
 def _source_or_404(slug, active_only=True):
@@ -179,7 +223,21 @@ def question_search_detail(request, pk):
         return Response({"detail": "Busca não encontrada."}, status=status.HTTP_404_NOT_FOUND)
     payload = _run_payload(run)
     payload["questions_count"] = run.questions.count()
+    # "74% concluído" na tela do revisor: o que já saiu de PENDING nesta busca.
+    payload["reviewed_count"] = run.questions.exclude(status=Question.Status.PENDING).count()
     return Response(payload)
+
+
+def _run_limit(request, parent: SearchRun) -> int:
+    """Limite da próxima parte.
+
+    Sem isso o cursor não reproduz a busca: `next_page=2` só faz sentido com o
+    mesmo `limit` da execução original, então o valor do pai é o padrão e o corpo
+    da requisição só o substitui quando vem explícito.
+    """
+    if "limit" not in request.data:
+        return parent.limit
+    return _number(request.data.get("limit"), parent.limit, 1000)
 
 
 def _resume_run(request, pk, page):
@@ -187,7 +245,7 @@ def _resume_run(request, pk, page):
     if not parent:
         return Response({"detail": "Busca não encontrada."}, status=status.HTTP_404_NOT_FOUND)
     try:
-        run = run_search(parent.source, parent.filters, limit=_number(request.data.get("limit"), 200, 1000), page=page, started_by=request.user, parent=parent, dry_run=bool(request.data.get("dry_run", False)))
+        run = run_search(parent.source, parent.filters, limit=_run_limit(request, parent), page=page, started_by=request.user, parent=parent, dry_run=bool(request.data.get("dry_run", False)))
     except ValidationError as exc:
         return _validation_response(exc)
     except AdapterNotConfigured as exc:
@@ -212,17 +270,50 @@ def question_search_rerun(request, pk):
     return _resume_run(request, pk, 1)
 
 
+DUPLICATE_SCAN_LIMIT = 300
+
+
+def _filter_by_duplicates(queryset, params, order=QUEUE_PRIORITY_ORDER):
+    """Filtra a fila por "tem duplicata" ou "gabarito conflita".
+
+    Não existe coluna para isso: a comparação vive no `DuplicateChecker`, que
+    precisa do enunciado e das alternativas, uma consulta por questão. A varredura
+    é limitada a `DUPLICATE_SCAN_LIMIT` questões do topo da fila — é o recorte que
+    o revisor está olhando, e auditar mais que isso é para a busca por `SearchRun`.
+    """
+    checker = _checker()
+    conflict_only = bool(params.get("conflict"))
+    scanned = queryset.order_by(*order).values_list("id", flat=True)[:DUPLICATE_SCAN_LIMIT]
+    keep = set()
+    for question in Question.objects.filter(id__in=list(scanned)):
+        matches = _duplicates(checker, question)
+        if conflict_only:
+            if any(match["answer_conflict"] for match in matches):
+                keep.add(question.id)
+        elif matches:
+            keep.add(question.id)
+    return queryset.filter(id__in=keep)
+
+
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 def questions_queue(request):
-    queryset = Question.objects.select_related("source", "exam", "reviewed_by", "search_run").order_by("id")
+    # Mesma prioridade do admin (`apps/questions/queue.py`): se as duas telas
+    # divergirem, o revisor corrige uma questão e a API entrega outra.
+    queryset = annotate_queue_priority(
+        Question.objects.select_related("source", "exam", "reviewed_by", "search_run")
+    )
     status_filter = request.query_params.get("status", Question.Status.PENDING)
     if status_filter:
         queryset = queryset.filter(status=status_filter)
     if source := request.query_params.get("source"):
         queryset = queryset.filter(source__slug=source)
+    # Dentro de uma busca a ordem é a de chegada (FIFO por `id`): o revisor segue a
+    # execução do começo ao fim. Sem busca, vale a prioridade da fila compartilhada.
+    order = QUEUE_PRIORITY_ORDER
     if search_run := request.query_params.get("search_run"):
         queryset = queryset.filter(search_run_id=search_run)
+        order = ("id",)
     if banca := request.query_params.get("banca"):
         queryset = queryset.filter(banca__iexact=banca)
     if discipline := request.query_params.get("discipline"):
@@ -231,9 +322,17 @@ def questions_queue(request):
         queryset = queryset.filter(year=year)
     if search := request.query_params.get("search"):
         queryset = queryset.filter(Q(statement__icontains=search) | Q(explanation__icontains=search))
+    if request.query_params.get("duplicates") or request.query_params.get("conflict"):
+        queryset = _filter_by_duplicates(queryset, request.query_params, order)
     limit, offset = _number(request.query_params.get("limit")), _offset(request.query_params.get("offset"))
+    queryset = queryset.order_by(*order)
     total = queryset.count()
-    return Response({"total": total, "limit": limit, "offset": offset, "results": [_question_payload(question) for question in queryset[offset:offset + limit]]})
+    checker = _checker()
+    results = [
+        _question_payload(question, _duplicates(checker, question))
+        for question in queryset[offset : offset + limit]
+    ]
+    return Response({"total": total, "limit": limit, "offset": offset, "results": results})
 
 
 @api_view(["GET"])
@@ -247,7 +346,10 @@ def questions_queue_next(request):
     question = queryset.first()
     if not question:
         return Response({"detail": "Fila em dia."}, status=status.HTTP_404_NOT_FOUND)
-    return Response({"cursor": question.id, "question": _question_payload(question)})
+    duplicates = _duplicates(_checker(), question)
+    return Response(
+        {"cursor": question.id, "question": _question_payload(question, duplicates)}
+    )
 
 
 def _question_ids(data):
@@ -257,6 +359,27 @@ def _question_ids(data):
     if isinstance(ids, list) and ids and all(isinstance(item, int) for item in ids):
         return ids
     return []
+
+
+def _stale(request, question) -> bool:
+    """Bloqueio otimista: a tela manda o `updated_at` que leu e a API compara.
+
+    Dois revisores na mesma questão ao mesmo tempo é o caso normal de uma fila
+    grande; sem isso, o segundo "aprovar" sobrescreveria o comentário do primeiro
+    sem ninguém perceber. Só compara quando a tela enviou o valor.
+    """
+    sent = request.data.get("updated_at")
+    if not sent:
+        return False
+    try:
+        sent_at = parse_datetime(str(sent))
+    except (TypeError, ValueError):
+        return False
+    if sent_at is None:
+        return False
+    if timezone.is_naive(sent_at):
+        sent_at = timezone.make_aware(sent_at, timezone.get_default_timezone())
+    return question.updated_at and sent_at < question.updated_at
 
 
 def _moderate(request, action):
@@ -269,7 +392,23 @@ def _moderate(request, action):
     changed = []
     for question in questions:
         if question.status != Question.Status.PENDING:
-            return Response({"detail": f"A questão #{question.id} não está pendente."}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": f"A questão #{question.id} já foi revisada.",
+                    "code": "already_reviewed",
+                    "status": question.status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if _stale(request, question):
+            return Response(
+                {
+                    "detail": "Esta questão foi atualizada por outro revisor.",
+                    "code": "stale",
+                    "status": question.status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         try:
             if action == "approve":
                 moderation.approve(question, request.user, request.data.get("explanation"))
@@ -277,8 +416,41 @@ def _moderate(request, action):
                 moderation.reject(question, request.user, request.data.get("reason"), request.data.get("reason_code"))
         except ValidationError as exc:
             return _validation_response(exc)
-        changed.append(_question_payload(question))
+        changed.append(_question_payload(question, []))
     return Response({"results": changed})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def questions_draft(request):
+    """Rascunho do revisor: anota o texto sem aprovar nem reprovar.
+
+    Digitar um comentário de 120 caracteres leva tempo e `S` salva o que já está na
+    tela, para o revisor não perder o raciocínio ao trocar de questão.
+    """
+    ids = _question_ids(request.data)
+    if not ids:
+        return Response({"id": ["Informe uma questão ou uma lista de questões."]}, status=status.HTTP_400_BAD_REQUEST)
+    questions = list(Question.objects.filter(id__in=ids))
+    if len(questions) != len(set(ids)):
+        return Response({"id": ["Uma ou mais questões não foram encontradas."]}, status=status.HTTP_404_NOT_FOUND)
+    note = str(request.data.get("note", ""))
+    for question in questions:
+        question.review_note = note
+        question.save(update_fields=["review_note", "updated_at"])
+    return Response({"results": [_question_payload(question, []) for question in questions]})
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def rejection_reasons(request):
+    """Motivos estruturados de rejeição: o formulário do admin monta a lista daqui."""
+    return Response(
+        [
+            {"code": code, "label": label}
+            for code, label in sorted(moderation.REJECTION_REASONS.items(), key=lambda item: item[1])
+        ]
+    )
 
 
 @api_view(["POST"])
@@ -292,6 +464,7 @@ def questions_approve(request):
 def questions_reject(request):
     return _moderate(request, "reject")
 
+
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
 def question_search_import_skipped(request, pk):
@@ -304,7 +477,7 @@ def question_search_import_skipped(request, pk):
         run = run_search(
             parent.source,
             parent.filters,
-            limit=_number(request.data.get("limit"), 200, 1000),
+            limit=_run_limit(request, parent),
             page=1,
             started_by=request.user,
             parent=parent,
@@ -316,3 +489,49 @@ def question_search_import_skipped(request, pk):
     except AdapterNotConfigured as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
     return Response(_run_payload(run), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def proofs_convert(request):
+    """Converte a prova enviada pelo aluno em questões, pelo mesmo pipeline das fontes.
+
+    Aceita o conteúdo colado no formulário ou um arquivo XML/JSON/CSV — o PDF que o
+    aluno mandou não é parseável, então quem converte é quem transcreve. A prova
+    precisa estar revisada: é o mesmo gate das outras telas de curadoria.
+    """
+    submission = ExamSubmission.objects.filter(pk=request.data.get("id")).first()
+    if not submission:
+        return Response({"detail": "Prova não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    content = str(request.data.get("content", ""))
+    filename = str(request.data.get("filename", ""))
+    upload = request.FILES.get("file")
+    if upload is not None:
+        if upload.size > 2 * 1024 * 1024:
+            return Response({"content": ["O arquivo deve ter no máximo 2 MB."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            content = upload.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return Response({"content": ["O arquivo precisa estar em UTF-8."]}, status=status.HTTP_400_BAD_REQUEST)
+        filename = upload.name
+    try:
+        run_record = convert_submission(
+            submission,
+            content=content,
+            filename=filename,
+            started_by=request.user,
+            dry_run=bool(request.data.get("dry_run", False)),
+            rights_confirmed=str(request.data.get("rights_confirmed", "")).strip().lower() in {"true", "1", "on", "yes"},
+        )
+    except ValidationError as exc:
+        return _validation_response(exc)
+    payload = _run_payload(run_record)
+    payload["submission"] = {
+        "id": submission.id,
+        "title": submission.title,
+        "username": submission.user.get_username(),
+        "converted_questions": submission.converted_questions,
+        "converted_at": submission.converted_at.isoformat() if submission.converted_at else None,
+    }
+    return Response(payload, status=status.HTTP_201_CREATED)

@@ -170,6 +170,10 @@ export type ExamSubmissionItem = {
   source_url: string;
   file_url: string | null;
   status: "pending" | "reviewed";
+  /** O autor declarou ter autorização; a conversão depende disso. */
+  rights_confirmed: boolean;
+  /** Quantas questões a prova já gerou na curadoria. */
+  converted_questions: number;
   created_at: string;
 };
 
@@ -183,12 +187,14 @@ export async function createSubmission(data: {
   description?: string;
   source_url?: string;
   file?: File;
+  rights_confirmed: boolean;
 }) {
   if (data.file) {
     const form = new FormData();
     form.append("title", data.title);
     form.append("description", data.description ?? "");
     form.append("file", data.file);
+    form.append("rights_confirmed", "true");
     const response = await http.post<{ id: number; status: string }>(
       "/api/workspace/submissions/",
       form,
@@ -198,7 +204,12 @@ export async function createSubmission(data: {
   }
   const response = await http.post<{ id: number; status: string }>(
     "/api/workspace/submissions/",
-    { title: data.title, source_url: data.source_url, description: data.description },
+    {
+      title: data.title,
+      source_url: data.source_url,
+      description: data.description,
+      rights_confirmed: data.rights_confirmed,
+    },
   );
   return response.data;
 }

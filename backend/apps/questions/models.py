@@ -94,6 +94,7 @@ class SearchRun(models.Model):
         max_length=12, choices=Status.choices, default=Status.RUNNING, db_index=True
     )
     next_page = models.PositiveIntegerField(null=True, blank=True)
+    limit = models.PositiveIntegerField(default=500)
     counts = models.JSONField(default=dict, blank=True)
     duplicates_preview = models.JSONField(default=list, blank=True)
     log_path = models.CharField(max_length=300, blank=True)
@@ -176,7 +177,6 @@ class Question(models.Model):
     rejection_reason = models.TextField(blank=True)
     rejection_reason_code = models.CharField(max_length=40, blank=True)
     review_note = models.TextField(blank=True)
-    is_active = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

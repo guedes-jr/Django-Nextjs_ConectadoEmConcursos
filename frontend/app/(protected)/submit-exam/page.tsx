@@ -27,6 +27,7 @@ export default function SubmitExamPage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [description, setDescription] = useState("");
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [items, setItems] = useState<ExamSubmissionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -69,11 +70,13 @@ export default function SubmitExamPage() {
         description: description.trim(),
         source_url: method === "link" ? sourceUrl.trim() : undefined,
         file: method === "upload" ? file ?? undefined : undefined,
+        rights_confirmed: rightsConfirmed,
       });
       setTitle("");
       setSourceUrl("");
       setFile(null);
       setDescription("");
+      setRightsConfirmed(false);
       setSuccess("Prova enviada com sucesso. Nossa equipe vai revisar e liberar as questões em breve.");
       const data = await listSubmissions();
       setItems(data);
@@ -86,7 +89,7 @@ export default function SubmitExamPage() {
   };
 
   const canSubmit =
-    !!title.trim() && (method === "link" ? !!sourceUrl.trim() : !!file);
+    !!title.trim() && rightsConfirmed && (method === "link" ? !!sourceUrl.trim() : !!file);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950">
@@ -221,6 +224,20 @@ export default function SubmitExamPage() {
               />
             </label>
 
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <input
+                type="checkbox"
+                checked={rightsConfirmed}
+                onChange={(event) => setRightsConfirmed(event.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span className="text-sm text-slate-600 dark:text-slate-300">
+                Declaro que tenho autorização para enviar este material e que ele pode ser
+                publicado no site, com crédito ao autor. Prova de concurso com direitos de
+                editor não entra na fila.
+              </span>
+            </label>
+
             {error && (
               <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400">
                 {error}
@@ -260,7 +277,8 @@ export default function SubmitExamPage() {
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {items.map((item) => (
+              {items.map((item) => {
+                return (
                 <article
                   key={item.id}
                   className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
@@ -297,8 +315,16 @@ export default function SubmitExamPage() {
                       <Paperclip size={13} /> Ver arquivo
                     </a>
                   ) : null}
+                  {item.converted_questions > 0 && (
+                    <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                      {item.converted_questions}{" "}
+                      {item.converted_questions === 1 ? "questão" : "questões"} já em revisão na
+                      curadoria.
+                    </p>
+                  )}
                 </article>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

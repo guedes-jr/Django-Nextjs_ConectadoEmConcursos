@@ -77,7 +77,28 @@ export type ProofRow = {
   username: string;
   title: string;
   status: string;
+  /** Insumo da conversão: o que o aluno mandou. */
+  file_url: string | null;
+  source_url: string;
+  description: string;
+  rights_confirmed: boolean;
+  converted_questions: number;
+  converted_run: number | null;
   created_at: string;
+};
+
+export type ConvertedProof = {
+  id: number;
+  name: string;
+  status: string;
+  counts: Record<string, number>;
+  submission: {
+    id: number;
+    title: string;
+    username: string;
+    converted_questions: number;
+    converted_at: string | null;
+  };
 };
 
 export type QuestionAdminRow = {
@@ -230,6 +251,30 @@ export const backoffice = {
   },
   setProofStatus: (id: number, status: string) =>
     http.patch<{ id: number; status: string }>("/api/backoffice/content/proofs/", { id, status }).then((r) => r.data),
+  /** Converte a prova em questões pelo mesmo pipeline das fontes. */
+  convertProof: (data: { id: number; content?: string; file?: File; rights_confirmed?: boolean; dry_run?: boolean }) => {
+    if (data.file) {
+      const form = new FormData();
+      form.append("id", String(data.id));
+      form.append("file", data.file);
+      if (data.content) form.append("content", data.content);
+      if (data.rights_confirmed) form.append("rights_confirmed", "true");
+      if (data.dry_run) form.append("dry_run", "true");
+      return http
+        .post<ConvertedProof>("/api/backoffice/content/proofs/convert/", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        })
+        .then((r) => r.data);
+    }
+    return http
+      .post<ConvertedProof>("/api/backoffice/content/proofs/convert/", {
+        id: data.id,
+        content: data.content ?? "",
+        rights_confirmed: data.rights_confirmed ?? false,
+        dry_run: data.dry_run ?? false,
+      })
+      .then((r) => r.data);
+  },
 
   listQuestions: (opts: { onlyUncommented?: boolean; search?: string } = {}) => {
     const params = new URLSearchParams();

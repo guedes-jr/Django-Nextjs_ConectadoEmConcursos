@@ -4,6 +4,7 @@ from django.test import TestCase
 
 from apps.questions import moderation
 from apps.questions.models import Question
+from apps.questions.visibility import visible
 
 User = get_user_model()
 
@@ -23,7 +24,6 @@ class ModerationBase(TestCase):
             statement="Assinale a alternativa correta.",
             options=["a", "b"],
             correct_answer=0,
-            is_active=False,
         )
 
     def reload(self):
@@ -36,7 +36,6 @@ class ApproveTests(ModerationBase):
             moderation.approve(self.question, self.reviewer, "Curto demais.")
         self.question = self.reload()
         self.assertEqual(self.question.status, Question.Status.PENDING)
-        self.assertFalse(self.question.is_active)
         self.assertIsNone(self.question.reviewed_at)
         self.assertEqual(self.question.explanation, "")
 
@@ -50,7 +49,6 @@ class ApproveTests(ModerationBase):
         moderation.approve(self.question, self.reviewer, text)
         self.question = self.reload()
         self.assertEqual(self.question.status, Question.Status.APPROVED)
-        self.assertTrue(self.question.is_active)
         self.assertEqual(self.question.explanation, text)
         self.assertEqual(self.question.reviewed_by, self.reviewer)
         self.assertIsNotNone(self.question.reviewed_at)
@@ -79,7 +77,7 @@ class ApproveTests(ModerationBase):
         self.assertEqual(self.question.status, Question.Status.APPROVED)
         self.assertEqual(self.question.rejection_reason, "")
         self.assertEqual(self.question.rejection_reason_code, "")
-        self.assertTrue(self.question.is_active)
+        self.assertIn(self.question.pk, set(visible().values_list("id", flat=True)))
 
 
 class RejectTests(ModerationBase):
@@ -101,7 +99,6 @@ class RejectTests(ModerationBase):
                 moderation.reject(question, self.reviewer, f"motivo para {code}", code)
         question = self.reload()
         self.assertEqual(question.status, Question.Status.REJECTED)
-        self.assertFalse(question.is_active)
         self.assertEqual(question.rejection_reason_code, "fora_do_escopo")
 
     def test_reject_takes_an_approved_question_off_the_air(self):
@@ -109,7 +106,6 @@ class RejectTests(ModerationBase):
         moderation.reject(self.question, self.reviewer, "enunciado com erro", "enunciado_com_erro")
         self.question = self.reload()
         self.assertEqual(self.question.status, Question.Status.REJECTED)
-        self.assertFalse(self.question.is_active)
         self.assertEqual(self.question.reviewed_by, self.reviewer)
 
 
@@ -119,7 +115,6 @@ class ReopenTests(ModerationBase):
         moderation.reopen(self.question, self.reviewer, "O gabarito mudou na fonte.")
         self.question = self.reload()
         self.assertEqual(self.question.status, Question.Status.PENDING)
-        self.assertFalse(self.question.is_active)
         self.assertEqual(self.question.review_note, "O gabarito mudou na fonte.")
         self.assertEqual(self.question.rejection_reason, "")
         self.assertEqual(self.question.rejection_reason_code, "")
@@ -130,31 +125,11 @@ class ReopenTests(ModerationBase):
         self.question = self.reload()
         self.assertEqual(self.question.status, Question.Status.PENDING)
         self.assertEqual(self.question.review_note, "")
-        self.assertFalse(self.question.is_active)
         self.assertEqual(self.question.explanation, LONG_EXPLANATION)
 
 
-class SyncVisibilityTests(ModerationBase):
-    def test_follows_status(self):
-        for status, expected in (
-            (Question.Status.PENDING, False),
-            (Question.Status.REJECTED, False),
-            (Question.Status.APPROVED, True),
-        ):
-            with self.subTest(status=status):
-                self.question.status = status
-                moderation.sync_visibility(self.question)
-                self.assertEqual(self.reload().is_active, expected)
-
-    def test_can_be_called_without_saving(self):
-        self.question.status = Question.Status.APPROVED
-        moderation.sync_visibility(self.question, save=False)
-        self.assertTrue(self.question.is_active)
-        self.assertFalse(self.reload().is_active)
-
-
 class PublicVisibilityTests(ModerationBase):
-    """`is_active` é o que segura a leitura: pendente e rejeitada somem do aluno."""
+    """`status=APPROVED` é o que segura a leitura: pendente e rejeitada somem do aluno."""
 
     def setUp(self):
         super().setUp()
@@ -170,12 +145,12 @@ class PublicVisibilityTests(ModerationBase):
         moderation.approve(self.public, self.reviewer)
 
     def test_approved_questions_are_listed(self):
-        self.assertIn(self.public, Question.objects.filter(is_active=True))
+        self.assertIn(self.public, visible())
 
     def test_rejecting_hides_it_from_the_student(self):
         moderation.reject(self.public, self.reviewer, "Duplicada", "duplicada")
-        self.assertNotIn(Question.objects.get(pk=self.public.pk), Question.objects.filter(is_active=True))
+        self.assertNotIn(Question.objects.get(pk=self.public.pk), visible())
 
     def test_reopening_hides_it_again(self):
         moderation.reopen(self.public, self.reviewer, "Conferir de novo")
-        self.assertNotIn(Question.objects.get(pk=self.public.pk), Question.objects.filter(is_active=True))
+        self.assertNotIn(Question.objects.get(pk=self.public.pk), visible())

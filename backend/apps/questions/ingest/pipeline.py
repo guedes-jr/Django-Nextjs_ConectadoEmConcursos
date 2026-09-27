@@ -200,7 +200,6 @@ def _create(
         source_url=item.source_url,
         number=item.number,
         status=Question.Status.PENDING,
-        is_active=False,
         review_note=checker.describe(match, item.correct_answer),
     )
     refresh_stem_index(question, checker)
@@ -249,7 +248,6 @@ def _update_existing(
         question.explanation = item.explanation.strip()
     if invalidation:
         question.status = Question.Status.PENDING
-        question.is_active = False
         question.reviewed_by = None
         question.reviewed_at = None
         question.review_note = f"Conteúdo alterado na fonte em {timezone.now():%d/%m/%Y}."

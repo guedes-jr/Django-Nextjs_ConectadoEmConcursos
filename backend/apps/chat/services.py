@@ -3,9 +3,9 @@ from django.conf import settings
 from django.core.signing import salted_hmac
 from django.db.models import Count, Q
 
-from apps.questions.models import UserAnswer
 from apps.billing.services import capabilities_for
-from apps.questions.models import Exam, Question
+from apps.questions.models import Exam, Question, UserAnswer
+from apps.questions.visibility import visible
 
 
 def local_response(user, prompt):
@@ -41,7 +41,7 @@ def build_study_context(question_ids=None, exam_id=None):
         exam = Exam.objects.filter(pk=exam_id, is_published=True).first()
         if exam:
             parts.append(f"Prova: {exam.title} — {exam.banca}, {exam.year}, {exam.institution}, {exam.role}.")
-    questions = Question.objects.filter(pk__in=question_ids or [], is_active=True)[:5]
+    questions = visible(Question.objects.filter(pk__in=question_ids or []))[:5]
     for question in questions:
         options = " | ".join(f"{index}: {text}" for index, text in enumerate(question.options))
         parts.append(f"Questão {question.pk} ({question.discipline}): {question.statement}\nAlternativas: {options}")

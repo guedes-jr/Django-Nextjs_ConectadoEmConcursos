@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.questions.models import Comment, Exam, Question, SimulationTemplate
+from apps.questions.visibility import visible
 
 
 class ExamSerializer(serializers.ModelSerializer):
@@ -16,7 +17,7 @@ class ExamSerializer(serializers.ModelSerializer):
 
     def get_disciplines(self, exam):
         return list(
-            exam.questions.filter(is_active=True)
+            visible(exam.questions.all())
             .order_by("discipline")
             .values_list("discipline", flat=True)
             .distinct()
@@ -35,6 +36,16 @@ class QuestionSerializer(serializers.ModelSerializer):
     is_marked = serializers.BooleanField(read_only=True)
     review_due = serializers.BooleanField(read_only=True)
     next_review_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    # Crédito da fonte: a licença de algumas fontes exige que o aluno veja de onde
+    # veio. Vazio quando a fonte não exige atribuição, então a tela não mostra nada.
+    attribution = serializers.SerializerMethodField()
+    source_url = serializers.CharField(read_only=True, allow_blank=True, default="")
+
+    def get_attribution(self, question):
+        source = question.source
+        if source is None or not source.requires_attribution:
+            return ""
+        return source.attribution or source.license_name
 
     class Meta:
         model = Question
@@ -43,6 +54,7 @@ class QuestionSerializer(serializers.ModelSerializer):
             "discipline", "banca", "year", "statement", "options",
             "is_favorite", "comment_count", "latest_answer", "latest_is_correct",
             "is_marked", "review_due", "next_review_at", "explanation",
+            "attribution", "source_url",
         ]
 
 

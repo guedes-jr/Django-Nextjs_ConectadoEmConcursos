@@ -2,7 +2,13 @@ import React from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const Checkbox = React.forwardRef(({ className, checked, onCheckedChange, ...props }, ref) => {
+type CheckboxProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onChange" | "type"> & {
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+};
+
+const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
+  ({ className, checked = false, onCheckedChange, ...props }, ref) => {
   return (
     <button
       ref={ref}
@@ -25,7 +31,6 @@ const Checkbox = React.forwardRef(({ className, checked, onCheckedChange, ...pro
     </button>
   );
 });
-
 Checkbox.displayName = "Checkbox";
 
 export { Checkbox };

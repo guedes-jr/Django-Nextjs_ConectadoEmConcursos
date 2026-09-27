@@ -1,0 +1,209 @@
+{
+  "meta": {
+    "slug": "referencia",
+    "name": "Dataset de referência (sintético)",
+    "kind": "open_dataset",
+    "home_url": "https://exemplo.test/datasets/questoes-referencia",
+    "license_name": "CC0 1.0 — conteúdo sintético escrito para esta base",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "attribution": "Dataset sintético de referência do Conectado em Questões",
+    "notes": "Questões originais escritas para exercitar o pipeline: alias de banca (CESPE vira CEBRASPE), duplicata exata, quase-duplicata com gabarito divergente, banda de suspeita, enunciado curto e questão sem comentário. Não é conteúdo de prova real."
+  },
+  "questions": [
+    {
+      "id": "ref-001",
+      "statement": "Nos termos da legislação estatutária dos servidores públicos, assinale a alternativa correta sobre o regime da estabilidade funcional e as hipóteses em que o servidor estável pode ser destituído do cargo.",
+      "options": [
+        "A estabilidade somente pode ser perdida por decisão do superior hierárquico, sem processo administrativo.",
+        "A perda do cargo ocorre mediante sentença judicial transitada em julgado ou mediante processo administrativo em que se assegure ampla defesa.",
+        "O servidor estável pode ser destituído a qualquer tempo por decisão discricionária da Administração.",
+        "A estabilidade impede o processo administrativo disciplinar, ainda que por falta funcional grave.",
+        "A perda do cargo ocorre somente por iniciativa do próprio servidor."
+      ],
+      "correct_answer": 1,
+      "banca": "CESPE",
+      "year": 2024,
+      "discipline": "Direito Administrativo",
+      "exam_title": "Simulado de referência — Direito Administrativo",
+      "institution": "Instituto de Referência",
+      "role": "Analista",
+      "level": "Superior",
+      "state": "DF",
+      "number": 1,
+      "explanation": "A estabilidade é a garantia de permanência no cargo, oponível à Administração e ao próprio servidor. Ela só cede diante de sentença definitiva ou de processo administrativo com ampla defesa, garantida pela Constituição. A demissão de servidor estável fora dessas hipóteses é nula e gera a necessidade de reintegração, sem prejuízo de reparação patrimonial ao servidor.",
+      "source_url": "https://exemplo.test/questoes/ref-001"
+    },
+    {
+      "id": "ref-002",
+      "statement": "Assinale a alternativa correta sobre a competência residual da União para legislar sobre direito administrativo, conforme previsto no texto constitucional.",
+      "options": [
+        "A União não possui competência residual alguma, pois a Constituição esgota a matéria administrativa.",
+        "Existe competência residual para a União legislar sobre direito administrativo quando não houver competência específica definida em lei.",
+        "A competência residual pertence exclusivamente aos Estados e ao Distrito Federal.",
+        "A competência residual é vedada pela Constituição e depende de lei complementar.",
+        "A competência residual é exercida apenas por medidas provisórias do Executivo federal."
+      ],
+      "correct_answer": 1,
+      "banca": "CESPE",
+      "year": 2024,
+      "discipline": "Direito Constitucional",
+      "exam_title": "Simulado de referência — Direito Constitucional",
+      "institution": "Instituto de Referência",
+      "role": "Analista",
+      "level": "Superior",
+      "state": "DF",
+      "number": 2,
+      "explanation": "O art. 22, XXI, da Constituição estabelece competência privativa da União para legislar sobre direito administrativo, com a ressalva de que, quando a Constituição não fixar a competência de cada ente, a União exercerá competência residual para legislar sobre a matéria administrativa, mediante lei complementar, se necessária.",
+      "source_url": "https://exemplo.test/questoes/ref-002"
+    },
+    {
+      "id": "ref-003",
+      "statement": "Considerando o Regime Jurídico dos Servidores Públicos, assinale a alternativa correta sobre a licença-prêmio, o afastamento para prestar serviço militar e o limite de gozo das licenças por ano civil.",
+      "options": [
+        "A licença-prêmio não pode ser usufruída em parcela única nem em parcelas.",
+        "O afastamento para prestar serviço militar é sempre computado no limite anual das licenças.",
+        "O servidor pode converter o período de serviço militar em licença-prêmio sem qualquer resultado.",
+        "A licença-prêmio pode ser usufruída em parcela única ou em parcelas e o afastamento militar é computado no limite anual das licenças.",
+        "O limite de gozo das licenças depende exclusivamente da avaliação de desempenho funcional."
+      ],
+      "correct_answer": 3,
+      "banca": "CESPE",
+      "year": 2024,
+      "discipline": "Direito Administrativo",
+      "exam_title": "Simulado de referência — Direito Administrativo",
+      "institution": "Instituto de Referência",
+      "role": "Técnico",
+      "level": "Médio",
+      "state": "RJ",
+      "number": 3,
+      "explanation": "O afastamento do servidor para prestar serviço militar é computado no limite de dias de licença-prêmio a que teria direito no período, conforme disciplina do estatuto. A licença-prêmio pode ser usufruída em parcela única ou em parcelas, o que impede a Administração de recusar o pedido sem motivo administrativo legítimo.",
+      "source_url": "https://exemplo.test/questoes/ref-003"
+    },
+    {
+      "id": "ref-004",
+      "statement": "Considerando o Regime Jurídico dos Servidores Públicos da União, assinale a alternativa correta sobre o cadastro dos servidores, o afastamento para prestar serviço militar e o pagamento do adicional de serviço.",
+      "options": [
+        "O cadastro funcional é atualizado exclusivamente pela carreira e independe da chefia imediata.",
+        "O afastamento para prestar serviço militar gera adicional de serviço e o cadastro atualiza-se por portaria.",
+        "O cadastro dos servidores é atualizado a cada cinco anos pela Administração e o adicional independe do regime.",
+        "O afastamento para prestar serviço militar é remunerado e a atualização do cadastro depende de portaria, sendo o pagamento do adicional disciplinado por lei.",
+        "O adicional de serviço é proibido para servidores afastados e o cadastro permanece congelado."
+      ],
+      "correct_answer": 3,
+      "banca": "FGV",
+      "year": 2024,
+      "discipline": "Direito Administrativo",
+      "exam_title": "Simulado de referência — Direito Administrativo",
+      "institution": "Instituto de Referência",
+      "role": "Técnico",
+      "level": "Médio",
+      "state": "MG",
+      "number": 4,
+      "source_url": "https://exemplo.test/questoes/ref-004"
+    },
+    {
+      "id": "ref-005",
+      "statement": "Assinale a alternativa correta sobre a competência residual da União para legislar sobre direito administrativo, conforme previsto no texto constitucional.",
+      "options": [
+        "A União não possui competência residual alguma, pois a Constituição esgota a matéria administrativa.",
+        "Existe competência residual para a União legislar sobre direito administrativo quando não houver competência específica definida em lei.",
+        "A competência residual pertence exclusivamente aos Estados e ao Distrito Federal.",
+        "A competência residual é vedada pela Constituição e depende de lei complementar.",
+        "A competência residual é exercida apenas por medidas provisórias do Executivo federal."
+      ],
+      "correct_answer": 1,
+      "banca": "FGV",
+      "year": 2024,
+      "discipline": "Direito Constitucional",
+      "exam_title": "Simulado de referência — Direito Constitucional",
+      "institution": "Instituto de Referência",
+      "role": "Analista",
+      "level": "Superior",
+      "state": "SP",
+      "number": 5,
+      "source_url": "https://exemplo.test/questoes/ref-005"
+    },
+    {
+      "id": "ref-006",
+      "statement": "Nos termos da legislação estatutária dos servidores públicos, assinale a alternativa correta sobre o regime da estabilidade funcional e as hipóteses em que o servidor estável pode ser removido do cargo.",
+      "options": [
+        "A estabilidade somente pode ser perdida por decisão do superior hierárquico, sem processo administrativo.",
+        "A perda do cargo ocorre mediante sentença judicial transitada em julgado ou mediante processo administrativo em que se assegure ampla defesa.",
+        "O servidor estável pode ser removido a qualquer tempo por decisão discricionária da Administração.",
+        "A estabilidade impede o processo administrativo disciplinar, ainda que por falta funcional grave.",
+        "A remoção do cargo ocorre somente por iniciativa do próprio servidor."
+      ],
+      "correct_answer": 1,
+      "banca": "FGV",
+      "year": 2024,
+      "discipline": "Direito Administrativo",
+      "exam_title": "Simulado de referência — Direito Administrativo",
+      "institution": "Instituto de Referência",
+      "role": "Analista",
+      "level": "Superior",
+      "state": "DF",
+      "number": 6,
+      "source_url": "https://exemplo.test/questoes/ref-006"
+    },
+    {
+      "id": "ref-007",
+      "statement": "Julgue o item a seguir.",
+      "options": ["Certo", "Errado"],
+      "correct_answer": 0,
+      "banca": "IADES",
+      "year": 2023,
+      "discipline": "Conhecimentos Gerais",
+      "exam_title": "Simulado de referência — Conhecimentos Gerais",
+      "institution": "Instituto de Referência",
+      "role": "Agente",
+      "level": "Médio",
+      "state": "AM",
+      "number": 7,
+      "source_url": "https://exemplo.test/questoes/ref-007"
+    },
+    {
+      "id": "ref-008",
+      "statement": "Sobre a Lei de Abuso de Autoridade, assinale a alternativa correta quanto à exigência de culpa na responsabilização do agente público.",
+      "options": [
+        "A lei dispensa prova de culpa e admite a condenação pela responsabilidade subjetiva do agente.",
+        "É exigida prova de culpa, sob pena de responsabilização objetiva do agente público.",
+        "A responsabilidade subjetiva é suficiente para os crimes de responsabilidade previstos em lei especial.",
+        "A lei adota a responsabilidade objetiva para o servidor público e a culpa é irrelevante.",
+        "A responsabilidade objetiva é a regra e a culpa é usada apenas como atenuante."
+      ],
+      "correct_answer": 1,
+      "banca": "IADES",
+      "year": 2023,
+      "discipline": "Direito Penal",
+      "exam_title": "Simulado de referência — Direito Penal",
+      "institution": "Instituto de Referência",
+      "role": "Agente",
+      "level": "Médio",
+      "state": "AM",
+      "number": 8,
+      "source_url": "https://exemplo.test/questoes/ref-008"
+    },
+    {
+      "id": "ref-009",
+      "statement": "Considerando o Regime Jurídico dos Servidores Públicos, assinale a alternativa correta sobre a licença-prêmio, o afastamento para prestar serviço militar e o limite de gozo das licenças por ano de serviço.",
+      "options": [
+        "A licença-prêmio não pode ser usufruída em parcela única nem em parcelas.",
+        "O afastamento para prestar serviço militar é computado no limite anual das licenças.",
+        "O servidor pode converter o período de serviço militar em licença-prêmio sem qualquer resultado.",
+        "A licença-prêmio pode ser usufruída em parcela única ou em parcelas e o afastamento militar é computado no limite anual das licenças.",
+        "O limite de gozo das licenças depende exclusivamente da avaliação de desempenho funcional."
+      ],
+      "correct_answer": 1,
+      "banca": "IADES",
+      "year": 2024,
+      "discipline": "Direito Administrativo",
+      "exam_title": "Simulado de referência — Direito Administrativo",
+      "institution": "Instituto de Referência",
+      "role": "Técnico",
+      "level": "Médio",
+      "state": "AM",
+      "number": 9,
+      "source_url": "https://exemplo.test/questoes/ref-009"
+    }
+  ]
+}

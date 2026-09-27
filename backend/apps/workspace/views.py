@@ -4,17 +4,25 @@ from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, parser_classes, permission_classes
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from allauth.socialaccount.models import SocialAccount
 from apps.questions.models import Question, QuestionNote, UserAnswer
+from apps.questions.visibility import visible
 from .models import CommunityPost, ExamSubmission, Flashcard, Notebook, SimulationRun
 
 
 def _notebook(item):
-    return {"id": item.id, "title": item.title, "question_ids": list(item.questions.values_list("id", flat=True)), "created_at": item.created_at}
+    return {
+        "id": item.id,
+        "title": item.title,
+        "question_ids": list(
+            visible(item.questions.all()).values_list("id", flat=True)
+        ),
+        "created_at": item.created_at,
+    }
 
 
 @api_view(["GET", "POST"])
@@ -52,7 +60,7 @@ def notebook_questions(request, item_id):
     if not item:
         return Response({"detail": "Caderno não encontrado."}, status=404)
     question_id = request.data.get("question_id")
-    question = Question.objects.filter(id=question_id, is_active=True).first()
+    question = visible(Question.objects.filter(id=question_id)).first()
     if not question:
         return Response({"question_id": "Questão não encontrada."}, status=400)
     if request.method == "POST":
@@ -242,29 +250,41 @@ def simulation_detail(request, item_id):
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
-@parser_classes([MultiPartParser, FormParser])
+# O envio por link chega como JSON e o upload como multipart: sem `JSONParser` o
+# primeiro caminho devolvia 415.
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def submissions(request):
     if request.method == "GET":
-        return Response([{"id": item.id, "title": item.title, "source_url": item.source_url, "file_url": request.build_absolute_uri(item.file.url) if item.file else None, "status": item.status, "created_at": item.created_at} for item in ExamSubmission.objects.filter(user=request.user).order_by("-created_at")[:50]])
+        return Response([{"id": item.id, "title": item.title, "source_url": item.source_url, "file_url": request.build_absolute_uri(item.file.url) if item.file else None, "status": item.status, "rights_confirmed": item.rights_confirmed, "converted_questions": item.converted_questions, "created_at": item.created_at} for item in ExamSubmission.objects.filter(user=request.user).order_by("-created_at")[:50]])
     title = str(request.data.get("title", "")).strip()
     source_url = str(request.data.get("source_url", "")).strip()
     description = str(request.data.get("description", "")).strip()
     uploaded = request.FILES.get("file")
+    rights_confirmed = _truthy(request.data.get("rights_confirmed"))
     if not 1 <= len(title) <= 160:
         return Response({"detail": "Informe o título da prova."}, status=400)
     if len(description) > 2000:
         return Response({"detail": "As observações devem ter até 2000 caracteres."}, status=400)
+    if not rights_confirmed:
+        # A prova só entra na fila se o autor disser que tem o direito de enviá-la:
+        # a conversão publica material de terceiros, e a declaração é o que sustenta isso.
+        return Response({"detail": "Confirme que você tem autorização para enviar esta prova."}, status=400)
     if uploaded:
         if source_url:
             return Response({"detail": "Escolha uma opção: enviar o link OU fazer upload do arquivo."}, status=400)
         if uploaded.size > 10 * 1024 * 1024:
             return Response({"detail": "O arquivo deve ter no máximo 10 MB."}, status=400)
         name = uploaded.name.lower()
-        if not name.endswith((".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg")):
-            return Response({"detail": "Formato não suportado. Envie PDF, DOC, DOCX, TXT ou imagem (PNG/JPG)."}, status=400)
-        item = ExamSubmission.objects.create(user=request.user, title=title, file=uploaded, description=description)
+        if not name.endswith((".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".xml", ".json", ".csv")):
+            return Response({"detail": "Formato não suportado. Envie PDF, DOC, DOCX, TXT, XML, JSON, CSV ou imagem (PNG/JPG)."}, status=400)
+        item = ExamSubmission.objects.create(user=request.user, title=title, file=uploaded, description=description, rights_confirmed=True)
     else:
         if not source_url.startswith("https://") or len(source_url) > 200:
             return Response({"detail": "Informe um link HTTPS para a prova."}, status=400)
-        item = ExamSubmission.objects.create(user=request.user, title=title, source_url=source_url, description=description)
-    return Response({"id": item.id, "status": item.status}, status=201)
+        item = ExamSubmission.objects.create(user=request.user, title=title, source_url=source_url, description=description, rights_confirmed=True)
+    return Response({"id": item.id, "status": item.status, "rights_confirmed": True}, status=201)
+
+
+def _truthy(value) -> bool:
+    """`rights_confirmed` chega como string do `FormData` do navegador."""
+    return value is True or str(value).strip().lower() in {"true", "1", "on", "yes"}

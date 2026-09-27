@@ -12,6 +12,7 @@ from apps.questions.ingest.duplicates import (
 )
 from apps.questions.models import Question, QuestionSource
 from apps.questions.naming import banca_query, banca_variants, normalize_banca
+from apps.questions.visibility import visible
 
 
 class NormalizeStatementTests(TestCase):
@@ -169,6 +170,6 @@ class QuestionSourceTests(TestCase):
             options=["a"],
             correct_answer=0,
         )
+        # Nada entra no ar sem passar pelo `moderation.approve`.
         self.assertEqual(question.status, Question.Status.PENDING)
-        # O default=False garante que nada entra no ar sem passar pelo moderation.approve.
-        self.assertFalse(question.is_active)
+        self.assertFalse(visible().filter(pk=question.pk).exists())

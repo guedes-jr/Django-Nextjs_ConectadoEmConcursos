@@ -11,8 +11,8 @@ confirma ou rejeita. Só a questão aprovada fica disponível para o usuário co
   detecção de duplicata por similaridade de enunciado, fila de aprovação, tela de
   revisão sequencial, conversão de envio do aluno.
 - **Não entra:** scraper de banco de questões comercial, modelos `Banca`/`Disciplina`
-  (banca e disciplina continuam texto normalizado), remoção do campo `is_active`,
-  rotina automática de sincronização, alterações no `sync_sources` de concursos.
+  (banca e disciplina continuam texto normalizado), rotina automática de
+  sincronização, alterações no `sync_sources` de concursos.
 
 ## Fluxo ponta a ponta
 
@@ -22,7 +22,7 @@ confirma ou rejeita. Só a questão aprovada fica disponível para o usuário co
 3. Executar a busca          (1 fonte + N filtros, com limite por execução)
 4. Dedupe                    (Dice >= 0.80 no enunciado + gabarito)
 5. Fila PENDING              (admin revisa uma a uma, edita, confirma ou rejeita)
-6. APPROVED                  (is_active = True, visível para o aluno)
+6. APPROVED                  (visível para o aluno)
 ```
 
 ## Diagnóstico (estado atual)
@@ -470,7 +470,27 @@ A escolha da fonte de referência deve ser registrada em `QUESTIONS_SOURCES` no
 `.env.example` como exemplo funcional, e o teste de integração do adapter
 deve passar com os dados reais (ou um subconjunto fixo em fixture).
 
-## [ ] Fase 2 — Django admin
+### Feito nesta fase
+
+- `ingest/sources.py` com `BaseAdapter`, `FilterSpec`/`Option`, `get_adapter(slug)` e os
+  4 adapters (`open_dataset`, `public_api`, `official_index`, `local_file`).
+- `open_dataset` resolve `path` relativo a `settings.BASE_DIR`, então o mesmo `.env`
+  funciona em qualquer máquina.
+- **Fonte de referência:** `backend/apps/questions/data/reference_dataset.json` — 9
+  questões **sintéticas** em CC0 1.0, versionadas no repositório, com casos que o
+  pipeline precisa tratar: duplicata exata (mesmo hash), duplicata por similaridade com
+  o mesmo gabarito, conflito de gabarito, enunciado curto demais para a regra de
+  similaridade e nome de banca com alias (`CESPE` → `CEBRASPE`). Registrada como
+  exemplo funcional em `.env.example` e documentada em `docs/fontes-questoes.md`.
+- `test_reference_source.py` (15 testes) cobre a fonte de ponta a ponta: importação,
+  deduplicação, alias de banca, contadores do `SearchRun` e a lista de descartadas.
+- **Pendente de uma fase futura:** trocar a fixture por conteúdo real licenciado. O
+  critério acima é satisfeito pela cláusula "subconjunto fixo em fixture"; nenhuma
+  fonte real estava disponível no repositório ou no ambiente, eQUESTões de prova não
+  podem ser versionadas aqui sem licença. O fluxo para trocar está em
+  `docs/fontes-questoes.md` (seção "Fonte licenciada real").
+
+## [x] Fase 2 — Django admin
 
 - **Página "Busca por fonte"** em 3 passos: fonte → filtros (re-renderiza com
   `?source=<slug>`, sem estado em JS) → executar. `limit` default 200, máximo 1000,
@@ -492,9 +512,37 @@ Busca: banca=CESPE, ano 2020-2023, disciplina=Direito Constitucional, limit=200
  1ª execução  page=1  -> found 812  imported 200  status=partial  next_page=2
  2ª execução  "continuar"           imported 200  status=partial  next_page=3
  ... até status=done
- "Executar novamente" (mesmo fingerprint) -> dedupe descarta o que já entrou
+  "Executar novamente" (mesmo fingerprint) -> dedupe descarta o que já entrou
                                             e traz o que a fonte publicou depois
 ```
+
+### Feito nesta fase
+
+- Página **"Busca por fonte"** em 3 passos (`QuestionSourceAdmin.search_view`):
+  fonte → filtros com re-render por `?source=<slug>` (opções dependentes de
+  `list_options(spec, current)`) → executar. `limit` default 200, máximo 1000,
+  execução síncrona, com `Simular sem gravar`.
+- **Histórico de buscas** (`SearchRunAdmin.history_view`): fingerprint, filtros,
+  contadores, log, `Continuar de onde parou`, `Executar novamente`,
+  `Importar descartadas` e link para a fila daquela busca.
+- `QuestionAdmin` com as 4 ações em massa — aprovar, rejeitar, reabrir e marcar
+  duplicada — todas passando por `moderation.py` através de um `_bulk_action` comum:
+  um item que viola a regra não interrompe o lote, ele é contado e o motivo vai
+  para o aviso do admin.
+- Ordenação da fila em `apps/questions/queue.py` (`annotate_queue_priority` +
+  `QUEUE_PRIORITY_ORDER`): `status_order` (`PENDING` → `REJECTED` → `APPROVED`),
+  `-comment_requests_count`, `-error_count`, `id`. Fica num módulo próprio porque o
+  admin e a API de conteúdo precisam mostrar a fila na mesma ordem.
+- `QuestionSourceAdmin` recusa ativar uma fonte sem `license_name`
+  (`save_model`), e `_error_text` transforma o `ValidationError` de filtro em uma
+  frase legível em vez do dict cru.
+- `SearchRun.limit` (migração `0016`) passa a ser gravado: sem ele, continuar/repetir
+  uma execução reaplicava o default do adapter e o cursor não era reproduzível.
+- `test_admin_queue.py` (15 testes) cobre a ordem da fila, as 4 ações em massa
+  (inclusive o item ignorado por falta de explicação), a recusa da fonte sem licença,
+  a página de busca com simulação, o erro de filtro obrigatório e os links do
+  histórico.
+
 
 ## [x] Fase 3 — API
 
@@ -526,13 +574,25 @@ procedência (fonte, `source_url`, licença, `external_id`, hash), `duplicates[]
   declarados pelo adapter, execução/histórico/detalhe de `SearchRun`, continuar,
   reexecutar e reprocessar duplicatas descartadas.
 - Fila paginada e FIFO por `SearchRun`, com payload completo de revisão e ações de
-  aprovar/rejeitar delegadas a `moderation.py`.
+  aprovar/rejeitar delegadas a `moderation.py`. A lista ordena pela **mesma**
+  prioridade do admin (`apps/questions/queue.py`); `next/` permanece FIFO por `id`
+  para o cursor `?cursor=` fazer sentido.
+- Payload de revisão: enunciado inteiro, `options`, `correct_answer`, procedência
+  (fonte com licença, `source_url`, `external_id`, `content_hash`) e **`duplicates[]`**
+  com score e `answer_conflict`, mais o booleano **`conflict`**. Vem de
+  `DuplicateChecker.matches()` — a mesma comparação do pipeline, sem gravar nada.
+  `content_hash` cai no hash calculado quando a questão foi criada fora do ingestor.
 - `Question.search_run` (migração `0015`) relaciona cada questão nova ou atualizada
   à execução que a trouxe; isso torna os filtros e o cursor da fila reproduzíveis.
-- `test_question_content_api.py` cobre fontes ativas, fila por execução e aprovação.
+- `SearchRun.limit` (migração `0016`) é gravado e reaproveitado em
+  continuar/reexecutar/importar descartadas.
+- `test_question_content_api.py` (13 testes) cobre fontes ativas, fila por execução,
+  prioridade da fila, procedência e duplicatas, conflito de gabarito, enunciado curto
+  sem duplicatas, aprovação com e sem comentário, rejeição sem motivo, decisão em
+  lote, `404` e as 11 rotas fechadas (`403`) para usuário não staff.
 
 
-## [ ] Fase 4 — Next `/admin/questoes`
+## [x] Fase 4 — Next `/admin/questoes`
 
 Duas colunas em `max-w-none` (o shell limita a `max-w-6xl` em
 `layout.tsx:193`), com a lista recolhível para foco total:
@@ -572,7 +632,68 @@ Atalhos de teclado (`A` aprovar, `R` rejeitar, `S` salvar rascunho, `P` pular,
 `J`/`K` navegar) só são ativados quando não há foco em campo de texto, para
 não interferir com a digitação da explicação.
 
-## [ ] Fase 5 — Envio de aluno
+### Feito nesta fase
+
+- Tela `frontend/app/admin/questoes/page.tsx` em duas colunas, com a lista recolhível
+  (`max-w-none` só nessa rota, via `cn()` no `app/admin/layout.tsx`, porque o shell
+  limita tudo a `max-w-6xl`).
+- **Esquerda:** `QueueList` com filtros por fonte, `SearchRun`, status, banca,
+  disciplina, ano, busca textual, "só duplicatas" e "só conflitos". Trocar a fonte
+  descarta a `SearchRun` selecionada: uma execução pertence a uma fonte só.
+- **Direita:** `ReviewPanel` com `QuestionContent` (imagens incluídas), alternativas e
+  gabarito em letra, procedência (fonte, licença, `external_id`, link de origem),
+  `duplicates[]` com score e link, `Textarea` de 120 com contador e as ações
+  Aprovar/Rejeitar/Pular. Aprovar atualiza a fila **sem refetch**; só os contadores
+  do cabeçalho (`12 de 340 nesta busca · 74% concluído`) vêm da API.
+- `SearchDialog` em dois passos (fonte → filtros declarados por ela). Trocar a fonte
+  descarta o formulário inteiro, porque `banca` na fonte A e `banca` na fonte B não
+  significam a mesma coisa.
+- Atalhos `A` aprovar, `R` focar os motivos de rejeição, `S` salvar rascunho, `P`
+  pular, `J`/`K` navegar — desligados quando o foco está em `input`, `textarea`,
+  `select` ou `contentEditable`. **`R` não rejeita sozinho:** um `R` acidental não pode
+  descartar a questão, então ele foca a lista de motivos.
+- `StatusBadge` mapeia `approved`/`pending`/`rejected`; a aba "Questões sem comentário"
+  do `app/admin/conteudo` virou link para cá (duas telas de revisão divergem).
+- **Estados de erro**, um a um: `400` de explicação → foco no campo, borda vermelha e
+  contagem `atual/120`; `400` de rejeição → anel vermelho no bloco de motivos; erro de
+  rede/5xx → aviso "Falha ao salvar — tente novamente" e botões reabilitados;
+  `409` de questão já revisada → remove da fila local e avança; `409` de questão
+  alterada por outro revisor → recarrega e avisa; fila vazia → "Fila em dia" com botão
+  para o `Dialog`; `SearchRun` inexistente → avisa e volta ao histórico.
+- **Fim da dívida do `is_active`:** campo removido do modelo com a migração `0017`
+  (backfill do que estava `is_active=True` para `approved` antes do `RemoveField`),
+  `moderation.sync_visibility` deletado, os 11 pontos de leitura convertidos e os 2
+  vazamentos fechados. `visible()` em `apps/questions/visibility.py` é a única forma
+  de ler questão para o aluno; `QuestionSource.is_active` continua, porque é outra
+  coisa (a fonte pode ser desativada sem sumir com as questões importadas).
+- API acrescentada para a tela, com `IsAdminUser` e testes:
+  - `GET content/questions/rejection-reasons/` — os motivos estruturados saem de
+    `moderation.REJECTION_REASONS`, não de uma lista copiada no frontend.
+  - `POST content/questions/draft/` — `S` grava `review_note` sem aprovar nem
+    reprovar, para o revisor não perder o raciocínio ao trocar de questão.
+  - `updated_at` no payload e **bloqueio otimista**: `approve`/`reject` devolvem `409`
+    com `code: "stale"` se a questão mudou entre o GET e o POST, e
+    `code: "already_reviewed"` se alguém já decidiu. A UI ramifica pelo `code`, não
+    pelo texto.
+  - `duplicates=1` e `conflict=1` na fila, com varredura limitada a 300 questões do
+    topo (`DUPLICATE_SCAN_LIMIT`) — não existe coluna para isso, a comparação é a do
+    `DuplicateChecker`, uma consulta por questão. Acima disso, o recorte é o filtro
+    de `SearchRun`.
+  - Dentro de uma `SearchRun` a fila é FIFO por `id`; sem `search_run`, vale a
+    prioridade compartilhada com o admin.
+  - `GET question-search/<id>/` traz `reviewed_count`, que alimenta o "74% concluído".
+- Atribuição: `QuestionSerializer` devolve `attribution` (vazio quando a fonte não
+  exige crédito) e `source_url`, e a tela do aluno mostra o crédito com link. Três
+  testes em `test_visibility.py`.
+- `test_question_content_api.py` com 20 testes e `test_visibility.py` com 39; suíte
+  completa em 268 testes verdes, `make check`, `make lint` (0 erros), `make typecheck`
+  e `make build` (`/admin/questoes` prerenderizada) passando.
+- Corrigido de passagem: `components/ui/checkbox.tsx` tinha `forwardRef` sem tipos e
+  quebrava `make typecheck`; e o `Toast` virou `Notice` porque `sonner` não está no
+  `package.json` (o projeto usa o par `Notice`/`setError` do `app/admin/conteudo`).
+
+
+## [x] Fase 5 — Envio de aluno
 
 `ExamSubmission` (`workspace/models.py:59-70`) ganha `rights_confirmed` (obrigatório
 no upload) e `source` da fonte `local_file`. Ao marcar a prova como revisada, a ação
@@ -580,6 +701,31 @@ no upload) e `source` da fonte `local_file`. Ao marcar a prova como revisada, a 
 mesmo `ingest.pipeline` → PENDING com procedência "enviado por {usuário}" e sem
 `source_url` público. O PATCH de status existente (`backoffice/views.py:255-266`)
 permanece.
+
+### Feito nesta fase
+
+- `ExamSubmission` ganhou `rights_confirmed`, `source`, `converted_run`, `converted_at` e
+  `converted_questions` (migration `workspace/0004_examsubmission_conversion.py`).
+- Envio do aluno (`workspace/views.py`) passou a exigir `rights_confirmed`; o
+  `JSONParser` que faltava no parser class-based também foi adicionado, o que
+  conserta o `415` que o link já devolvia. O `GET` expõe os campos de conversão.
+- Conversão em `apps/questions/submissions.py`: `QuestionSource` própria por envio
+  (`is_active=False`, `attribution="Enviado por {username}"`), `source_url` removido
+  dos itens, `external_id="envio{id}:{n}"` para reconversão idempotente. Só roda com
+  `status=REVIEWED` e direitos confirmados, aceita dry-run e 2 MB de conteúdo colado
+  ou arquivo.
+- `POST /api/backoffice/content/proofs/convert/` (`IsAdminUser`) e o GET das provas
+  passou a devolver arquivo, descrição, direitos e o progresso da conversão.
+- `parse_content` + `parse_xml_text`/`parse_json_text`/`parse_csv_text` em
+  `ingest/parsers.py` para o texto colado no dialog; `run_items_record` foi extraído
+  em `ingest/__init__.py` para o upload e a conversão compartilharem criação de
+  `SearchRun` e `_finish`.
+- Frontend: checkbox obrigatório de direitos no envio (bloqueia o botão e some após
+  o sucesso) com o progresso de questões na lista, e o Dialog "Converter em
+  questões" na aba de provas, só para as revisadas, com dry-run e confirmação de
+  direitos para os envios antigos.
+- `make check`, `make test` (294 testes), `make lint` (0 erros), `make typecheck` e
+  `make build` passando.
 
 ## [ ] Fase 6 — Testes e documentação
 
@@ -635,13 +781,12 @@ Docs: `docs/requisitos.md`, `readme.md` (comandos e o porquê de não agendar na
    disciplina para o admin editar.
 3. **Falso positivo de duplicata** com enunciados curtos genéricos — mitigado pelo
    piso de 12 tokens; a banda 0.60–0.80 existe para o admin discordar.
-4. **`is_active` e `status` convivem** até o encerramento da Fase 4. A sincronização
-   é num ponto só (`moderation.sync_visibility`), mas é um segundo estado. A remoção
-   **deve acontecer junto com o merge da Fase 4** — antes de abrir a Fase 5. Isso
-   inclui fechar os 2 vazamentos conhecidos (`questions/views.py:220` e
-   `workspace/models.py:8`) e atualizar os 11 pontos de leitura que hoje filtram por
-   `is_active` para filtrar por `status=APPROVED`. Adiar além desse ponto torna a
-   dívida estrutural e aumenta o risco de regressão.
+4. ~~**`is_active` e `status` convivem**~~ — **resolvido na Fase 4.** `Question.is_active`
+   foi removido (migração `0017`, com backfill do que estava visível para
+   `approved`). A regra é `status=APPROVED` em todo leitor, concentrada em
+   `apps/questions/visibility.py`, e os 2 vazamentos conhecidos foram fechados
+   (consulta de questões de simulado e M2M de caderno, que agora passa pelo filtro
+   em `workspace/views.py`).
 5. **A validação de licença é do time/jurídico.** O sistema registra e exige
    `license_name` para ativar a fonte e exibe a atribuição; ele não decide se um
    dataset pode ser redistribuído.

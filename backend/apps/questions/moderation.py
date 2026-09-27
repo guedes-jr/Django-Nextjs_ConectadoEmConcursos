@@ -2,9 +2,9 @@
 
 Publicar ou rejeitar é decisão editorial com rastro de auditoria, então as três
 ações moram aqui e nenhuma delas aceita status pronto: quem chama escolhe entre
-`approve`, `reject` e `reopen`. O `is_active` é sempre derivado do `status` por
-`sync_visibility`, é ele que segura a leitura dos 11 pontos de query da app —
-por isso as ações nunca setam o campo na mão.
+`approve`, `reject` e `reopen`. O `status` é a única fonte da verdade da
+visibilidade — os leitores filtram por `status=APPROVED` (`visibility.visible`),
+então estas ações são o único caminho para publicar algo.
 """
 
 from django.core.exceptions import ValidationError
@@ -35,14 +35,6 @@ REVIEW_FIELDS = [
 ]
 
 
-def sync_visibility(question, save: bool = True):
-    """Deixa `is_active` sempre igual a "aprovada" e grava a mudança."""
-    question.is_active = question.status == Question.Status.APPROVED
-    if save:
-        question.save(update_fields=["is_active", "updated_at"])
-    return question
-
-
 def approve(question, reviewer, explanation=None):
     """Aprova e publica a questão.
 
@@ -69,8 +61,7 @@ def approve(question, reviewer, explanation=None):
         question.review_note = ""
         question.rejection_reason = ""
         question.rejection_reason_code = ""
-        sync_visibility(question, save=False)
-        question.save(update_fields=[*REVIEW_FIELDS, "is_active", "updated_at"])
+        question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
     return question
 
 
@@ -102,8 +93,7 @@ def reject(question, reviewer, reason, reason_code):
         question.review_note = ""
         question.rejection_reason = reason
         question.rejection_reason_code = reason_code
-        sync_visibility(question, save=False)
-        question.save(update_fields=[*REVIEW_FIELDS, "is_active", "updated_at"])
+        question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
     return question
 
 
@@ -116,6 +106,5 @@ def reopen(question, reviewer, note=""):
         question.review_note = (note or "").strip()
         question.rejection_reason = ""
         question.rejection_reason_code = ""
-        sync_visibility(question, save=False)
-        question.save(update_fields=[*REVIEW_FIELDS, "is_active", "updated_at"])
+        question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
     return question

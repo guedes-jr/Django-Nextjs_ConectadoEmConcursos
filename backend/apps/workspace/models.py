@@ -57,6 +57,14 @@ class SimulationRun(models.Model):
 
 
 class ExamSubmission(models.Model):
+    """Prova que um aluno enviou para virar questão.
+
+    O envio é só a primeira metade: a prova entra na fila do admin como `PENDING` e
+    só vira questão depois que alguém converte o conteúdo pelo mesmo pipeline das
+    fontes. `rights_confirmed` é obrigatório porque a conversão publica material de
+    terceiros — sem a declaração de quem enviou, o material não entra.
+    """
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pendente"
         REVIEWED = "reviewed", "Revisada"
@@ -67,4 +75,25 @@ class ExamSubmission(models.Model):
     file = models.FileField(upload_to="exam_submissions/", blank=True, null=True)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    rights_confirmed = models.BooleanField(default=False)
+    source = models.ForeignKey(
+        "questions.QuestionSource",
+        on_delete=models.SET_NULL,
+        related_name="exam_submissions",
+        null=True,
+        blank=True,
+    )
+    converted_run = models.ForeignKey(
+        "questions.SearchRun",
+        on_delete=models.SET_NULL,
+        related_name="exam_submissions",
+        null=True,
+        blank=True,
+    )
+    converted_at = models.DateTimeField(null=True, blank=True)
+    converted_questions = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_converted(self) -> bool:
+        return self.converted_run_id is not None

@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, SimulationTemplate, UserAnswer
 from apps.questions.naming import banca_query
 from apps.questions.review import schedule_review
+from apps.questions.visibility import visible
 from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer, SimulationTemplateSerializer
 from apps.billing.services import capabilities_for
 from apps.workspace.models import SimulationRun
@@ -24,7 +25,7 @@ def questions_for_user(user):
         user=user, question=OuterRef("pk")
     ).order_by("-created_at", "-id")
     reviews = QuestionReview.objects.filter(user=user, question=OuterRef("pk"))
-    return Question.objects.filter(is_active=True).select_related("exam").annotate(
+    return visible().select_related("exam", "source").annotate(
         is_favorite=Exists(Favorite.objects.filter(user=user, question=OuterRef("pk"))),
         comment_count=Count("comments", distinct=True),
         latest_answer=Subquery(
@@ -45,7 +46,10 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = Exam.objects.filter(is_published=True).annotate(
-            question_count=Count("questions", filter=Q(questions__is_active=True), distinct=True)
+            question_count=Count(
+                "questions", filter=Q(questions__status=Question.Status.APPROVED),
+                distinct=True,
+            )
         )
         search = self.request.query_params.get("search", "").strip()
         banca = self.request.query_params.get("banca", "").strip()
@@ -86,7 +90,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"])
     def disciplines(self, request):
         values = (
-            Question.objects.filter(is_active=True)
+            visible()
             .order_by("discipline")
             .values_list("discipline", flat=True)
             .distinct()
@@ -95,7 +99,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"])
     def facets(self, request):
-        queryset = Question.objects.filter(is_active=True)
+        queryset = visible()
         return Response({
             "disciplines": list(queryset.order_by("discipline").values_list("discipline", flat=True).distinct()),
             "bancas": list(queryset.order_by("banca").values_list("banca", flat=True).distinct()),
@@ -174,7 +178,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             if not isinstance(time_limit, int) or not 1 <= time_limit <= 180:
                 return Response({"detail": "Tempo limite inválido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        queryset = Question.objects.filter(is_active=True)
+        queryset = visible()
         discipline = str(data.get("discipline") or "").strip()
         banca = str(data.get("banca") or "").strip()
         year = data.get("year")
@@ -285,7 +289,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "Questões inválidas ou repetidas."}, status=status.HTTP_400_BAD_REQUEST)
         if run is not None and not set(question_ids).issubset(run.question_ids):
             return Response({"detail": "Uma ou mais questões não pertencem ao simulado."}, status=status.HTTP_400_BAD_REQUEST)
-        questions = Question.objects.filter(pk__in=question_ids, is_active=True).in_bulk()
+        questions = visible(Question.objects.filter(pk__in=question_ids)).in_bulk()
         if len(questions) != len(entries):
             return Response({"detail": "Uma ou mais questões não estão disponíveis."}, status=status.HTTP_400_BAD_REQUEST)
         validated = []
@@ -315,7 +319,9 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
                 })
             if run is not None:
                 answered_by_id = {item["question_id"]: item for item in results}
-                session_questions = Question.objects.filter(pk__in=run.question_ids, is_active=True).in_bulk()
+                session_questions = visible(
+                    Question.objects.filter(pk__in=run.question_ids)
+                ).in_bulk()
                 full_results = []
                 for qid in run.question_ids:
                     question = session_questions.get(qid)

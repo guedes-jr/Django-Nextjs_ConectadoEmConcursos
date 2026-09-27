@@ -1,8 +1,9 @@
-"""Testes de regressão de visibilidade — Fase 0.7.
+"""Testes de regressão de visibilidade — Fase 0.7, atualizados na Fase 4.
 
 Garante que questões PENDING e REJECTED são invisíveis em TODOS os endpoints do
-aluno, e que o invariante `is_active = (status == APPROVED)` nunca é quebrado.
-Estes testes fazem parte do CI e devem permanecer verdes a cada PR.
+aluno. Desde a Fase 4 existe um único estado: `status`. Não há mais campo derivado
+para quebrar o invariante — a regra é `status=APPROVED`, e todo leitor passa por
+`apps.questions.visibility.visible`.
 """
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,8 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.questions import moderation
-from apps.questions.models import Exam, Question
+from apps.questions.models import Exam, Question, QuestionSource
+from apps.questions.visibility import visible
 from apps.chat.services import build_study_context
 from apps.workspace.models import Notebook
 
@@ -28,7 +30,7 @@ LONG_EXPLANATION = (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_question(status=Question.Status.PENDING, is_active=False, **kwargs):
+def _make_question(status=Question.Status.PENDING, **kwargs):
     defaults = dict(
         discipline="Direito Constitucional",
         banca="CEBRASPE",
@@ -38,25 +40,22 @@ def _make_question(status=Question.Status.PENDING, is_active=False, **kwargs):
         correct_answer=1,
     )
     defaults.update(kwargs)
-    return Question.objects.create(status=status, is_active=is_active, **defaults)
+    return Question.objects.create(status=status, **defaults)
 
 
 def _approved(**kwargs):
     q = _make_question(
-        status=Question.Status.APPROVED,
-        is_active=True,
-        explanation=LONG_EXPLANATION,
-        **kwargs,
+        status=Question.Status.APPROVED, explanation=LONG_EXPLANATION, **kwargs
     )
     return q
 
 
 def _pending(**kwargs):
-    return _make_question(status=Question.Status.PENDING, is_active=False, **kwargs)
+    return _make_question(status=Question.Status.PENDING, **kwargs)
 
 
 def _rejected(**kwargs):
-    q = _make_question(status=Question.Status.REJECTED, is_active=False, **kwargs)
+    q = _make_question(status=Question.Status.REJECTED, **kwargs)
     q.rejection_reason = "Gabarito errado na fonte."
     q.rejection_reason_code = "gabarito_errado"
     q.save(update_fields=["rejection_reason", "rejection_reason_code"])
@@ -67,52 +66,43 @@ def _rejected(**kwargs):
 # 1. Invariante do modelo
 # ---------------------------------------------------------------------------
 
-class DefaultIsActiveTests(TestCase):
-    """Question.objects.create() sem is_active explícito nasce is_active=False."""
+class StatusIsTheOnlySourceOfTruthTests(TestCase):
+    """O modelo não guarda nenhum estado de visibilidade: só `status`."""
 
-    def test_new_question_default_is_active_false(self):
+    def test_new_question_is_pending(self):
         q = Question.objects.create(
             discipline="Matemática", banca="FGV", year=2024,
             statement="Enunciado", options=["A", "B"], correct_answer=0,
         )
-        self.assertFalse(q.is_active)
         self.assertEqual(q.status, Question.Status.PENDING)
+        self.assertFalse(hasattr(q, "is_active"))
 
-    def test_sync_visibility_follows_status(self):
-        q = _pending()
-        for status_val, expected in (
-            (Question.Status.APPROVED, True),
-            (Question.Status.PENDING, False),
-            (Question.Status.REJECTED, False),
-        ):
-            with self.subTest(status=status_val):
-                q.status = status_val
-                moderation.sync_visibility(q)
-                self.assertEqual(Question.objects.get(pk=q.pk).is_active, expected)
+    def test_visible_keeps_only_approved(self):
+        approved, pending, rejected = _approved(), _pending(), _rejected()
+        visible_ids = set(visible().values_list("id", flat=True))
+        self.assertEqual(visible_ids, {approved.id})
 
-    def test_approve_sets_is_active_true(self):
+    def test_approve_makes_the_question_visible(self):
         reviewer = User.objects.create_user("rev", password="x")
         q = _pending()
         moderation.approve(q, reviewer, LONG_EXPLANATION)
-        q.refresh_from_db()
-        self.assertTrue(q.is_active)
-        self.assertEqual(q.status, Question.Status.APPROVED)
+        self.assertIn(q.pk, set(visible().values_list("id", flat=True)))
 
-    def test_reject_sets_is_active_false(self):
+    def test_reject_hides_the_question(self):
         reviewer = User.objects.create_user("rev2", password="x")
         q = _approved()
         moderation.reject(q, reviewer, "Gabarito errado", "gabarito_errado")
         q.refresh_from_db()
-        self.assertFalse(q.is_active)
         self.assertEqual(q.status, Question.Status.REJECTED)
+        self.assertNotIn(q.pk, set(visible().values_list("id", flat=True)))
 
-    def test_reopen_sets_is_active_false(self):
+    def test_reopen_hides_the_question_again(self):
         reviewer = User.objects.create_user("rev3", password="x")
         q = _approved()
         moderation.reopen(q, reviewer, "Conteúdo mudou na fonte.")
         q.refresh_from_db()
-        self.assertFalse(q.is_active)
         self.assertEqual(q.status, Question.Status.PENDING)
+        self.assertNotIn(q.pk, set(visible().values_list("id", flat=True)))
 
 
 # ---------------------------------------------------------------------------
@@ -353,9 +343,29 @@ class NotebookVisibilityTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
+    def test_notebook_never_lists_a_question_that_left_the_curation(self):
+        """Vazamento fechado: o M2M sozinho não filtrava visibilidade.
+
+        Uma questão que entrou no caderno e depois foi rejeitada voltava para a
+        lista do aluno só porque a linha do M2M continuava lá.
+        """
+        approved = _approved()
+        approved_then_rejected = _approved(statement="Aprovada e depois rejeitada.")
+        resp = self.client.post("/api/workspace/notebooks/", {"title": "Caderno 3"})
+        nb_id = resp.data["id"]
+        item = Notebook.objects.get(pk=nb_id, user=self.user)
+        item.questions.add(approved, approved_then_rejected)
+        reviewer = User.objects.create_user("rev-caderno", password="x")
+        moderation.reject(approved_then_rejected, reviewer, "Duplicada", "duplicada")
+
+        resp = self.client.get("/api/workspace/notebooks/")
+
+        notebook = next(row for row in resp.data if row["id"] == nb_id)
+        self.assertEqual(notebook["question_ids"], [approved.id])
+
 
 # ---------------------------------------------------------------------------
-# 8. Backoffice — PATCH direto de is_active recusado
+# 8. Backoffice — o PATCH legado não publica nada sem passar pelo moderation
 # ---------------------------------------------------------------------------
 
 class BackofficePatchVisibilityTests(TestCase):
@@ -365,16 +375,16 @@ class BackofficePatchVisibilityTests(TestCase):
         self.client.force_authenticate(self.admin)
         self.pending = _pending()
 
-    def test_patch_is_active_directly_is_refused(self):
-        """Setar is_active direto via PATCH deve ser recusado — use action=approve."""
+    def test_patch_without_a_moderation_action_publishes_nothing(self):
+        """Sem `action` e sem `explanation`, o PATCH legado não publica nada."""
         resp = self.client.patch("/api/backoffice/content/questions/", {
             "id": self.pending.id,
-            "is_active": True,
+            "status": Question.Status.APPROVED,
         }, format="json")
-        # Sem action válida e sem explanation, a view retorna 400
         self.assertEqual(resp.status_code, 400)
-        # O campo is_active NÃO foi alterado no banco
-        self.assertFalse(Question.objects.get(pk=self.pending.id).is_active)
+        self.assertNotIn(
+            self.pending.id, set(visible().values_list("id", flat=True))
+        )
 
     def test_approve_via_backoffice_uses_moderation(self):
         resp = self.client.patch("/api/backoffice/content/questions/", {
@@ -384,7 +394,6 @@ class BackofficePatchVisibilityTests(TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 200)
         q = Question.objects.get(pk=self.pending.id)
-        self.assertTrue(q.is_active)
         self.assertEqual(q.status, Question.Status.APPROVED)
         self.assertEqual(q.reviewed_by, self.admin)
 
@@ -397,8 +406,8 @@ class BackofficePatchVisibilityTests(TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 200)
         q = Question.objects.get(pk=self.pending.id)
-        self.assertFalse(q.is_active)
         self.assertEqual(q.status, Question.Status.REJECTED)
+        self.assertNotIn(q.pk, set(visible().values_list("id", flat=True)))
 
     def test_approve_with_short_explanation_returns_400(self):
         resp = self.client.patch("/api/backoffice/content/questions/", {
@@ -432,3 +441,49 @@ class BackofficePatchVisibilityTests(TestCase):
         # Opções presentes
         self.assertIn("options", result)
         self.assertIn("correct_answer", result)
+
+
+class AttributionVisibilityTests(TestCase):
+    """A licença de algumas fontes obriga o aluno a ver o crédito da questão."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="aluno", password="x")
+        self.client.force_login(self.user)
+
+    def _question(self, source, status=Question.Status.APPROVED):
+        return Question.objects.create(
+            source=source, discipline="Direito", banca="CEBRASPE", year=2024,
+            statement="Enunciado com crédito obrigatório.", options=["A", "B"],
+            correct_answer=0, status=status,
+        )
+
+    def test_approved_question_shows_the_attribution_of_a_source_that_requires_it(self):
+        source = QuestionSource.objects.create(
+            slug="creditada", name="Fonte com crédito", license_name="CC BY 4.0",
+            attribution="Questões adaptadas de Fonte X.", requires_attribution=True, is_active=True,
+        )
+        self._question(source)
+
+        data = self.client.get("/api/questions/").data["results"][0]
+
+        self.assertEqual(data["attribution"], "Questões adaptadas de Fonte X.")
+
+    def test_source_without_attribution_requirement_sends_an_empty_credit(self):
+        source = QuestionSource.objects.create(
+            slug="sem-credito", name="Fonte livre", license_name="Domínio público",
+            attribution="Fonte X.", requires_attribution=False, is_active=True,
+        )
+        self._question(source)
+
+        data = self.client.get("/api/questions/").data["results"][0]
+
+        self.assertEqual(data["attribution"], "")
+
+    def test_pending_question_is_not_in_the_list_to_attribute(self):
+        source = QuestionSource.objects.create(
+            slug="creditada-pendente", name="Fonte com crédito", license_name="CC BY 4.0",
+            attribution="Fonte X.", requires_attribution=True, is_active=True,
+        )
+        self._question(source, status=Question.Status.PENDING)
+
+        self.assertEqual(self.client.get("/api/questions/").data["results"], [])

@@ -6,6 +6,7 @@ moram aqui agora: qualquer fonte que traga HTML passa pelo mesmo caminho, e o
 """
 
 import csv
+import io
 import json
 import re
 from html.parser import HTMLParser
@@ -92,11 +93,20 @@ def _options(value):
     return [rich_text(option) or "[Alternativa sem conteúdo na fonte]" for option in value]
 
 
-def parse_xml(path: Path) -> list[QuestionItem]:
-    root = ElementTree.parse(path).getroot()
+def parse_xml_text(text: str) -> list[QuestionItem]:
+    try:
+        root = ElementTree.fromstring(text.lstrip())
+    except ElementTree.ParseError as exc:
+        # `ParseError` é `SyntaxError`, não `ValueError`: sem esta tradução, quem
+        # chama só com texto (o formulário de conversão) não pega a exceção.
+        raise ValueError(f"XML inválido: {exc}") from exc
     if root.tag != "questions":
         raise ValueError("a raiz do XML deve ser <questions>")
     return [item for number, node in enumerate(root, 1) if (item := _xml_item(node, number))]
+
+
+def parse_xml(path: Path) -> list[QuestionItem]:
+    return parse_xml_text(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def _xml_item(node, number: int) -> QuestionItem:
@@ -139,16 +149,30 @@ def _xml_item(node, number: int) -> QuestionItem:
     )
 
 
+def parse_json_text(text: str) -> list[QuestionItem]:
+    payload = json.loads(text.lstrip("\ufeff"))
+    if isinstance(payload, dict):
+        if "questions" not in payload:
+            raise ValueError('o objeto JSON precisa da chave "questions"')
+        payload = payload["questions"]
+    if not isinstance(payload, list):
+        raise ValueError("o JSON deve ser uma lista de questões")
+    return [
+        item for number, row in enumerate(payload, 1) if (item := row_item(row, number))
+    ]
+
+
 def parse_json(path: Path) -> list[QuestionItem]:
-    with path.open(encoding="utf-8-sig") as source:
-        payload = json.load(source)
-    rows = payload["questions"] if isinstance(payload, dict) else payload
+    return parse_json_text(Path(path).read_text(encoding="utf-8-sig"))
+
+
+def parse_csv_text(text: str) -> list[QuestionItem]:
+    rows = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
     return [item for number, row in enumerate(rows, 1) if (item := row_item(row, number))]
 
 
 def parse_csv(path: Path) -> list[QuestionItem]:
-    with path.open(encoding="utf-8-sig", newline="") as source:
-        return [item for number, row in enumerate(csv.DictReader(source), 1) if (item := row_item(row, number))]
+    return parse_csv_text(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def row_item(row, number: int) -> QuestionItem:
@@ -181,12 +205,34 @@ def row_item(row, number: int) -> QuestionItem:
 PARSERS = {".xml": parse_xml, ".json": parse_json, ".csv": parse_csv}
 
 
+TEXT_PARSERS = {".xml": parse_xml_text, ".json": parse_json_text, ".csv": parse_csv_text}
+
+
+def parse_content(text: str, filename: str = "") -> list[QuestionItem]:
+    """Lê o conteúdo colado no formulário de conversão de prova.
+
+    O admin cola o XML ou o JSON direto no campo, sem passar por arquivo nenhum. Com
+    `filename` o sufixo decide; sem ele, o formato é deduzido do próprio texto, e
+    erro de formato é erro do admin — não da fonte.
+    """
+    body = (text or "").strip()
+    if not body:
+        raise ValueError("Cole o XML ou o JSON da prova.")
+    suffix = Path(filename).suffix.lower() if filename else ""
+    if suffix in TEXT_PARSERS:
+        return TEXT_PARSERS[suffix](body)
+    if body.startswith("{"):
+        return parse_json_text(body)
+    if body.startswith("<"):
+        return parse_xml_text(body)
+    if body.startswith(("[", "statement,", "statement;")) or "," in body.splitlines()[0]:
+        return parse_csv_text(body)
+    raise ValueError("Não reconheci o formato: cole um XML, um JSON ou um CSV.")
+
+
 def parse_file(path: Path) -> list[QuestionItem]:
     """Lê um arquivo e devolve itens já normalizados, sem tocar no banco."""
     path = Path(path)
     if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
         raise ValueError("Informe um arquivo .json, .csv ou .xml existente.")
-    try:
-        return PARSERS[path.suffix.lower()](path)
-    except ElementTree.ParseError as exc:
-        raise ValueError(f"XML inválido: {exc}") from exc
+    return PARSERS[path.suffix.lower()](path)
