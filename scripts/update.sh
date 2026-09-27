@@ -243,7 +243,8 @@ check_next_admin_route() {
     case "$status" in
 
         301|302|303|307|308)
-            if [[ "$location" == *"/?next="* || "$location" == "?next="* ]]; then
+            # Páginas protegidas podem redirecionar para o login; ambos os formatos são válidos.
+            if [[ "$location" == *"/?next="* || "$location" == *"/login?next="* || "$location" == "?next=" ]]; then
                 return 0
             fi
             ;;
