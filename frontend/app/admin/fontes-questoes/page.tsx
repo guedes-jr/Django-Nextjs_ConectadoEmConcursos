@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/admin/PageHeader";
 import { Notice } from "@/components/admin/Notice";
 import { Button } from "@/components/ui/button";
 import { SearchDialog } from "@/components/admin/questions/SearchDialog";
+import { adminUrl } from "@/lib/admin";
 import { apiMessage, content, type SearchRun, type SourceCatalogItem } from "@/lib/content";
 
 export default function FontesQuestoesPage() {
@@ -38,7 +39,7 @@ export default function FontesQuestoesPage() {
       <PageHeader
         title="Fontes de questões"
         description="Escolha uma fonte autorizada, refine os filtros e envie o resultado para a fila de revisão."
-        actions={<Button onClick={() => setDialogOpen(true)}><Search className="h-4 w-4" /> Nova busca</Button>}
+        actions={<><Button variant="outline" asChild><a href={adminUrl("questions/questionsource/add/")}>Cadastrar fonte</a></Button><Button onClick={() => setDialogOpen(true)}><Search className="h-4 w-4" /> Nova busca</Button></>}
       />
       {feedback && <Notice kind={feedback.kind}>{feedback.message}</Notice>}
       <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
@@ -52,7 +53,7 @@ export default function FontesQuestoesPage() {
               <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">{source.availability_message}</p>
               <dl className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div><dt className="text-slate-500">Na fila</dt><dd className="mt-1 font-semibold">{source.pending_total}</dd></div><div><dt className="text-slate-500">Importadas</dt><dd className="mt-1 font-semibold">{source.questions_total}</dd></div><div><dt className="text-slate-500">Buscas</dt><dd className="mt-1 font-semibold">{source.runs_total}</dd></div></dl>
               <p className="mt-4 text-xs text-slate-500">Licença: {source.license_name || "não informada"}</p>
-              <div className="mt-auto flex gap-2 pt-4">{source.ready_for_import ? <Button size="sm" onClick={() => setDialogOpen(true)}>Buscar e enviar à fila</Button> : <Button size="sm" variant="outline" asChild><Link href="/admin/fila-questoes">Ver configuração</Link></Button>}{source.home_url && <Button size="sm" variant="ghost" asChild><a href={source.home_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /> Origem</a></Button>}</div>
+              <div className="mt-auto flex gap-2 pt-4">{source.ready_for_import ? <Button size="sm" onClick={() => setDialogOpen(true)}>Buscar e enviar à fila</Button> : <Button size="sm" variant="outline" asChild><a href={adminUrl(`questions/questionsource/${source.id}/change/`)}>Configurar</a></Button>}{source.home_url && <Button size="sm" variant="ghost" asChild><a href={source.home_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /> Origem</a></Button>}</div>
             </article>
           ))}
           {sources.length === 0 && <p className="text-sm text-slate-500">Nenhuma fonte cadastrada. Cadastre uma fonte com licença e configuração de coleta antes de ativá-la.</p>}
