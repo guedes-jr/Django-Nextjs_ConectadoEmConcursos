@@ -4,9 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BookOpen, Brain, CalendarDays, ChartColumn, ChevronDown, ClipboardList, FileText, GraduationCap, HelpCircle, History, Landmark, ListChecks, Menu, MessageSquare, Newspaper, NotebookPen, Send, Shield, Star, Trophy, User, Users, X, Bell, Presentation } from "lucide-react";
+import { BookOpen, Brain, CalendarDays, ChartColumn, ChevronDown, ClipboardList, FileText, HelpCircle, History, Landmark, ListChecks, Menu, MessageSquare, Newspaper, NotebookPen, Send, Shield, Star, Trophy, User, Users, X, Bell, Presentation } from "lucide-react";
 import { useMe } from "@/lib/useMe";
-import { adminUrl, backendUrl } from "@/lib/admin";
+import { backendUrl } from "@/lib/admin";
 import { getStudyAlerts } from "@/lib/studies";
 
 const primary = [

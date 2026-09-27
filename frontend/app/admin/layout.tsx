@@ -20,6 +20,11 @@ import {
   ClipboardCheck,
   Search,
   Archive,
+  Trophy,
+  FilePlus2,
+  Newspaper,
+  Building2,
+  HelpCircle,
 } from "lucide-react";
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
@@ -35,6 +40,17 @@ const navGroups = [
       { href: "/admin/assinaturas", label: "Assinaturas", icon: CreditCard },
       { href: "/admin/planos", label: "Planos", icon: Package },
       { href: "/admin/staff", label: "Staff", icon: ShieldCheck },
+    ],
+  },
+  {
+    label: "Cadastros e conteúdos",
+    items: [
+      { href: "/admin/cadastros", label: "Visão geral", icon: LayoutDashboard },
+      { href: "/admin/bancas", label: "Bancas", icon: Building2 },
+      { href: "/admin/concursos", label: "Concursos", icon: Trophy },
+      { href: "/admin/provas", label: "Provas", icon: FilePlus2 },
+      { href: "/admin/questoes", label: "Questões", icon: HelpCircle },
+      { href: "/admin/artigos", label: "Artigos", icon: Newspaper },
     ],
   },
   {

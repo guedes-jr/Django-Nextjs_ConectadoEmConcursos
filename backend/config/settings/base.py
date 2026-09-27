@@ -102,6 +102,9 @@ CHANNEL_LAYERS = {
     },
 }
 
+OFFICIAL_EXAM_DOWNLOAD_LIMIT = int(os.getenv("OFFICIAL_EXAM_DOWNLOAD_LIMIT", "10"))
+OFFICIAL_EXAM_DOWNLOAD_WINDOW_SECONDS = int(os.getenv("OFFICIAL_EXAM_DOWNLOAD_WINDOW_SECONDS", "3600"))
+
 Q_CLUSTER = {
     "name": os.getenv("Q_NAME", "conectadoemconcursos"),
     "workers": int(os.getenv("Q_WORKERS", "2")),
@@ -137,6 +140,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+OFFICIAL_EXAMS_ROOT = Path(os.getenv("OFFICIAL_EXAMS_ROOT", BASE_DIR / "private" / "official-exams"))
 
 BACKUP_DIR = BASE_DIR / "backups"
 BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "20"))

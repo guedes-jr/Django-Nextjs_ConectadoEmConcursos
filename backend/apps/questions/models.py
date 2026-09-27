@@ -1,6 +1,11 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.text import slugify
 from django.utils import timezone
+
+from apps.questions.naming import banca_key
+from .storages import official_exam_storage
 
 # Fonte usada para o conteúdo que já existia antes das Questões/Fontes e para o
 # `import_content`. Nasce inativa: a licença do conteúdo pré-existente precisa ser
@@ -17,6 +22,9 @@ class Exam(models.Model):
     level = models.CharField(max_length=40, blank=True, db_index=True)
     state = models.CharField(max_length=2, blank=True, db_index=True)
     is_published = models.BooleanField(default=True, db_index=True)
+    concurso = models.ForeignKey("concursos.Concurso", null=True, blank=True, on_delete=models.SET_NULL, related_name="exams")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_exams")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_exams")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -30,6 +38,84 @@ class Exam(models.Model):
 
     def __str__(self):
         return f"{self.banca} - {self.title} ({self.year})"
+
+
+class BancaCatalog(models.Model):
+    """Catálogo editorial de bancas, sem substituir os campos textuais existentes."""
+
+    name = models.CharField(max_length=100)
+    normalized_name = models.CharField(max_length=120, unique=True, editable=False)
+    slug = models.SlugField(max_length=120, unique=True)
+    official_url = models.URLField(max_length=600, blank=True)
+    description = models.TextField(blank=True)
+    image_url = models.URLField(max_length=600, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_featured = models.BooleanField(default=False, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_banca_catalogs",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="updated_banca_catalogs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def clean(self):
+        self.name = " ".join((self.name or "").split())
+        if not self.name:
+            raise ValidationError({"name": "Informe o nome canônico da banca."})
+        self.normalized_name = banca_key(self.name)
+        if BancaAlias.objects.filter(
+            normalized_alias=self.normalized_name
+        ).exists():
+            raise ValidationError({"name": "Este nome já está cadastrado como alias de outra banca."})
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)[:120]
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class BancaAlias(models.Model):
+    """Grafia alternativa que resolve para uma banca canônica."""
+
+    banca = models.ForeignKey(BancaCatalog, on_delete=models.CASCADE, related_name="aliases")
+    alias = models.CharField(max_length=100)
+    normalized_alias = models.CharField(max_length=120, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["alias"]
+
+    def clean(self):
+        self.alias = " ".join((self.alias or "").split())
+        if not self.alias:
+            raise ValidationError({"alias": "Informe uma grafia alternativa."})
+        self.normalized_alias = banca_key(self.alias)
+        catalog_match = BancaCatalog.objects.exclude(pk=self.banca_id).filter(
+            normalized_name=self.normalized_alias
+        ).exists()
+        if catalog_match:
+            raise ValidationError({"alias": "Este alias coincide com o nome canônico de outra banca."})
+        if self.banca_id and self.normalized_alias == self.banca.normalized_name:
+            raise ValidationError({"alias": "O alias não pode repetir o nome canônico da própria banca."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.alias} → {self.banca.name}"
 
 
 class QuestionSource(models.Model):
@@ -127,6 +213,7 @@ class SearchRun(models.Model):
 
 class Question(models.Model):
     class Status(models.TextChoices):
+        DRAFT = "draft", "Rascunho"
         PENDING = "pending", "Na fila de aprovação"
         APPROVED = "approved", "Aprovada"
         REJECTED = "rejected", "Rejeitada"
@@ -407,10 +494,11 @@ class OfficialExamDownload(models.Model):
         FAILED = "failed", "Falhou"
     document = models.ForeignKey(OfficialExamDocument, on_delete=models.CASCADE, related_name="downloads")
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.RUNNING)
-    file = models.FileField(upload_to="official-exams/%Y/%m/", blank=True)
+    file = models.FileField(storage=official_exam_storage, upload_to="official-exams/%Y/%m/", blank=True)
     sha256 = models.CharField(max_length=64, blank=True)
     bytes_count = models.PositiveBigIntegerField(default=0)
     http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    final_url = models.URLField(max_length=1000, blank=True)
     error_message = models.CharField(max_length=300, blank=True)
     started_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)

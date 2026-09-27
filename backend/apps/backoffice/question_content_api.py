@@ -3,6 +3,7 @@
 import json
 
 from django.core.exceptions import ValidationError
+from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.db.models import Count, Q
@@ -16,7 +17,7 @@ from apps.questions import moderation
 from apps.questions.ingest import run as run_search
 from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
 from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
-from apps.questions.models import OfficialExamDocument, OfficialExamPortal, Question, QuestionSource, SearchRun
+from apps.questions.models import BancaAlias, BancaCatalog, OfficialExamDocument, OfficialExamDownload, OfficialExamPortal, Question, QuestionSource, SearchRun
 from apps.questions.queue import QUEUE_PRIORITY_ORDER, annotate_queue_priority
 from apps.questions.submissions import convert_submission
 from apps.workspace.models import ExamSubmission
@@ -577,8 +578,19 @@ def _portal_payload(portal):
     return {"id": portal.id, "slug": portal.slug, "name": portal.name, "catalog_url": portal.catalog_url, "notes": portal.notes, "is_active": portal.is_active, "documents_count": getattr(portal, "documents_count", 0)}
 
 
+def _workflow_status(document):
+    if document.kind != OfficialExamDocument.Kind.EXAM:
+        return "answer_key"
+    if not document.paired_with_id:
+        return "answer_key_pending"
+    if document.status == OfficialExamDocument.Status.DOWNLOADED and document.paired_with.status == OfficialExamDocument.Status.DOWNLOADED:
+        return "ready_manual"
+    return "paired"
+
+
 def _document_payload(document):
-    return {"id": document.id, "portal": document.portal.slug, "portal_name": document.portal.name, "title": document.title, "year": document.year, "organization": document.organization, "role": document.role, "kind": document.kind, "status": document.status, "source_url": document.source_url, "paired_with": document.paired_with_id, "created_at": document.created_at}
+    latest = document.downloads.order_by("-created_at").first()
+    return {"id": document.id, "portal": document.portal.slug, "portal_name": document.portal.name, "title": document.title, "year": document.year, "organization": document.organization, "role": document.role, "kind": document.kind, "status": document.status, "source_url": document.source_url, "paired_with": document.paired_with_id, "workflow_status": _workflow_status(document), "created_at": document.created_at, "download": {"status": latest.status, "bytes": latest.bytes_count, "sha256": latest.sha256, "error": latest.error_message, "finished_at": latest.finished_at, "final_url": latest.final_url} if latest else None}
 
 
 @api_view(["GET"])
@@ -587,6 +599,21 @@ def official_exam_portals(request):
     portals = OfficialExamPortal.objects.annotate(documents_count=Count("documents")).order_by("name")
     return Response({"results": [_portal_payload(portal) for portal in portals]})
 
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def official_exam_metrics(request):
+    downloads = OfficialExamDownload.objects.all()
+    completed = list(downloads.filter(finished_at__isnull=False).only("created_at", "finished_at").order_by("-finished_at")[:500])
+    durations = [(item.finished_at - item.created_at).total_seconds() for item in completed if item.finished_at]
+    return Response({
+        "documents": OfficialExamDocument.objects.count(),
+        "discovered": OfficialExamDocument.objects.filter(status=OfficialExamDocument.Status.DISCOVERED).count(),
+        "downloads_done": downloads.filter(status=OfficialExamDownload.Status.DONE).count(),
+        "downloads_failed": downloads.filter(status=OfficialExamDownload.Status.FAILED).count(),
+        "downloads_running": downloads.filter(status=OfficialExamDownload.Status.RUNNING).count(),
+        "average_duration_seconds": round(sum(durations) / len(durations), 1) if durations else None,
+    })
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAdminUser])
@@ -612,8 +639,53 @@ def official_exam_documents(request):
     documents = OfficialExamDocument.objects.select_related("portal", "paired_with").order_by("-created_at")
     if portal := request.query_params.get("portal"):
         documents = documents.filter(portal__slug=portal)
+    if kind := request.query_params.get("kind"):
+        documents = documents.filter(kind=kind)
+    if document_status := request.query_params.get("status"):
+        documents = documents.filter(status=document_status)
+    if year := request.query_params.get("year"):
+        try:
+            documents = documents.filter(year=int(year))
+        except ValueError:
+            return Response({"year": ["Informe um ano válido."]}, status=status.HTTP_400_BAD_REQUEST)
+    if organization := request.query_params.get("organization"):
+        documents = documents.filter(organization__icontains=organization)
+    if role := request.query_params.get("role"):
+        documents = documents.filter(role__icontains=role)
     return Response({"results": [_document_payload(document) for document in documents[:200]]})
 
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def official_exam_export(request):
+    documents = OfficialExamDocument.objects.select_related("portal", "paired_with").prefetch_related("downloads").order_by("portal__name", "-year", "title")
+    if portal := request.query_params.get("portal"):
+        documents = documents.filter(portal__slug=portal)
+    if kind := request.query_params.get("kind"):
+        documents = documents.filter(kind=kind)
+    if document_status := request.query_params.get("status"):
+        documents = documents.filter(status=document_status)
+    if year := request.query_params.get("year"):
+        try:
+            documents = documents.filter(year=int(year))
+        except ValueError:
+            return Response({"year": ["Informe um ano válido."]}, status=status.HTTP_400_BAD_REQUEST)
+    if organization := request.query_params.get("organization"):
+        documents = documents.filter(organization__icontains=organization)
+    if role := request.query_params.get("role"):
+        documents = documents.filter(role__icontains=role)
+    documents = documents[:500]
+    payload = []
+    for document in documents:
+        latest = max(document.downloads.all(), key=lambda item: item.created_at, default=None)
+        payload.append({
+            "id": document.id, "portal": document.portal.name, "title": document.title,
+            "year": document.year, "organization": document.organization, "role": document.role,
+            "kind": document.kind, "status": document.status, "source_url": document.source_url,
+            "paired_with": document.paired_with_id,
+            "download": {"status": latest.status, "sha256": latest.sha256, "bytes": latest.bytes_count, "final_url": latest.final_url} if latest else None,
+        })
+    return Response({"format": "official-exam-manual-package/v1", "generated_at": timezone.now(), "count": len(payload), "documents": payload})
 
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
@@ -623,7 +695,238 @@ def official_exam_discover(request, slug):
         return Response({"detail": "Portal oficial não encontrado ou inativo."}, status=status.HTTP_404_NOT_FOUND)
     from apps.questions.official_exam_discovery import discover
     try:
-        result = discover(portal)
+        result = discover(portal, persist=bool(request.data.get("persist")))
     except ValidationError as exc:
         return _validation_response(exc)
-    return Response({"detail": f"Consulta concluída: {result['created']} referência(s) nova(s), {result['skipped']} já existente(s).", **result})
+    return Response({"detail": f"Consulta concluída: {result['created']} referência(s) nova(s), {result['skipped']} já existente(s)." if request.data.get("persist") else f"Prévia pronta: {len(result['candidates'])} documento(s) encontrado(s).", **result})
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def official_exam_download(request, pk):
+    document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
+    if not document:
+        return Response({"detail": "Documento não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if OfficialExamDownload.objects.filter(document=document, status=OfficialExamDownload.Status.DONE).exists() and not bool(request.data.get("force")):
+        return Response({"code": "confirm_repeat", "detail": "Já existe um PDF baixado. Confirme para registrar uma nova tentativa sem apagar o histórico."}, status=status.HTTP_409_CONFLICT)
+    from apps.questions.official_exam_downloads import create_download
+    try:
+        result = create_download(document, request.user)
+        from django_q.tasks import async_task
+        async_task("apps.questions.official_exam_downloads.run", result.id)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except Exception as exc:
+        result.status = OfficialExamDownload.Status.FAILED
+        result.error_message = "Não foi possível enviar o download para a fila."
+        result.finished_at = timezone.now()
+        result.save(update_fields=["status", "error_message", "finished_at"])
+        return Response({"detail": "Não foi possível enviar o download para a fila."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    return Response({"id": result.id, "status": result.status, "detail": "Download enviado para processamento."}, status=status.HTTP_202_ACCEPTED)
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def official_exam_file(request, pk):
+    record = OfficialExamDownload.objects.filter(document_id=pk, status=OfficialExamDownload.Status.DONE).exclude(file="").order_by("-created_at").first()
+    if not record:
+        return Response({"detail": "Não há PDF baixado para este documento."}, status=status.HTTP_404_NOT_FOUND)
+    if not record.file.storage.exists(record.file.name):
+        return Response({"detail": "O arquivo privado não está disponível no armazenamento."}, status=status.HTTP_404_NOT_FOUND)
+    return FileResponse(record.file.open("rb"), as_attachment=True, filename=f"documento-{pk}.pdf", content_type="application/pdf")
+
+@api_view(["GET", "DELETE"])
+@permission_classes([IsAdminUser])
+def official_exam_document_detail(request, pk):
+    document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
+    if not document:
+        return Response({"detail": "Documento não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        events = document.downloads.order_by("-created_at")
+        return Response({**_document_payload(document), "events": [{"id": item.id, "status": item.status, "http_status": item.http_status, "bytes": item.bytes_count, "sha256": item.sha256, "final_url": item.final_url, "error": item.error_message, "created_at": item.created_at, "finished_at": item.finished_at} for item in events]})
+    if document.downloads.filter(status=OfficialExamDownload.Status.DONE).exists():
+        return Response({"detail": "Documentos já baixados não podem ser descartados, para preservar a auditoria."}, status=status.HTTP_409_CONFLICT)
+    if document.paired_with_id:
+        OfficialExamDocument.objects.filter(pk=document.paired_with_id, paired_with_id=document.pk).update(paired_with=None)
+    document.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def official_exam_pair(request, pk):
+    document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
+    pair = OfficialExamDocument.objects.select_related("portal").filter(pk=request.data.get("paired_with")).first()
+    if not document or not pair:
+        return Response({"detail": "Informe documentos existentes para o pareamento."}, status=status.HTTP_400_BAD_REQUEST)
+    if document.pk == pair.pk or document.portal_id != pair.portal_id:
+        return Response({"detail": "Prova e gabarito devem ser documentos diferentes do mesmo portal."}, status=status.HTTP_400_BAD_REQUEST)
+    if document.kind == pair.kind or (document.kind != OfficialExamDocument.Kind.EXAM and pair.kind != OfficialExamDocument.Kind.EXAM):
+        return Response({"detail": "Associe uma prova a um gabarito preliminar ou final."}, status=status.HTTP_400_BAD_REQUEST)
+    if document.paired_with_id and document.paired_with_id != pair.pk:
+        return Response({"detail": "Este documento já está associado. Desfaça ou ajuste a associação antes de continuar."}, status=status.HTTP_400_BAD_REQUEST)
+    if pair.paired_with_id and pair.paired_with_id != document.pk:
+        return Response({"detail": "O documento selecionado já está associado a outro item."}, status=status.HTTP_400_BAD_REQUEST)
+    document.paired_with = pair
+    document.save(update_fields=["paired_with", "updated_at"])
+    if pair.paired_with_id != document.pk:
+        pair.paired_with = document
+        pair.save(update_fields=["paired_with", "updated_at"])
+    return Response(_document_payload(document))
+
+# Catálogo de bancas: deliberadamente separado das fontes de questões. Ele apenas
+# padroniza nomes para os próximos cadastros e não reescreve registros existentes.
+def _banca_payload(banca, include_aliases=True):
+    payload = {
+        "id": banca.id,
+        "name": banca.name,
+        "slug": banca.slug,
+        "official_url": banca.official_url,
+        "description": banca.description,
+        "image_url": banca.image_url,
+        "is_active": banca.is_active,
+        "is_featured": banca.is_featured,
+        "created_by": banca.created_by.get_username() if banca.created_by else None,
+        "updated_by": banca.updated_by.get_username() if banca.updated_by else None,
+        "created_at": banca.created_at,
+        "updated_at": banca.updated_at,
+        # Contagens são informativas: dados antigos continuam texto livre.
+        "questions_count": Question.objects.filter(banca__iexact=banca.name).count(),
+    }
+    from apps.questions.models import Exam
+    payload["exams_count"] = Exam.objects.filter(banca__iexact=banca.name).count()
+    if include_aliases:
+        payload["aliases"] = [
+            {"id": alias.id, "alias": alias.alias, "created_at": alias.created_at}
+            for alias in banca.aliases.all()
+        ]
+    return payload
+
+
+def _banca_write(banca, data, user):
+    writable = ("name", "slug", "official_url", "description", "image_url", "is_active", "is_featured")
+    for field in writable:
+        if field not in data:
+            continue
+        value = data[field]
+        if field in {"is_active", "is_featured"}:
+            if not isinstance(value, bool):
+                raise ValidationError({field: "Informe verdadeiro ou falso."})
+        elif not isinstance(value, str):
+            raise ValidationError({field: "Informe um texto válido."})
+        setattr(banca, field, value.strip() if isinstance(value, str) else value)
+    banca.updated_by = user
+    banca.save()
+    return banca
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def bancas(request):
+    if request.method == "POST":
+        name = request.data.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return Response({"name": ["Informe o nome canônico da banca."]}, status=status.HTTP_400_BAD_REQUEST)
+        banca = BancaCatalog(created_by=request.user, updated_by=request.user)
+        try:
+            _banca_write(banca, request.data, request.user)
+        except ValidationError as exc:
+            return _validation_response(exc)
+        return Response(_banca_payload(banca), status=status.HTTP_201_CREATED)
+
+    queryset = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by").order_by("name")
+    if request.query_params.get("active") in {"0", "1"}:
+        queryset = queryset.filter(is_active=request.query_params["active"] == "1")
+    if search := request.query_params.get("search", "").strip():
+        queryset = queryset.filter(Q(name__icontains=search) | Q(aliases__alias__icontains=search)).distinct()
+    limit, offset = _number(request.query_params.get("limit")), _offset(request.query_params.get("offset"))
+    total = queryset.count()
+    page = queryset[offset:offset + limit]
+    return Response({"total": total, "limit": limit, "offset": offset, "results": [_banca_payload(item) for item in page]})
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAdminUser])
+def banca_detail(request, pk):
+    banca = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by").filter(pk=pk).first()
+    if not banca:
+        return Response({"detail": "Banca não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(_banca_payload(banca))
+    try:
+        _banca_write(banca, request.data, request.user)
+    except ValidationError as exc:
+        return _validation_response(exc)
+    return Response(_banca_payload(banca))
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def banca_aliases(request, pk):
+    banca = BancaCatalog.objects.prefetch_related("aliases").filter(pk=pk).first()
+    if not banca:
+        return Response({"detail": "Banca não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response({"results": [{"id": item.id, "alias": item.alias, "created_at": item.created_at} for item in banca.aliases.all()]})
+    alias_value = request.data.get("alias")
+    if not isinstance(alias_value, str) or not alias_value.strip():
+        return Response({"alias": ["Informe uma grafia alternativa."]}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        alias = BancaAlias.objects.create(banca=banca, alias=alias_value)
+    except ValidationError as exc:
+        return _validation_response(exc)
+    return Response({"id": alias.id, "alias": alias.alias, "created_at": alias.created_at}, status=status.HTTP_201_CREATED)
+
+MANUAL_SOURCE_SLUG = "manual"
+
+def _manual_source():
+    source, _ = QuestionSource.objects.get_or_create(slug=MANUAL_SOURCE_SLUG, defaults={"name": "Cadastro manual", "kind": QuestionSource.Kind.LOCAL_FILE, "license_name": "Cadastro interno", "is_active": False})
+    return source
+
+def _manual_question_validate(data, exclude_id=None):
+    errors = {}; statement = str(data.get("statement", "")).strip(); banca = str(data.get("banca", "")).strip(); discipline = str(data.get("discipline", "")).strip(); reference = str(data.get("source_url", "")).strip(); options = data.get("options", []); answer = data.get("correct_answer")
+    if not statement: errors["statement"] = ["Informe o enunciado."]
+    if not banca: errors["banca"] = ["Informe a banca."]
+    if not discipline: errors["discipline"] = ["Informe a disciplina."]
+    if not reference.startswith(("https://", "http://")): errors["source_url"] = ["Informe uma URL de referência HTTP(S)."]
+    if not isinstance(options, list) or len(options) < 2 or any(not isinstance(x, str) or not x.strip() for x in options): errors["options"] = ["Informe ao menos duas alternativas preenchidas."]
+    if not isinstance(answer, int) or not isinstance(options, list) or answer < 0 or answer >= len(options): errors["correct_answer"] = ["Escolha uma alternativa válida como gabarito."]
+    if statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"]).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, banca e ano."]
+    if errors: raise ValidationError(errors)
+
+def _manual_question_write(question, data):
+    _manual_question_validate(data, question.pk)
+    for field in ("statement", "banca", "discipline", "year", "options", "correct_answer", "explanation", "source_url", "number"):
+        if field in data: setattr(question, field, data[field].strip() if isinstance(data[field], str) else data[field])
+    if "exam" in data: question.exam_id = data["exam"] or None
+    question.save()
+    return question
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def manual_questions(request):
+    if request.method == "POST":
+        question = Question(source=_manual_source(), status=Question.Status.DRAFT)
+        try: _manual_question_write(question, request.data)
+        except ValidationError as exc: return _validation_response(exc)
+        return Response(_question_payload(question, []), status=status.HTTP_201_CREATED)
+    qs = Question.objects.filter(source__slug=MANUAL_SOURCE_SLUG).select_related("exam").order_by("-updated_at")
+    return Response({"results": [_question_payload(q, []) for q in qs[:200]]})
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def manual_question_detail(request, pk):
+    question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
+    if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED}: return Response({"detail": "A questão já está em revisão ou publicada."}, status=status.HTTP_409_CONFLICT)
+    try: _manual_question_write(question, request.data)
+    except ValidationError as exc: return _validation_response(exc)
+    return Response(_question_payload(question, []))
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def manual_question_submit(request, pk):
+    question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
+    if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED}: return Response({"detail": "Esta questão já foi enviada para revisão."}, status=status.HTTP_409_CONFLICT)
+    try: _manual_question_validate({field: getattr(question, field) for field in ("statement", "banca", "discipline", "year", "options", "correct_answer", "source_url")}, question.pk)
+    except ValidationError as exc: return _validation_response(exc)
+    question.status = Question.Status.PENDING; question.rejection_reason = ""; question.rejection_reason_code = ""; question.save(update_fields=["status", "rejection_reason", "rejection_reason_code", "updated_at"])
+    return Response(_question_payload(question, []))

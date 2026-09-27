@@ -377,3 +377,24 @@ export const cycleLabel: Record<string, string> = {
   semestral: "Semestral",
   anual: "Anual",
 };
+export type EditorialConcurso = { id: number; title: string; organization: string; state: string; status: string; deadline: string | null; source_url: string; origin: "manual" | "imported"; editorial_status: "published" | "archived"; exams_count: number; updated_at: string };
+export type EditorialExam = { id: number; title: string; banca: string; institution: string; role: string; year: number; is_published: boolean; concurso: number | null; questions_count: number; updated_at: string };
+export const editorial = {
+  listConcursos: () => http.get<{results: EditorialConcurso[]}>("/api/backoffice/content/editorial/concursos/").then(r => r.data),
+  createConcurso: (data: Partial<EditorialConcurso>) => http.post<EditorialConcurso>("/api/backoffice/content/editorial/concursos/", data).then(r => r.data),
+  updateConcurso: (id: number, data: Partial<EditorialConcurso>) => http.patch<EditorialConcurso>(`/api/backoffice/content/editorial/concursos/${id}/`, data).then(r => r.data),
+  listExams: () => http.get<{results: EditorialExam[]}>("/api/backoffice/content/editorial/provas/").then(r => r.data),
+  createExam: (data: Partial<EditorialExam>) => http.post<EditorialExam>("/api/backoffice/content/editorial/provas/", data).then(r => r.data),
+  updateExam: (id: number, data: Partial<EditorialExam>) => http.patch<EditorialExam>(`/api/backoffice/content/editorial/provas/${id}/`, data).then(r => r.data),
+};
+
+export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; exam: string | null; rejection_reason: string; updated_at: string };
+export const manualQuestions = {
+  list: () => http.get<{results: ManualQuestion[]}>("/api/backoffice/content/questions/manual/").then(r => r.data),
+  create: (data: Omit<ManualQuestion, "id" | "status" | "exam" | "rejection_reason" | "updated_at">) => http.post<ManualQuestion>("/api/backoffice/content/questions/manual/", data).then(r => r.data),
+  submit: (id: number) => http.post<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/submit/`).then(r => r.data),
+};
+export type EditorialArticle = { id:number; title:string; slug:string; summary:string; body:string; category:string; image_url:string; origin:"manual"|"imported"; editorial_status:"draft"|"scheduled"|"published"|"archived"; is_published:boolean; scheduled_for?: string | null };
+export const editorialArticles = { list:()=>http.get<{results:EditorialArticle[]}>("/api/backoffice/content/editorial/artigos/").then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
+export type BancaCatalogRow={id:number;name:string;slug:string;is_active:boolean;is_featured:boolean;aliases:{id:number;alias:string}[];questions_count:number;exams_count:number};
+export const bancasAdmin={list:()=>http.get<{results:BancaCatalogRow[]}>("/api/backoffice/content/bancas/").then(r=>r.data),create:(data:{name:string;slug?:string})=>http.post<BancaCatalogRow>("/api/backoffice/content/bancas/",data).then(r=>r.data),addAlias:(id:number,alias:string)=>http.post(`/api/backoffice/content/bancas/${id}/aliases/`,{alias}).then(r=>r.data)};

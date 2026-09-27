@@ -8,6 +8,8 @@ from apps.questions import moderation
 from apps.questions.ingest import run as run_question_search
 from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
 from apps.questions.models import (
+    BancaAlias,
+    BancaCatalog,
     Comment,
     ErrorReport,
     Exam,
@@ -378,3 +380,26 @@ QuestionSourceAdmin.get_urls = _question_source_admin_urls
 QuestionSourceAdmin.save_model = _source_save_model
 SearchRunAdmin.get_urls = _search_run_admin_urls
 QuestionAdmin.list_filter = (*QuestionAdmin.list_filter, "search_run")
+
+@admin.register(BancaCatalog)
+class BancaCatalogAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "is_active", "is_featured", "updated_at")
+    list_filter = ("is_active", "is_featured")
+    search_fields = ("name", "slug")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("normalized_name", "created_at", "updated_at", "created_by", "updated_by")
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(BancaAlias)
+class BancaAliasAdmin(admin.ModelAdmin):
+    list_display = ("alias", "banca", "normalized_alias", "updated_at")
+    list_filter = ("banca",)
+    search_fields = ("alias", "banca__name")
+    autocomplete_fields = ("banca",)
+    readonly_fields = ("normalized_alias", "created_at", "updated_at")

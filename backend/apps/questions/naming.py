@@ -1,9 +1,4 @@
-"""Normalização de nomes de disciplinas e bancas.
-
-Nomes vindos de arquivos de conteúdo chegam sem acentuação (ex.: "Portugues",
-"Raciocinio Logico"). Centraliza a correção usada na importação e em migrações
-de dados.
-"""
+"""Normalização de disciplinas e bancas, incluindo o catálogo editorial opcional."""
 
 import re
 import unicodedata
@@ -11,118 +6,98 @@ import unicodedata
 from django.db.models import Q
 
 DISCIPLINE_RENAMES = {
-    "Administracao Recursos Materiais": "Administração de Recursos Materiais",
-    "Afo": "AFO",
-    "Eca": "ECA",
-    "Etica Administracao": "Ética Administração",
+    "Administracao Recursos Materiais": "Administração de Recursos Materiais", "Afo": "AFO",
+    "Eca": "ECA", "Etica Administracao": "Ética Administração",
 }
-
-
 WORD_FIXES = {
-    "administracao": "administração",
-    "basica": "básica",
-    "comunicacao": "comunicação",
-    "especifica": "específica",
-    "especifico": "específico",
-    "estatistica": "estatística",
-    "etica": "ética",
-    "gestao": "gestão",
-    "informatica": "informática",
-    "legislacao": "legislação",
-    "logica": "lógica",
-    "logico": "lógico",
-    "matematica": "matemática",
-    "portugues": "português",
-    "publica": "pública",
-    "publico": "público",
-    "raciocinio": "raciocínio",
-    "redacao": "redação",
-    "tecnica": "técnica",
-    "tecnico": "técnico",
+    "administracao": "administração", "basica": "básica", "comunicacao": "comunicação",
+    "especifica": "específica", "especifico": "específico", "estatistica": "estatística",
+    "etica": "ética", "gestao": "gestão", "informatica": "informática",
+    "legislacao": "legislação", "logica": "lógica", "logico": "lógico",
+    "matematica": "matemática", "portugues": "português", "publica": "pública",
+    "publico": "público", "raciocinio": "raciocínio", "redacao": "redação",
+    "tecnica": "técnica", "tecnico": "técnico",
 }
-
 _LOWERCASE_WORDS = {"da", "das", "de", "do", "dos", "e", "em"}
+_PUNCTUATION_RE = re.compile(r"[^\w\s]", re.UNICODE)
+_SPACES_RE = re.compile(r"\s+")
+_RAW_BANCAS_ALIASES = {"CESPE": "CEBRASPE", "CESPE/UNB": "CEBRASPE", "CEB": "CEBRASPE"}
 
 
 def _fix_words(name):
     fixed = []
     for word in name.split():
         corrected = WORD_FIXES.get(word.lower(), word)
-        if corrected.lower() in _LOWERCASE_WORDS:
-            corrected = corrected.lower()
-        else:
-            corrected = corrected[:1].upper() + corrected[1:]
-        fixed.append(corrected)
+        fixed.append(corrected.lower() if corrected.lower() in _LOWERCASE_WORDS else corrected[:1].upper() + corrected[1:])
     return " ".join(fixed)
 
 
 def normalize_discipline(value):
-    """Retorna a forma acentuada e padronizada de um nome de disciplina."""
     if not value:
         return value
     name = " ".join(str(value).split())
-    if name in DISCIPLINE_RENAMES:
-        return DISCIPLINE_RENAMES[name]
-    return _fix_words(name)
+    return DISCIPLINE_RENAMES.get(name, _fix_words(name))
 
 
-# Bancas que mudaram de nome (ou de grafia) ao longo do tempo. O mesmo
-# examinador não pode virar duas opções no filtro, e link salvo pelo aluno com a
-# grafia antiga precisa continuar funcionando.
-_PUNCTUATION_RE = re.compile(r"[^\w\s]", re.UNICODE)
-_SPACES_RE = re.compile(r"\s+")
-
-_RAW_BANCAS_ALIASES = {
-    "CESPE": "CEBRASPE",
-    "CESPE/UNB": "CEBRASPE",
-    "CEB": "CEBRASPE",
-}
-
-
-def _plain(value):
-    """Mesma do `naming.normalize_banca`: sem acento, pontuação ou caixa."""
-    plain = unicodedata.normalize("NFKD", str(value))
+def banca_key(value) -> str:
+    """Chave sem acento, pontuação, espaços extras ou distinção de caixa."""
+    plain = unicodedata.normalize("NFKD", str(value or ""))
     plain = plain.encode("ascii", "ignore").decode("ascii")
-    return _SPACES_RE.sub(" ", _PUNCTUATION_RE.sub("", plain)).upper()
+    return _SPACES_RE.sub(" ", _PUNCTUATION_RE.sub("", plain)).upper().strip()
 
 
-BANCAS_ALIASES = {_plain(alias): _plain(target) for alias, target in _RAW_BANCAS_ALIASES.items()}
-# A forma canônica também é chave: `normalize_banca("cebraspe")` precisa devolver
-# `CEBRASPE`, senão a mesma banca entra duas vezes no filtro por caixa diferente.
+# Aliases históricos continuam válidos mesmo sem nenhum item no catálogo.
+BANCAS_ALIASES = {banca_key(alias): banca_key(target) for alias, target in _RAW_BANCAS_ALIASES.items()}
 BANCAS_ALIASES.update({canonical: canonical for canonical in BANCAS_ALIASES.values()})
 
 
+def _catalog_match(*keys):
+    """Resolve no catálogo sem torná-lo obrigatório para importação ou filtros."""
+    keys = [key for key in dict.fromkeys(keys) if key]
+    if not keys:
+        return None
+    # Importação local evita dependência circular durante o carregamento dos modelos.
+    from apps.questions.models import BancaAlias, BancaCatalog
+
+    alias = BancaAlias.objects.select_related("banca").filter(normalized_alias__in=keys).first()
+    if alias:
+        return alias.banca.name
+    catalog = BancaCatalog.objects.filter(normalized_name__in=keys).first()
+    return catalog.name if catalog else None
+
+
 def normalize_banca(value):
-    """Retorna a forma canônica do nome da banca."""
+    """Retorna nome canônico do catálogo; na ausência dele usa os aliases legados."""
     if not value:
         return value
     name = " ".join(str(value).split()).strip()
     if not name:
         return name
-    return BANCAS_ALIASES.get(_plain(name), name)
+    raw_key = banca_key(name)
+    legacy_key = BANCAS_ALIASES.get(raw_key, raw_key)
+    return _catalog_match(raw_key, legacy_key) or BANCAS_ALIASES.get(raw_key, name)
 
 
 def banca_variants(value):
-    """Lista as grafias conhecidas de uma banca, incluindo a digitada pelo aluno."""
+    """Grafias aceitas por filtros, preservando URLs salvas com aliases antigos."""
     if not value:
         return []
     name = " ".join(str(value).split()).strip()
     canonical = normalize_banca(name)
     variants = {name, canonical}
-    canonical_key = _plain(canonical)
+    canonical_key = banca_key(canonical)
     for alias, target in BANCAS_ALIASES.items():
         if canonical_key in {target, alias}:
             variants.add(alias)
+    from apps.questions.models import BancaCatalog
+
+    catalog = BancaCatalog.objects.prefetch_related("aliases").filter(normalized_name=canonical_key).first()
+    if catalog:
+        variants.update(alias.alias for alias in catalog.aliases.all())
     return sorted(variants)
 
 
 def banca_query(value, prefix: str = ""):
-    """Filtro de banca que aceita as grafias antigas, sem diferenciar caixa.
-
-    `?banca=CESPE` continua funcionando depois que a migração passa a gravar
-    `CEBRASPE`. `prefix` aponta o filtro para outro caminho, como
-    `question__banca` na estatística de respostas.
-    """
     field = f"{prefix}banca"
     query = Q()
     for variant in banca_variants(value):

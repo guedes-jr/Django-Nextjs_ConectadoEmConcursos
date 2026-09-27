@@ -1,9 +1,11 @@
 import datetime as dt
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count, F, Max, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAdminUser
@@ -14,7 +16,7 @@ from apps.chat.models import ChatUsage, Conversation, Message
 from apps.concursos.models import Concurso, NewsArticle
 from apps.questions import moderation
 from apps.questions.moderation import REJECTION_REASONS
-from apps.questions.models import Question, UserAnswer
+from apps.questions.models import Exam, Question, UserAnswer
 from apps.studies.models import StudySession
 from apps.workspace.models import (
     CommunityPost,
@@ -842,3 +844,131 @@ def study_reports(request):
             ],
         }
     )
+
+
+def _editorial_concurso_payload(item):
+    return {"id": item.id, "title": item.title, "organization": item.organization, "state": item.state,
+            "status": item.status, "deadline": item.deadline, "source_url": item.source_url,
+            "origin": item.origin, "editorial_status": item.editorial_status,
+            "exams_count": item.exams.count(), "updated_at": item.fetched_at}
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def editorial_concursos(request):
+    if request.method == "POST":
+        title = str(request.data.get("title", "")).strip()
+        if not title:
+            return Response({"title": ["Informe o título do concurso."]}, status=status.HTTP_400_BAD_REQUEST)
+        item = Concurso.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL,
+            title=title, organization=str(request.data.get("organization", "")).strip(), state=str(request.data.get("state", "")).strip().upper()[:2],
+            status=request.data.get("status", Concurso.Status.EXPECTED), source_url=str(request.data.get("source_url", "")).strip(),
+            created_by=request.user, updated_by=request.user)
+        return Response(_editorial_concurso_payload(item), status=status.HTTP_201_CREATED)
+    qs = Concurso.objects.prefetch_related("exams").order_by("-fetched_at")
+    if origin := request.query_params.get("origin"):
+        qs = qs.filter(origin=origin)
+    if search := request.query_params.get("search"):
+        qs = qs.filter(Q(title__icontains=search) | Q(organization__icontains=search))
+    return Response({"results": [_editorial_concurso_payload(item) for item in qs[:200]]})
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def editorial_concurso_detail(request, pk):
+    item = Concurso.objects.filter(pk=pk).first()
+    if not item:
+        return Response({"detail": "Concurso não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if "editorial_status" in request.data:
+        if request.data["editorial_status"] not in Concurso.EditorialStatus.values:
+            return Response({"editorial_status": ["Estado editorial inválido."]}, status=status.HTTP_400_BAD_REQUEST)
+        item.editorial_status = request.data["editorial_status"]
+    if item.origin == Concurso.Origin.IMPORTED and any(key in request.data for key in ("title", "organization", "state", "status", "source_url")):
+        return Response({"detail": "Campos de concursos importados são protegidos contra a sincronização."}, status=status.HTTP_409_CONFLICT)
+    if item.origin == Concurso.Origin.MANUAL:
+        for field in ("title", "organization", "state", "status", "source_url"):
+            if field in request.data:
+                setattr(item, field, str(request.data[field]).strip())
+    item.updated_by = request.user
+    item.save()
+    return Response(_editorial_concurso_payload(item))
+
+
+def _editorial_exam_payload(item):
+    return {"id": item.id, "title": item.title, "banca": item.banca, "institution": item.institution,
+            "role": item.role, "year": item.year, "is_published": item.is_published,
+            "concurso": item.concurso_id, "questions_count": item.questions.count(), "updated_at": item.updated_at}
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def editorial_exams(request):
+    if request.method == "POST":
+        required = {key: request.data.get(key) for key in ("title", "banca", "year")}
+        if not all(str(value or "").strip() for value in required.values()):
+            return Response({"detail": "Informe título, banca e ano da prova."}, status=status.HTTP_400_BAD_REQUEST)
+        concurso = Concurso.objects.filter(pk=request.data.get("concurso")).first() if request.data.get("concurso") else None
+        item = Exam.objects.create(title=str(required["title"]).strip(), banca=str(required["banca"]).strip(), year=int(required["year"]),
+            institution=str(request.data.get("institution", "")).strip(), role=str(request.data.get("role", "")).strip(), concurso=concurso,
+            is_published=bool(request.data.get("is_published", False)), created_by=request.user, updated_by=request.user)
+        return Response(_editorial_exam_payload(item), status=status.HTTP_201_CREATED)
+    qs = Exam.objects.select_related("concurso").prefetch_related("questions").order_by("-year", "title")
+    if concurso := request.query_params.get("concurso"):
+        qs = qs.filter(concurso_id=concurso)
+    if search := request.query_params.get("search"):
+        qs = qs.filter(Q(title__icontains=search) | Q(banca__icontains=search))
+    return Response({"results": [_editorial_exam_payload(item) for item in qs[:200]]})
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def editorial_exam_detail(request, pk):
+    item = Exam.objects.filter(pk=pk).first()
+    if not item:
+        return Response({"detail": "Prova não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    for field in ("title", "banca", "institution", "role", "level", "state", "is_published"):
+        if field in request.data:
+            setattr(item, field, request.data[field])
+    if "concurso" in request.data:
+        item.concurso = Concurso.objects.filter(pk=request.data["concurso"]).first() if request.data["concurso"] else None
+    item.updated_by = request.user
+    item.save()
+    return Response(_editorial_exam_payload(item))
+
+def _article_payload(item):
+    return {"id": item.id, "title": item.title, "slug": item.slug, "summary": item.summary, "body": item.body, "category": item.category, "image_url": item.image_url, "origin": item.origin, "editorial_status": item.editorial_status, "scheduled_for": item.scheduled_for, "is_published": item.is_published}
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def editorial_news(request):
+    from django.utils.text import slugify
+    if request.method == "POST":
+        title = str(request.data.get("title", "")).strip(); body = str(request.data.get("body", "")).strip()
+        if not title or not body: return Response({"detail": "Informe título e conteúdo do artigo."}, status=status.HTTP_400_BAD_REQUEST)
+        base = slugify(request.data.get("slug") or title)[:250] or "artigo"; slug = base; index = 2
+        while NewsArticle.objects.filter(slug=slug).exists(): slug = f"{base[:245]}-{index}"; index += 1
+        item = NewsArticle.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL, title=title, body=body, slug=slug, summary=str(request.data.get("summary", "")).strip(), category=str(request.data.get("category", "")).strip(), image_url=str(request.data.get("image_url", "")).strip(), editorial_status=NewsArticle.EditorialStatus.DRAFT, is_published=False, author=request.user, updated_by=request.user)
+        return Response(_article_payload(item), status=status.HTTP_201_CREATED)
+    return Response({"results": [_article_payload(item) for item in NewsArticle.objects.order_by("-created_at")[:200]]})
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def editorial_news_detail(request, pk):
+    item = NewsArticle.objects.filter(pk=pk).first()
+    if not item: return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    protected = {"title", "body", "summary", "category", "image_url", "slug"}
+    if item.origin == Concurso.Origin.IMPORTED and protected.intersection(request.data): return Response({"detail": "Campos de notícia importada são protegidos contra sincronização."}, status=status.HTTP_409_CONFLICT)
+    if item.origin == Concurso.Origin.MANUAL:
+        for field in protected:
+            if field in request.data: setattr(item, field, str(request.data[field]).strip())
+    if "editorial_status" in request.data:
+        value=request.data["editorial_status"]
+        if value not in NewsArticle.EditorialStatus.values: return Response({"editorial_status": ["Estado inválido."]}, status=status.HTTP_400_BAD_REQUEST)
+        if value == NewsArticle.EditorialStatus.SCHEDULED:
+            scheduled_for = parse_datetime(str(request.data.get("scheduled_for", "")))
+            if not scheduled_for or scheduled_for <= timezone.now(): return Response({"scheduled_for": ["Informe uma data futura para agendar."]}, status=status.HTTP_400_BAD_REQUEST)
+            item.scheduled_for = scheduled_for
+        elif value == NewsArticle.EditorialStatus.PUBLISHED:
+            item.published_at = timezone.now(); item.scheduled_for = None
+        item.editorial_status=value; item.is_published=value == NewsArticle.EditorialStatus.PUBLISHED
+    item.updated_by=request.user; item.save(); return Response(_article_payload(item))

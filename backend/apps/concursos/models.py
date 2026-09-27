@@ -1,13 +1,26 @@
+from django.conf import settings
 from django.db import models
 
 
 class Concurso(models.Model):
+    class Origin(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        IMPORTED = "imported", "Importado"
+
+    class EditorialStatus(models.TextChoices):
+        PUBLISHED = "published", "Publicado"
+        ARCHIVED = "archived", "Arquivado"
+
     class Status(models.TextChoices):
         OPEN = "open", "Inscrições abertas"
         EXPECTED = "expected", "Autorizado / Previsto"
         CLOSED = "closed", "Encerrado"
 
     source = models.CharField(max_length=32, db_index=True)
+    origin = models.CharField(max_length=12, choices=Origin.choices, default=Origin.IMPORTED, db_index=True)
+    editorial_status = models.CharField(max_length=12, choices=EditorialStatus.choices, default=EditorialStatus.PUBLISHED, db_index=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_concursos")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_concursos")
     external_id = models.CharField(max_length=255, db_index=True)
     title = models.CharField(max_length=300)
     organization = models.CharField(max_length=255, blank=True)
@@ -40,8 +53,19 @@ class Concurso(models.Model):
 
 
 class NewsArticle(models.Model):
+    class EditorialStatus(models.TextChoices):
+        DRAFT = "draft", "Rascunho"
+        SCHEDULED = "scheduled", "Agendado"
+        PUBLISHED = "published", "Publicado"
+        ARCHIVED = "archived", "Arquivado"
+
     source = models.CharField(max_length=32, db_index=True)
     external_id = models.CharField(max_length=255, db_index=True)
+    origin = models.CharField(max_length=12, choices=Concurso.Origin.choices, default=Concurso.Origin.IMPORTED, db_index=True)
+    editorial_status = models.CharField(max_length=12, choices=EditorialStatus.choices, default=EditorialStatus.PUBLISHED, db_index=True)
+    scheduled_for = models.DateTimeField(null=True, blank=True, db_index=True)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="authored_news")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_news")
     slug = models.SlugField(max_length=260, unique=True, db_index=True)
     title = models.CharField(max_length=300)
     summary = models.TextField(blank=True)
