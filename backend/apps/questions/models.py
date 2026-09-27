@@ -350,3 +350,68 @@ class ErrorReport(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class OfficialExamPortal(models.Model):
+    """Portal institucional usado apenas para localizar documentos oficiais."""
+    slug = models.SlugField(max_length=60, unique=True)
+    name = models.CharField(max_length=120)
+    catalog_url = models.URLField(max_length=600)
+    allowed_hosts = models.JSONField(default=list)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class OfficialExamDocument(models.Model):
+    class Kind(models.TextChoices):
+        EXAM = "exam", "Prova"
+        ANSWER_KEY_PRELIMINARY = "answer_key_preliminary", "Gabarito preliminar"
+        ANSWER_KEY_FINAL = "answer_key_final", "Gabarito final"
+
+    class Status(models.TextChoices):
+        DISCOVERED = "discovered", "Descoberto"
+        REVIEW = "review", "Aguardando conferência"
+        DOWNLOADED = "downloaded", "Baixado"
+        FAILED = "failed", "Falhou"
+
+    portal = models.ForeignKey(OfficialExamPortal, on_delete=models.PROTECT, related_name="documents")
+    title = models.CharField(max_length=300)
+    year = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    organization = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=180, blank=True)
+    kind = models.CharField(max_length=28, choices=Kind.choices)
+    source_url = models.URLField(max_length=1000)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DISCOVERED)
+    paired_with = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="paired_documents")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-year", "title"]
+        constraints = [models.UniqueConstraint(fields=["portal", "source_url"], name="official_exam_document_source_unique")]
+
+    def __str__(self):
+        return self.title
+
+class OfficialExamDownload(models.Model):
+    class Status(models.TextChoices):
+        RUNNING = "running", "Baixando"
+        DONE = "done", "Baixado"
+        FAILED = "failed", "Falhou"
+    document = models.ForeignKey(OfficialExamDocument, on_delete=models.CASCADE, related_name="downloads")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.RUNNING)
+    file = models.FileField(upload_to="official-exams/%Y/%m/", blank=True)
+    sha256 = models.CharField(max_length=64, blank=True)
+    bytes_count = models.PositiveBigIntegerField(default=0)
+    http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    error_message = models.CharField(max_length=300, blank=True)
+    started_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)

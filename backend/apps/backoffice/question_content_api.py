@@ -16,7 +16,7 @@ from apps.questions import moderation
 from apps.questions.ingest import run as run_search
 from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
 from apps.questions.ingest.sources import AdapterNotConfigured, get_adapter
-from apps.questions.models import Question, QuestionSource, SearchRun
+from apps.questions.models import OfficialExamDocument, OfficialExamPortal, Question, QuestionSource, SearchRun
 from apps.questions.queue import QUEUE_PRIORITY_ORDER, annotate_queue_priority
 from apps.questions.submissions import convert_submission
 from apps.workspace.models import ExamSubmission
@@ -571,3 +571,59 @@ def proofs_convert(request):
         "converted_at": submission.converted_at.isoformat() if submission.converted_at else None,
     }
     return Response(payload, status=status.HTTP_201_CREATED)
+
+
+def _portal_payload(portal):
+    return {"id": portal.id, "slug": portal.slug, "name": portal.name, "catalog_url": portal.catalog_url, "notes": portal.notes, "is_active": portal.is_active, "documents_count": getattr(portal, "documents_count", 0)}
+
+
+def _document_payload(document):
+    return {"id": document.id, "portal": document.portal.slug, "portal_name": document.portal.name, "title": document.title, "year": document.year, "organization": document.organization, "role": document.role, "kind": document.kind, "status": document.status, "source_url": document.source_url, "paired_with": document.paired_with_id, "created_at": document.created_at}
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def official_exam_portals(request):
+    portals = OfficialExamPortal.objects.annotate(documents_count=Count("documents")).order_by("name")
+    return Response({"results": [_portal_payload(portal) for portal in portals]})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def official_exam_documents(request):
+    if request.method == "POST":
+        portal = OfficialExamPortal.objects.filter(slug=request.data.get("portal"), is_active=True).first()
+        if not portal:
+            return Response({"portal": ["Escolha um portal oficial ativo."]}, status=status.HTTP_400_BAD_REQUEST)
+        title = str(request.data.get("title", "")).strip()
+        if not title:
+            return Response({"title": ["Informe um título para o documento."]}, status=status.HTTP_400_BAD_REQUEST)
+        source_url = str(request.data.get("source_url", "")).strip()
+        if not source_url.startswith(("https://", "http://")):
+            return Response({"source_url": ["Informe uma URL HTTP(S) oficial."]}, status=status.HTTP_400_BAD_REQUEST)
+        from urllib.parse import urlparse
+        if portal.allowed_hosts and urlparse(source_url).hostname not in portal.allowed_hosts:
+            return Response({"source_url": ["A URL não pertence ao domínio permitido para este portal."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            document = OfficialExamDocument.objects.create(portal=portal, title=title, year=request.data.get("year") or None, organization=str(request.data.get("organization", "")).strip(), role=str(request.data.get("role", "")).strip(), kind=request.data.get("kind"), source_url=source_url, status=OfficialExamDocument.Status.REVIEW)
+        except (ValidationError, ValueError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_document_payload(document), status=status.HTTP_201_CREATED)
+    documents = OfficialExamDocument.objects.select_related("portal", "paired_with").order_by("-created_at")
+    if portal := request.query_params.get("portal"):
+        documents = documents.filter(portal__slug=portal)
+    return Response({"results": [_document_payload(document) for document in documents[:200]]})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def official_exam_discover(request, slug):
+    portal = OfficialExamPortal.objects.filter(slug=slug, is_active=True).first()
+    if not portal:
+        return Response({"detail": "Portal oficial não encontrado ou inativo."}, status=status.HTTP_404_NOT_FOUND)
+    from apps.questions.official_exam_discovery import discover
+    try:
+        result = discover(portal)
+    except ValidationError as exc:
+        return _validation_response(exc)
+    return Response({"detail": f"Consulta concluída: {result['created']} referência(s) nova(s), {result['skipped']} já existente(s).", **result})

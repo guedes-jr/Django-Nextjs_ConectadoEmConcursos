@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   ClipboardCheck,
   Search,
+  Archive,
 } from "lucide-react";
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
@@ -41,6 +42,7 @@ const navGroups = [
     items: [
       { href: "/admin/fontes-questoes", label: "Fontes de questões", icon: Search },
       { href: "/admin/fila-questoes", label: "Fila de revisão", icon: ClipboardCheck },
+      { href: "/admin/acervo-provas", label: "Acervo de provas", icon: Archive },
       { href: "/admin/conteudo", label: "Conteúdo", icon: FileText },
       { href: "/admin/relatorios", label: "Relatórios de estudo", icon: BarChart3 },
       { href: "/admin/backups", label: "Backups", icon: Database },
