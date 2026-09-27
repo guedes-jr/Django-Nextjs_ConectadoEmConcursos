@@ -18,6 +18,7 @@ import {
   GraduationCap,
   ShieldCheck,
   ClipboardCheck,
+  Search,
 } from "lucide-react";
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
@@ -38,7 +39,8 @@ const navGroups = [
   {
     label: "Operação",
     items: [
-      { href: "/admin/questoes", label: "Curadoria", icon: ClipboardCheck },
+      { href: "/admin/fontes-questoes", label: "Fontes de questões", icon: Search },
+      { href: "/admin/fila-questoes", label: "Fila de revisão", icon: ClipboardCheck },
       { href: "/admin/conteudo", label: "Conteúdo", icon: FileText },
       { href: "/admin/relatorios", label: "Relatórios de estudo", icon: BarChart3 },
       { href: "/admin/backups", label: "Backups", icon: Database },
@@ -195,7 +197,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <main
           className={cn(
             "mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8",
-            pathname.startsWith("/admin/questoes") && "max-w-none",
+            (pathname.startsWith("/admin/questoes") || pathname.startsWith("/admin/fila-questoes") || pathname.startsWith("/admin/fontes-questoes")) && "max-w-none",
           )}
         >
           {children}

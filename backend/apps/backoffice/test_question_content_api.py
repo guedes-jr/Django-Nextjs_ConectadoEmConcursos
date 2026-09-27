@@ -23,6 +23,7 @@ REWORDED_TWIN_STATEMENT = (
 
 ROUTES = (
     ("get", "/api/backoffice/content/sources/"),
+    ("get", "/api/backoffice/content/sources/catalog/"),
     ("get", "/api/backoffice/content/sources/fonte/filters/"),
     ("get", "/api/backoffice/content/question-search/"),
     ("get", "/api/backoffice/content/question-search/1/"),
@@ -61,6 +62,17 @@ class QuestionContentApiTests(TestCase):
         response = self.client.get("/api/backoffice/content/sources/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["slug"] for row in response.data["results"]], ["source-api"])
+
+    def test_source_catalog_lists_active_and_inactive_sources_with_queue_counts(self):
+        QuestionSource.objects.create(slug="catalogada", name="Catalogada", license_name="")
+        response = self.client.get("/api/backoffice/content/sources/catalog/")
+        self.assertEqual(response.status_code, 200)
+        rows = {row["slug"]: row for row in response.data["results"]}
+        self.assertTrue(rows["source-api"]["ready_for_import"])
+        self.assertEqual(rows["source-api"]["pending_total"], 1)
+        self.assertEqual(rows["source-api"]["runs_total"], 1)
+        self.assertFalse(rows["catalogada"]["ready_for_import"])
+        self.assertEqual(rows["catalogada"]["availability"], "inactive")
 
     def test_queue_filters_by_search_run_and_next_is_fifo(self):
         response = self.client.get(f"{QUEUE_URL}?search_run={self.run.id}")

@@ -17,6 +17,7 @@ urlpatterns = [
     path("content/proofs/convert/", question_content_api.proofs_convert, name="proofs-convert"),
     path("content/questions/", views.questions_admin, name="questions"),
     path("content/sources/", question_content_api.sources, name="question-sources"),
+    path("content/sources/catalog/", question_content_api.source_catalog, name="question-source-catalog"),
     path("content/sources/<slug:slug>/filters/", question_content_api.source_filters, name="question-source-filters"),
     path("content/question-search/", question_content_api.question_search, name="question-search"),
     path("content/question-search/<int:pk>/", question_content_api.question_search_detail, name="question-search-detail"),

@@ -11,8 +11,19 @@ export type ContentSource = {
   license_url: string;
   attribution: string;
   requires_attribution: boolean;
+  home_url?: string;
+  is_active?: boolean;
   last_sync_at: string | null;
   facets_at: string | null;
+};
+
+export type SourceCatalogItem = ContentSource & {
+  ready_for_import: boolean;
+  availability: "ready" | "missing_license" | "inactive";
+  availability_message: string;
+  questions_total: number;
+  pending_total: number;
+  runs_total: number;
 };
 
 export type FilterOption = {
@@ -116,6 +127,8 @@ const BASE = "/api/backoffice/content";
 
 export const content = {
   sources: () => http.get<{ results: ContentSource[] }>(`${BASE}/sources/`).then((r) => r.data.results),
+
+  sourceCatalog: () => http.get<{ results: SourceCatalogItem[] }>(`${BASE}/sources/catalog/`).then((r) => r.data.results),
 
   sourceFilters: (slug: string, current: Record<string, unknown> = {}) =>
     http

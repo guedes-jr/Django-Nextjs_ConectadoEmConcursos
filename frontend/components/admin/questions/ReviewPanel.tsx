@@ -92,7 +92,7 @@ export function ReviewPanel({
           <ul className="mt-2 space-y-1 text-xs">
             {conflicts.map((match) => (
               <li key={match.id}>
-                <a href={`/admin/questoes?questao=${match.id}`} className="font-mono underline">
+                <a href={`/admin/fila-questoes?questao=${match.id}`} className="font-mono underline">
                   #{match.id}
                 </a>{" "}
                 — {match.percent}% igual, gabarito {answerLetter(question.correct_answer)} nesta questão
@@ -133,7 +133,7 @@ export function ReviewPanel({
           <ul className="space-y-1 text-xs">
             {question.duplicates.map((match) => (
               <li key={match.id} className="flex flex-wrap items-center gap-2 text-slate-600 dark:text-slate-300">
-                <a href={`/admin/questoes?questao=${match.id}`} className="font-mono underline">
+                <a href={`/admin/fila-questoes?questao=${match.id}`} className="font-mono underline">
                   #{match.id}
                 </a>
                 <span>{match.percent}%</span>

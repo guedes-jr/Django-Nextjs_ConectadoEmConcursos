@@ -5,7 +5,7 @@ import json
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django.db.models import Q
+from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -46,9 +46,33 @@ def _source_payload(source):
         "license_url": source.license_url,
         "attribution": source.attribution,
         "requires_attribution": source.requires_attribution,
+        "home_url": source.home_url,
+        "is_active": source.is_active,
         "last_sync_at": source.last_sync_at,
         "facets_at": source.facets_at,
     }
+
+
+def _source_catalog_payload(source):
+    """Dados para descoberta: fontes inativas aparecem, mas não podem importar."""
+    payload = _source_payload(source)
+    payload.update({
+        "ready_for_import": bool(source.is_active and source.license_name),
+        "availability": "ready" if source.is_active and source.license_name else (
+            "missing_license" if source.is_active else "inactive"
+        ),
+        "availability_message": (
+            "Pronta para buscar e enviar questões à fila."
+            if source.is_active and source.license_name
+            else "Cadastre a licença antes de ativar esta fonte."
+            if source.is_active
+            else "Fonte catalogada. Configure e ative-a antes de importar."
+        ),
+        "questions_total": getattr(source, "questions_total", 0),
+        "pending_total": getattr(source, "pending_total", 0),
+        "runs_total": getattr(source, "runs_total", 0),
+    })
+    return payload
 
 
 def _run_payload(run):
@@ -154,6 +178,18 @@ def _validation_response(exc):
 def sources(request):
     queryset = QuestionSource.objects.filter(is_active=True).order_by("name")
     return Response({"results": [_source_payload(source) for source in queryset]})
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def source_catalog(request):
+    """Catálogo completo, separado da lista operacional usada pela busca."""
+    queryset = QuestionSource.objects.annotate(
+        questions_total=Count("questions", distinct=True),
+        pending_total=Count("questions", filter=Q(questions__status=Question.Status.PENDING), distinct=True),
+        runs_total=Count("runs", distinct=True),
+    ).order_by("name")
+    return Response({"results": [_source_catalog_payload(source) for source in queryset]})
 
 
 @api_view(["GET"])

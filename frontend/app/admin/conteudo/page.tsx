@@ -264,7 +264,7 @@ export default function AdminContentPage() {
                   e o revisor passa a decidir em uma e commentar na outra.
                 </p>
                 <Button asChild>
-                  <Link href="/admin/questoes">
+                  <Link href="/admin/fila-questoes">
                     <PenLine className="h-4 w-4" /> Abrir a curadoria
                   </Link>
                 </Button>
