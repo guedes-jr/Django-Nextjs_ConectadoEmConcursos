@@ -8,6 +8,7 @@ saber de onde o item veio.
 
 import csv
 import json
+import os
 from pathlib import Path
 
 import requests
@@ -209,18 +210,25 @@ class PublicApiAdapter(BaseAdapter):
         return url
 
     def _get(self, url: str, params: dict) -> dict:
+        headers = {"Accept": "application/json"}
+        if key_env := self.config.get("api_key_env"):
+            key = os.getenv(key_env, "").strip()
+            if not key:
+                raise AdapterNotConfigured(f"A fonte requer a variável {key_env} no ambiente do servidor. Cadastre a chave no backend/.env e reinicie o Django.")
+            headers[self.config.get("api_key_header", "X-Api-Key")] = key
         try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=int(self.config.get("timeout", 25)),
-                headers={"Accept": "application/json"},
-            )
+            response = requests.get(url, params=params, timeout=int(self.config.get("timeout", 25)), headers=headers)
         except requests.RequestException as exc:
-            raise AdapterNotConfigured(f"Falha ao consultar a API: {exc}") from exc
+            raise AdapterNotConfigured(f"Não foi possível alcançar a API externa: {exc}") from exc
+        messages = {401: "Chave da API inválida ou ausente. Verifique a variável configurada no servidor.", 402: "A API recusou a consulta por falta de créditos. Recarregue as cotas no provedor.", 403: "A chave da API foi suspensa pelo provedor."}
+        if response.status_code in messages:
+            raise AdapterNotConfigured(messages[response.status_code])
         if response.status_code >= 400:
-            raise AdapterNotConfigured(f"A API respondeu {response.status_code}.")
-        return response.json()
+            raise AdapterNotConfigured(f"A API respondeu {response.status_code}. Tente novamente ou confira os filtros.")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise AdapterNotConfigured("A API respondeu em formato inválido; nenhuma questão foi importada.") from exc
 
     def list_options(self, spec: FilterSpec, current: dict) -> list[Option]:
         if spec.options_from != "facets":
@@ -229,8 +237,24 @@ class PublicApiAdapter(BaseAdapter):
         options = cached.get(spec.key) or []
         return [Option(value=item["value"], label=item["label"], count=item.get("count")) for item in options]
 
+    def _qapi_rows(self, rows):
+        if not self.config.get("qapi_format"):
+            return rows
+        normalized = []
+        for row in rows:
+            answer = str(row.get("gabarito", "")).strip().upper()
+            options = [row.get(f"opcao{letter}") for letter in "ABCDE"]
+            options = [option for option in options if option]
+            if answer not in "ABCDE" or ord(answer) - 65 >= len(options):
+                continue
+            normalized.append({"id": row.get("_id"), "statement": row.get("enunciado"), "options": options, "correct_answer": ord(answer) - 65, "banca": row.get("banca"), "year": row.get("ano"), "discipline": row.get("materia"), "exam_title": row.get("cargo", ""), "institution": row.get("orgao", ""), "explanation": row.get("comentario", "")})
+        return normalized
+
     def fetch_questions(self, filters: dict, limit: int, page: int) -> FetchResult:
         filters = self.validate_filters(filters)
+        max_limit = int(self.config.get("max_limit", 1000))
+        if limit > max_limit:
+            raise ValidationError({"limit": [f"Esta fonte aceita no máximo {max_limit} questões por consulta. Reduza o limite e tente novamente."]})
         params: dict = {}
         for spec in self.filters():
             value = filters.get(spec.key)
@@ -242,8 +266,8 @@ class PublicApiAdapter(BaseAdapter):
         params[self.config.get("limit_param", "limit")] = limit
         params[self.config.get("page_param", "page")] = page
         payload = self._get(self.url(), params)
-        rows = payload.get("results", payload.get("data", payload)) if isinstance(payload, dict) else payload
-        items = self._items(list(rows), self.config.get("mapping") or {})
+        rows = payload.get(self.config.get("results_key", "results"), payload.get("data", payload)) if isinstance(payload, dict) else payload
+        items = self._items(self._qapi_rows(list(rows)), self.config.get("mapping") or {})
         total = payload.get("total") if isinstance(payload, dict) else None
         facets = payload.get("facets") if isinstance(payload, dict) else None
         return FetchResult(
