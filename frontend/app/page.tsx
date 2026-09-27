@@ -799,12 +799,12 @@ export default function LandingPage() {
         <div className="mx-auto mt-10 flex max-w-7xl flex-col justify-between gap-3 border-t border-slate-100 pt-6 text-xs text-slate-500 sm:flex-row">
           <p>© 2026 Conectado em Concursos. Todos os direitos reservados.</p>
           <div className="flex gap-4">
-            <a href="#faq" className="hover:text-blue-600">
+            <Link href="/privacidade" className="hover:text-blue-600">
               Privacidade
-            </a>
-            <a href="#faq" className="hover:text-blue-600">
+            </Link>
+            <Link href="/termos-de-uso" className="hover:text-blue-600">
               Termos de uso
-            </a>
+            </Link>
           </div>
         </div>
       </footer>

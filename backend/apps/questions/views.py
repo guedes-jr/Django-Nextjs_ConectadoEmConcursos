@@ -12,6 +12,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question, QuestionNote, QuestionReview, SimulationTemplate, UserAnswer
+from apps.questions.naming import banca_query
 from apps.questions.review import schedule_review
 from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer, SimulationTemplateSerializer
 from apps.billing.services import capabilities_for
@@ -57,7 +58,7 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
                 | Q(institution__icontains=search)
             )
         if banca:
-            queryset = queryset.filter(banca__iexact=banca)
+            queryset = queryset.filter(banca_query(banca))
         if year.isdigit():
             queryset = queryset.filter(year=int(year))
         if discipline:
@@ -117,7 +118,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
         if discipline:
             queryset = queryset.filter(discipline__iexact=discipline)
         if banca:
-            queryset = queryset.filter(banca__iexact=banca)
+            queryset = queryset.filter(banca_query(banca))
         if year.isdigit():
             queryset = queryset.filter(year=int(year))
         if favorites in {"1", "true"}:
@@ -189,7 +190,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
         if discipline:
             queryset = queryset.filter(discipline__iexact=discipline)
         if banca:
-            queryset = queryset.filter(banca__iexact=banca)
+            queryset = queryset.filter(banca_query(banca))
         if isinstance(year, int) or (isinstance(year, str) and year.isdigit()):
             queryset = queryset.filter(year=int(year))
 
@@ -468,7 +469,7 @@ def statistics(request):
     if discipline:
         answers = answers.filter(question__discipline__iexact=discipline)
     if banca:
-        answers = answers.filter(question__banca__iexact=banca)
+        answers = answers.filter(banca_query(banca, prefix="question__"))
 
     total = answers.count()
     correct = answers.filter(is_correct=True).count()

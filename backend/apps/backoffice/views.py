@@ -12,9 +12,16 @@ from rest_framework.response import Response
 from apps.billing.models import Plan, Subscription
 from apps.chat.models import ChatUsage, Conversation, Message
 from apps.concursos.models import Concurso, NewsArticle
+from apps.questions import moderation
+from apps.questions.moderation import REJECTION_REASONS
 from apps.questions.models import Question, UserAnswer
 from apps.studies.models import StudySession
-from apps.workspace.models import CommunityPost, ExamSubmission, Flashcard, SimulationRun
+from apps.workspace.models import (
+    CommunityPost,
+    ExamSubmission,
+    Flashcard,
+    SimulationRun,
+)
 
 from . import services
 from .serializers import PlanSerializer, SubscriptionAdminSerializer
@@ -34,7 +41,9 @@ def overview(request):
     posts = CommunityPost.objects.count()
     sub = Subscription.objects
     backups = services.list_backups()
-    recent_subs = Subscription.objects.select_related("user", "plan").order_by("-created_at")[:5]
+    recent_subs = Subscription.objects.select_related("user", "plan").order_by(
+        "-created_at"
+    )[:5]
     recent_users = User.objects.order_by("-date_joined")[:5]
     return Response(
         {
@@ -46,25 +55,36 @@ def overview(request):
             "subscriptions": {
                 "total": sub.count(),
                 "active": sub.filter(status=Subscription.Status.ACTIVE).count(),
-                "pending_payment": sub.filter(status=Subscription.Status.PENDING).count(),
+                "pending_payment": sub.filter(
+                    status=Subscription.Status.PENDING
+                ).count(),
                 "canceled": sub.filter(status=Subscription.Status.CANCELED).count(),
             },
-            "plans": {"total": Plan.objects.count(), "active": Plan.objects.filter(is_active=True).count()},
+            "plans": {
+                "total": Plan.objects.count(),
+                "active": Plan.objects.filter(is_active=True).count(),
+            },
             "questions": {
                 "total": Question.objects.count(),
                 "uncommented": Question.objects.filter(explanation="").count(),
                 "with_comment": Question.objects.exclude(explanation="").count(),
             },
             "proofs": {
-                "pending": ExamSubmission.objects.filter(status=ExamSubmission.Status.PENDING).count(),
-                "reviewed": ExamSubmission.objects.filter(status=ExamSubmission.Status.REVIEWED).count(),
+                "pending": ExamSubmission.objects.filter(
+                    status=ExamSubmission.Status.PENDING
+                ).count(),
+                "reviewed": ExamSubmission.objects.filter(
+                    status=ExamSubmission.Status.REVIEWED
+                ).count(),
             },
             "content": {
                 "news_total": NewsArticle.objects.count(),
                 "news_unpublished": news_unpublished,
                 "community_posts": posts,
                 "concursos_total": Concurso.objects.count(),
-                "concursos_open": Concurso.objects.filter(status=Concurso.Status.OPEN).count(),
+                "concursos_open": Concurso.objects.filter(
+                    status=Concurso.Status.OPEN
+                ).count(),
             },
             "backups": {
                 "count": len(backups),
@@ -137,7 +157,9 @@ def update_user(request, pk):
     try:
         user = User.objects.get(pk=pk)
     except User.DoesNotExist:
-        return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
+        )
     if "is_active" in request.data and isinstance(request.data["is_active"], bool):
         user.is_active = request.data["is_active"]
         user.save(update_fields=["is_active"])
@@ -150,12 +172,20 @@ def assign_subscription(request, pk):
     try:
         user = User.objects.get(pk=pk)
     except User.DoesNotExist:
-        return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
+        )
     plan = Plan.objects.filter(slug=request.data.get("plan", "")).first()
     if not plan:
-        return Response({"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST
+        )
     cycle = request.data.get("cycle", Subscription.Cycle.MONTHLY)
-    status_ = Subscription.Status.ACTIVE if plan.monthly_price == 0 else Subscription.Status.PENDING
+    status_ = (
+        Subscription.Status.ACTIVE
+        if plan.monthly_price == 0
+        else Subscription.Status.PENDING
+    )
     sub, _ = Subscription.objects.update_or_create(
         user=user,
         defaults={"plan": plan, "cycle": cycle, "status": status_},
@@ -172,7 +202,9 @@ def list_subscriptions(request):
     if status_filter:
         qs = qs.filter(status=status_filter)
     if search:
-        qs = qs.filter(user__username__icontains=search) | qs.filter(user__email__icontains=search)
+        qs = qs.filter(user__username__icontains=search) | qs.filter(
+            user__email__icontains=search
+        )
     return Response({"results": SubscriptionAdminSerializer(qs[:200], many=True).data})
 
 
@@ -182,12 +214,16 @@ def update_subscription(request, pk):
     try:
         sub = Subscription.objects.select_for_update().get(pk=pk)
     except Subscription.DoesNotExist:
-        return Response({"detail": "Assinatura não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Assinatura não encontrada."}, status=status.HTTP_404_NOT_FOUND
+        )
     data = request.data
     if "plan" in data:
         plan = Plan.objects.filter(slug=data["plan"]).first()
         if not plan:
-            return Response({"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST
+            )
         sub.plan = plan
     if "cycle" in data:
         sub.cycle = data["cycle"]
@@ -215,10 +251,15 @@ def plan_detail(request, pk):
     try:
         plan = Plan.objects.get(pk=pk)
     except Plan.DoesNotExist:
-        return Response({"detail": "Plano não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Plano não encontrado."}, status=status.HTTP_404_NOT_FOUND
+        )
     if request.method == "DELETE":
         if Subscription.objects.filter(plan=plan).exists():
-            return Response({"detail": "Plano em uso por assinaturas."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Plano em uso por assinaturas."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         plan.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     ser = PlanSerializer(plan, data=request.data, partial=True)
@@ -257,10 +298,14 @@ def update_proof_status(request):
     try:
         proof = ExamSubmission.objects.get(pk=pk)
     except ExamSubmission.DoesNotExist:
-        return Response({"detail": "Prova não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Prova não encontrada."}, status=status.HTTP_404_NOT_FOUND
+        )
     new_status = request.data.get("status")
     if new_status not in ExamSubmission.Status.values:
-        return Response({"detail": "Status inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Status inválido."}, status=status.HTTP_400_BAD_REQUEST
+        )
     proof.status = new_status
     proof.save(update_fields=["status"])
     return Response({"id": proof.id, "status": proof.status})
@@ -272,38 +317,146 @@ def questions_admin(request):
     if request.method == "GET":
         only_empty = request.query_params.get("only_uncommented") == "1"
         search = request.query_params.get("search", "").strip()
-        qs = Question.objects.select_related("exam").order_by("-id")
+        status_filter = request.query_params.get(
+            "status", Question.Status.PENDING
+        ).strip()
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", 50)), 200))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(0, int(request.query_params.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+
+        qs = Question.objects.select_related("exam", "source", "reviewed_by").order_by(
+            "status", "-created_at"
+        )
+        if status_filter:
+            qs = qs.filter(status=status_filter)
         if only_empty:
             qs = qs.filter(explanation="")
         if search:
-            qs = qs.filter(statement__icontains=search) | qs.filter(discipline__icontains=search)
+            qs = qs.filter(statement__icontains=search) | qs.filter(
+                discipline__icontains=search
+            )
+
+        total = qs.count()
+        page_qs = qs[offset : offset + limit]
         return Response(
             {
-                "total": qs.count(),
+                "total": total,
+                "limit": limit,
+                "offset": offset,
                 "results": [
                     {
                         "id": q.id,
+                        "status": q.status,
+                        "source": q.source.slug if q.source else None,
                         "exam_title": q.exam.title if q.exam else None,
                         "discipline": q.discipline,
                         "banca": q.banca,
-                        "statement": q.statement[:160],
+                        "year": q.year,
+                        "statement": q.statement,
+                        "options": q.options,
+                        "correct_answer": q.correct_answer,
                         "explanation": q.explanation,
+                        "review_note": q.review_note,
+                        "rejection_reason": q.rejection_reason,
+                        "rejection_reason_code": q.rejection_reason_code,
+                        "reviewed_by": q.reviewed_by.username
+                        if q.reviewed_by
+                        else None,
+                        "reviewed_at": q.reviewed_at.isoformat()
+                        if q.reviewed_at
+                        else None,
                         "is_active": q.is_active,
                     }
-                    for q in qs[:200]
+                    for q in page_qs
                 ],
             }
         )
+
+    # PATCH — todas as escritas passam pelo moderation.py
     pk = request.data.get("id")
     try:
         question = Question.objects.get(pk=pk)
     except Question.DoesNotExist:
-        return Response({"detail": "Questão não encontrada."}, status=status.HTTP_404_NOT_FOUND)
-    for field in ("explanation", "is_active"):
-        if field in request.data:
-            setattr(question, field, request.data[field])
-    question.save()
-    return Response({"id": question.id, "explanation": question.explanation, "is_active": question.is_active})
+        return Response(
+            {"detail": "Questão não encontrada."}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    mod_action = request.data.get("action", "").strip()
+
+    if mod_action == "approve":
+        explanation = request.data.get("explanation")
+        try:
+            moderation.approve(question, request.user, explanation)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            if isinstance(exc, DjangoValidationError):
+                detail = (
+                    exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                )
+                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(
+            {
+                "id": question.id,
+                "status": question.status,
+                "is_active": question.is_active,
+            }
+        )
+
+    if mod_action == "reject":
+        reason = (request.data.get("rejection_reason") or "").strip()
+        reason_code = (request.data.get("rejection_reason_code") or "").strip()
+        try:
+            moderation.reject(question, request.user, reason, reason_code)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            if isinstance(exc, DjangoValidationError):
+                detail = (
+                    exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                )
+                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(
+            {
+                "id": question.id,
+                "status": question.status,
+                "is_active": question.is_active,
+            }
+        )
+
+    if mod_action == "reopen":
+        note = (request.data.get("review_note") or "").strip()
+        moderation.reopen(question, request.user, note)
+        return Response(
+            {
+                "id": question.id,
+                "status": question.status,
+                "is_active": question.is_active,
+            }
+        )
+
+    # Sem action: edição de rascunho de explicação antes de aprovar
+    if "explanation" in request.data:
+        question.explanation = request.data["explanation"]
+        question.save(update_fields=["explanation", "updated_at"])
+        return Response({"id": question.id, "explanation": question.explanation})
+
+    return Response(
+        {
+            "detail": (
+                f"Informe 'action' (approve | reject | reopen) ou 'explanation'. "
+                f"Motivos aceitos: {', '.join(sorted(REJECTION_REASONS))}."
+            )
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 @api_view(["GET", "PATCH"])
@@ -322,7 +475,9 @@ def news_admin(request):
                         "title": n.title,
                         "category": n.category,
                         "is_published": n.is_published,
-                        "published_at": n.published_at.isoformat() if n.published_at else None,
+                        "published_at": n.published_at.isoformat()
+                        if n.published_at
+                        else None,
                     }
                     for n in qs[:100]
                 ]
@@ -332,8 +487,12 @@ def news_admin(request):
     try:
         news = NewsArticle.objects.get(pk=pk)
     except NewsArticle.DoesNotExist:
-        return Response({"detail": "Notícia não encontrada."}, status=status.HTTP_404_NOT_FOUND)
-    if "is_published" in request.data and isinstance(request.data["is_published"], bool):
+        return Response(
+            {"detail": "Notícia não encontrada."}, status=status.HTTP_404_NOT_FOUND
+        )
+    if "is_published" in request.data and isinstance(
+        request.data["is_published"], bool
+    ):
         news.is_published = request.data["is_published"]
         news.save(update_fields=["is_published"])
     return Response({"id": news.id, "is_published": news.is_published})
@@ -343,7 +502,9 @@ def news_admin(request):
 @permission_classes([IsAdminUser])
 def community_admin(request):
     if request.method == "DELETE":
-        pk = request.query_params.get("id") or (request.data.get("id") if request.data else None)
+        pk = request.query_params.get("id") or (
+            request.data.get("id") if request.data else None
+        )
         CommunityPost.objects.filter(pk=pk).delete()
         return Response({"deleted": pk})
     kind = request.query_params.get("kind", "").strip()
@@ -389,7 +550,9 @@ def concursos_admin(request):
                     "state": c.state,
                     "status": c.status,
                     "deadline": c.deadline.isoformat() if c.deadline else None,
-                    "published_at": c.published_at.isoformat() if c.published_at else None,
+                    "published_at": c.published_at.isoformat()
+                    if c.published_at
+                    else None,
                 }
                 for c in qs[:100]
             ],
@@ -433,7 +596,9 @@ def chat_usage(request):
         ChatUsage.objects.filter(created_at__date__gte=since)
         .annotate(day=TruncDate("created_at"))
         .values("day")
-        .annotate(queries=Count("id"), tokens=Sum("input_tokens") + Sum("output_tokens"))
+        .annotate(
+            queries=Count("id"), tokens=Sum("input_tokens") + Sum("output_tokens")
+        )
         .order_by("day")
     )
     daily_map = {row["day"]: row for row in daily_qs}
@@ -495,10 +660,18 @@ def staff(request):
         email = (data.get("email") or "").strip()
         password = data.get("password") or ""
         if not username or not password:
-            return Response({"detail": "Usuário e senha são obrigatórios."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Usuário e senha são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if User.objects.filter(username=username).exists():
-            return Response({"detail": "Já existe um usuário com esse nome."}, status=status.HTTP_400_BAD_REQUEST)
-        user = User.objects.create_user(username=username, email=email, password=password, is_staff=True)
+            return Response(
+                {"detail": "Já existe um usuário com esse nome."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = User.objects.create_user(
+            username=username, email=email, password=password, is_staff=True
+        )
         return Response(_staff_payload(user), status=status.HTTP_201_CREATED)
 
     qs = User.objects.filter(is_staff=True).order_by("username")
@@ -511,10 +684,15 @@ def staff_detail(request, pk):
     try:
         user = User.objects.get(pk=pk)
     except User.DoesNotExist:
-        return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
+        )
     data = request.data
     if "is_staff" in data and user.pk == request.user.pk:
-        return Response({"detail": "Você não pode alterar o próprio cargo."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Você não pode alterar o próprio cargo."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     for field in ("is_staff", "is_active", "email", "first_name", "last_name"):
         if field in data:
             setattr(user, field, data[field])
@@ -595,8 +773,7 @@ def study_reports(request):
     minutes_by_user = {
         row["user_id"]: row["minutes"]
         for row in (
-            StudySession.objects
-            .annotate(user_id=F("block__plan__user_id"))
+            StudySession.objects.annotate(user_id=F("block__plan__user_id"))
             .values("user_id")
             .annotate(minutes=Sum("minutes"))
         )
@@ -610,22 +787,34 @@ def study_reports(request):
     )
 
     active_user_ids = (
-        UserAnswer.objects.filter(created_at__date__gte=since).values_list("user_id", flat=True).distinct()
+        UserAnswer.objects.filter(created_at__date__gte=since)
+        .values_list("user_id", flat=True)
+        .distinct()
     )
     active_user_ids = set(active_user_ids)
     active_user_ids.update(
-        SimulationRun.objects.filter(created_at__date__gte=since).values_list("user_id", flat=True)
+        SimulationRun.objects.filter(created_at__date__gte=since).values_list(
+            "user_id", flat=True
+        )
     )
     active_user_ids.update(
-        StudySession.objects.filter(completed_at__date__gte=since).values_list("block__plan__user_id", flat=True)
+        StudySession.objects.filter(completed_at__date__gte=since).values_list(
+            "block__plan__user_id", flat=True
+        )
     )
-    active_user_ids.update(ChatUsage.objects.filter(created_at__date__gte=since).values_list("user_id", flat=True))
+    active_user_ids.update(
+        ChatUsage.objects.filter(created_at__date__gte=since).values_list(
+            "user_id", flat=True
+        )
+    )
 
     return Response(
         {
             "total_answers": total_answers,
             "correct_answers": correct_answers,
-            "accuracy": round(correct_answers / total_answers * 100, 1) if total_answers else 0,
+            "accuracy": round(correct_answers / total_answers * 100, 1)
+            if total_answers
+            else 0,
             "total_minutes": total_minutes,
             "flashcards": Flashcard.objects.count(),
             "simulations": {
@@ -642,7 +831,9 @@ def study_reports(request):
                     "answers": s["total"],
                     "correct": s["correct"],
                     "minutes": minutes_by_user.get(s["user__id"], 0),
-                    "last_activity": s["last_activity"].isoformat() if s["last_activity"] else None,
+                    "last_activity": s["last_activity"].isoformat()
+                    if s["last_activity"]
+                    else None,
                 }
                 for s in top_students
             ],

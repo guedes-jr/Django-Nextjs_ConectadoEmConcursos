@@ -161,6 +161,7 @@ export default function LoginPage() {
   const [emailHasAt, setEmailHasAt] = useState(false);
   const [password1, setPassword1] = useState("");
   const [password2, setPassword2] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [globalErrors, setGlobalErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -201,8 +202,8 @@ export default function LoginPage() {
     const userOk = username.trim().length >= 3;
     const emailOk = email.includes("@") && email.trim().length > 3;
 
-    return passOk && userOk && emailOk;
-  }, [email, username, password1, password2]);
+    return passOk && userOk && emailOk && acceptedTerms;
+  }, [acceptedTerms, email, username, password1, password2]);
 
   const submitRegister = async () => {
     setRegisterLoading(true);
@@ -215,6 +216,7 @@ export default function LoginPage() {
         email: email.trim(),
         password1,
         password2,
+        accepted_terms: acceptedTerms,
       });
 
       if (avatarFile) {
@@ -560,6 +562,14 @@ export default function LoginPage() {
                     </div>
 
                     <PasswordChecklist password={password1} confirm={password2} />
+
+                    <div>
+                      <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                        <input checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" />
+                        <span>Li e aceito os <a href="/termos-de-uso" className="font-medium text-blue-700 hover:underline dark:text-blue-300">Termos de Uso</a> e a <a href="/privacidade" className="font-medium text-blue-700 hover:underline dark:text-blue-300">Política de Privacidade</a>.</span>
+                      </label>
+                      {fieldErrors.accepted_terms?.length ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.accepted_terms.join(" ")}</p> : null}
+                    </div>
 
                     <button
                       onClick={submitRegister}

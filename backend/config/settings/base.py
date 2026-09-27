@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 from dotenv import load_dotenv
 
@@ -156,6 +157,10 @@ JWT_AUTH_COOKIE = "access"
 JWT_AUTH_REFRESH_COOKIE = "refresh"
 JWT_AUTH_HTTPONLY = True
 
+REST_AUTH = {
+    "REGISTER_SERIALIZER": "apps.core.registration.TermsRegisterSerializer",
+}
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 LOGIN_REDIRECT_URL = f"{FRONTEND_URL}/portal"
 LOGOUT_REDIRECT_URL = FRONTEND_URL
@@ -204,3 +209,27 @@ CONCURSOS = {
     "rss_feeds": [],       # [{url, category, filter, timeout}]
     "community": [],       # [{"name", "url", "items_path", "fields", "status_map"}]
 }
+
+# Importação de questões (comando `sync_questions` e fila de aprovação).
+# "80% do enunciado bater" é a régua de duplicata: entre o limiar de suspeita e o
+# de duplicata a questão entra na fila com aviso, e acima dele com o mesmo
+# gabarito ela nem entra.
+QUESTIONS_DUPLICATE_THRESHOLD = float(os.getenv("QUESTIONS_DUPLICATE_THRESHOLD", "0.80"))
+QUESTIONS_SUSPICIOUS_THRESHOLD = float(os.getenv("QUESTIONS_SUSPICIOUS_THRESHOLD", "0.60"))
+
+# Teto padrão de itens por execução, para uma fonte grande não derrubar o worker.
+QUESTIONS_IMPORT_LIMIT = int(os.getenv("QUESTIONS_IMPORT_LIMIT", "500"))
+
+# Configuração por fonte, indexada pelo `slug` do `QuestionSource`. Cada entrada é
+# lida por um adapter de `apps.questions.ingest.sources`:
+#
+#   QUESTIONS_SOURCES = {
+#       "concursos-publicos": {
+#           "url": "https://exemplo.org/api/questoes",  # public_api / official_index
+#           "path": "/srv/dados/provas.csv",           # open_dataset
+#           "item_url": "https://exemplo.org/prova/{banca}/{exam}",  # official_index
+#           "mapping": {"source_id": "codigo"},       # renomeia colunas/keys da fonte
+#           "timeout": 25,
+#       },
+#   }
+QUESTIONS_SOURCES = json.loads(os.getenv("QUESTIONS_SOURCES", "{}"))

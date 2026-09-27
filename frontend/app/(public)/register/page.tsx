@@ -66,6 +66,7 @@ export default function RegisterPage() {
 
   const [password1, setPassword1] = useState("");
   const [password2, setPassword2] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [globalErrors, setGlobalErrors] = useState<string[]>([]);
@@ -86,8 +87,8 @@ export default function RegisterPage() {
     const userOk = username.trim().length >= 3;
     const emailOk = email.includes("@") && email.trim().length > 3;
 
-    return passOk && userOk && emailOk;
-  }, [email, username, password1, password2]);
+    return passOk && userOk && emailOk && acceptedTerms;
+  }, [acceptedTerms, email, username, password1, password2]);
 
   const submit = async () => {
     setLoading(true);
@@ -100,6 +101,7 @@ export default function RegisterPage() {
         email: email.trim(),
         password1,
         password2,
+        accepted_terms: acceptedTerms,
       });
 
       if (avatarFile) {
@@ -263,6 +265,14 @@ export default function RegisterPage() {
           </div>
 
           <PasswordChecklist password={password1} confirm={password2} />
+
+          <div>
+            <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+              <input checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" />
+              <span>Li e aceito os <Link href="/termos-de-uso" className="font-medium text-blue-600 hover:underline">Termos de Uso</Link> e a <Link href="/privacidade" className="font-medium text-blue-600 hover:underline">Política de Privacidade</Link>.</span>
+            </label>
+            {fieldErrors.accepted_terms?.length ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.accepted_terms.join(" ")}</p> : null}
+          </div>
 
           <button
             onClick={submit}

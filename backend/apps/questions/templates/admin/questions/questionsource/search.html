@@ -1,0 +1,29 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div id="content-main">
+  <p><a href="{% url 'admin:questions_questionsource_changelist' %}">← Fontes</a> · <a href="{% url 'admin:questions_searchrun_history' %}">Histórico de buscas</a></p>
+  <form method="get" style="margin: 20px 0">
+    <label for="source"><strong>1. Escolha a fonte</strong></label>
+    <select name="source" id="source" onchange="this.form.submit()">
+      <option value="">Selecione…</option>
+      {% for item in sources %}<option value="{{ item.slug }}"{% if source.pk == item.pk %} selected{% endif %}>{{ item.name }} — {{ item.get_kind_display }}</option>{% endfor %}
+    </select>
+  </form>
+  {% if source %}
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="action" value="search"><input type="hidden" name="source" value="{{ source.slug }}">
+    <fieldset class="module aligned"><h2>2. Filtros de {{ source.name }}</h2>
+      {% for row in filter_rows %}<div class="form-row"><div><label for="id_{{ row.spec.key }}">{{ row.spec.label }}{% if row.spec.required %} *{% endif %}</label>
+        {% if row.spec.kind == 'select' %}<select name="{{ row.spec.key }}" id="id_{{ row.spec.key }}"><option value="">Todos</option>{% for option in row.options %}<option value="{{ option.value }}"{% if row.value == option.value %} selected{% endif %}>{{ option.label }}{% if option.count %} ({{ option.count }}){% endif %}</option>{% endfor %}</select>
+        {% elif row.spec.kind == 'bool' %}<input type="checkbox" name="{{ row.spec.key }}" id="id_{{ row.spec.key }}" value="1">
+        {% else %}<input type="text" name="{{ row.spec.key }}" id="id_{{ row.spec.key }}" value="{{ row.value }}">{% endif %}
+        {% if row.spec.help_text %}<p class="help">{{ row.spec.help_text }}</p>{% endif %}
+      </div></div>{% endfor %}
+      <div class="form-row"><div><label for="id_limit">Limite</label><input id="id_limit" name="limit" type="number" min="1" max="1000" value="200"></div></div>
+      <div class="form-row"><div><label><input name="dry_run" type="checkbox"> Simular sem gravar</label></div></div>
+    </fieldset>
+    <div class="submit-row"><input type="submit" value="3. Executar busca"></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

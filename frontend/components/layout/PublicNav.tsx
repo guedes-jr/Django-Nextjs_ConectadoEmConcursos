@@ -110,6 +110,8 @@ export function PublicFooter() {
           <Link href="/" className="transition hover:text-blue-600 dark:hover:text-blue-400">Início</Link>
           <Link href="/concursos" className="transition hover:text-blue-600 dark:hover:text-blue-400">Concursos abertos</Link>
           <Link href="/noticias" className="transition hover:text-blue-600 dark:hover:text-blue-400">Notícias</Link>
+          <Link href="/privacidade" className="transition hover:text-blue-600 dark:hover:text-blue-400">Privacidade</Link>
+          <Link href="/termos-de-uso" className="transition hover:text-blue-600 dark:hover:text-blue-400">Termos de uso</Link>
           <Link href="/register" className="transition hover:text-blue-600 dark:hover:text-blue-400">Criar conta</Link>
         </nav>
       </div>

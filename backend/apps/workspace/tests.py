@@ -93,7 +93,11 @@ class NotebookTests(APITestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="caderno", password="pw")
         self.client.force_authenticate(self.user)
-        self.question = Question.objects.create(statement="?", options=["a", "b"], correct_answer=0, discipline="A", banca="B", year=2024)
+        self.question = Question.objects.create(
+            statement="?", options=["a", "b"], correct_answer=0,
+            discipline="A", banca="B", year=2024,
+            status=Question.Status.APPROVED, is_active=True,
+        )
 
     def test_notebook_add_remove_question(self):
         response = self.client.post("/api/workspace/notebooks/", {"title": "CB"})

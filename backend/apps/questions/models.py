@@ -1,5 +1,11 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+
+# Fonte usada para o conteúdo que já existia antes das Questões/Fontes e para o
+# `import_content`. Nasce inativa: a licença do conteúdo pré-existente precisa ser
+# verificada antes de a fonte passar a ser usada em busca.
+LEGACY_SOURCE_SLUG = "legacy"
 
 
 class Exam(models.Model):
@@ -8,19 +14,137 @@ class Exam(models.Model):
     institution = models.CharField(max_length=160, blank=True, db_index=True)
     role = models.CharField(max_length=160, blank=True, db_index=True)
     year = models.PositiveSmallIntegerField(db_index=True)
+    level = models.CharField(max_length=40, blank=True, db_index=True)
+    state = models.CharField(max_length=2, blank=True, db_index=True)
     is_published = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-year", "banca", "title"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["title", "banca", "year"], name="unique_exam_title_banca_year"
+            )
+        ]
 
     def __str__(self):
         return f"{self.banca} - {self.title} ({self.year})"
 
 
+class QuestionSource(models.Model):
+    """Base de conteúdo de onde as questões são importadas.
+
+    A fonte é a unidade de proveniência: uma execução de busca (`SearchRun`) usa
+    exatamente uma fonte, e toda questão importada guarda de onde veio.
+    """
+
+    class Kind(models.TextChoices):
+        OPEN_DATASET = "open_dataset", "Dataset aberto"
+        PUBLIC_API = "public_api", "API pública"
+        OFFICIAL_INDEX = "official_index", "Índice oficial"
+        LOCAL_FILE = "local_file", "Arquivo local"
+
+    slug = models.SlugField(max_length=60, unique=True)
+    name = models.CharField(max_length=120)
+    kind = models.CharField(
+        max_length=20, choices=Kind.choices, default=Kind.LOCAL_FILE, db_index=True
+    )
+    home_url = models.URLField(max_length=600, blank=True)
+    license_name = models.CharField(max_length=120, blank=True)
+    license_url = models.URLField(max_length=600, blank=True)
+    attribution = models.CharField(max_length=300, blank=True)
+    requires_attribution = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=False, db_index=True)
+    cached_facets = models.JSONField(default=dict, blank=True)
+    facets_at = models.DateTimeField(null=True, blank=True)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class SearchRun(models.Model):
+    """Uma execução de busca em uma fonte, com os filtros usados e o resultado.
+
+    É ao mesmo tempo o histórico dos filtros (permite repetir ou continuar a
+    mesma busca) e a trilha de auditoria da importação.
+    """
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "Em execução"
+        DONE = "done", "Concluída"
+        PARTIAL = "partial", "Parcial"
+        FAILED = "failed", "Falhou"
+        CANCELLED = "cancelled", "Cancelada"
+
+    name = models.CharField(max_length=200, blank=True)
+    source = models.ForeignKey(
+        QuestionSource, on_delete=models.PROTECT, related_name="runs"
+    )
+    filters = models.JSONField(default=dict, blank=True)
+    fingerprint = models.CharField(max_length=64, blank=True, db_index=True)
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.RUNNING, db_index=True
+    )
+    next_page = models.PositiveIntegerField(null=True, blank=True)
+    counts = models.JSONField(default=dict, blank=True)
+    duplicates_preview = models.JSONField(default=list, blank=True)
+    log_path = models.CharField(max_length=300, blank=True)
+    parent = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="runs"
+    )
+    started_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="question_search_runs",
+    )
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(
+                fields=["fingerprint", "-started_at"],
+                name="questions_run_fingerprint_idx",
+            )
+        ]
+
+    def __str__(self):
+        return self.name or f"{self.source_id} · {self.started_at:%d/%m/%Y %H:%M}"
+
+
 class Question(models.Model):
-    source_id = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    class Status(models.TextChoices):
+        PENDING = "pending", "Na fila de aprovação"
+        APPROVED = "approved", "Aprovada"
+        REJECTED = "rejected", "Rejeitada"
+
+    external_id = models.CharField(max_length=64, null=True, blank=True)
+    source = models.ForeignKey(
+        QuestionSource,
+        on_delete=models.SET_NULL,
+        related_name="questions",
+        null=True,
+        blank=True,
+    )
+    search_run = models.ForeignKey(
+        SearchRun,
+        on_delete=models.SET_NULL,
+        related_name="questions",
+        null=True,
+        blank=True,
+    )
     exam = models.ForeignKey(
         Exam,
         on_delete=models.SET_NULL,
@@ -31,19 +155,75 @@ class Question(models.Model):
     discipline = models.CharField(max_length=100, db_index=True)
     banca = models.CharField(max_length=100, db_index=True)
     year = models.PositiveSmallIntegerField(db_index=True)
+    number = models.PositiveSmallIntegerField(null=True, blank=True)
     statement = models.TextField()
     options = models.JSONField(default=list)
     correct_answer = models.PositiveSmallIntegerField()
     explanation = models.TextField(blank=True)
-    is_active = models.BooleanField(default=True, db_index=True)
+    content_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    source_url = models.URLField(max_length=600, blank=True)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_questions",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    rejection_reason_code = models.CharField(max_length=40, blank=True)
+    review_note = models.TextField(blank=True)
+    is_active = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-year", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id"], name="unique_question_source_external"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["status", "-created_at"], name="questions_queue_idx"),
+        ]
 
     def __str__(self):
         return f"{self.banca} {self.year} - {self.discipline} ({self.pk})"
+
+
+class QuestionStemToken(models.Model):
+    """Token raro do enunciado, índice de candidatos para a busca de duplicatas.
+
+    Guardar só os `SIGNATURE_SIZE` tokens mais raros de cada enunciado mantém o
+    índice pequeno e faz o candidato a duplicata aparecer por consulta indexada,
+    sem varrer a base inteira a cada item importado.
+    """
+
+    question = models.ForeignKey(
+        Question, on_delete=models.CASCADE, related_name="stem_tokens"
+    )
+    token = models.CharField(max_length=40, db_index=True)
+    df = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["question", "token"], name="unique_question_stem_token"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["token", "df"], name="questions_token_df_idx"),
+            models.Index(
+                fields=["question", "token"], name="questions_question_token_idx"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.question_id}:{self.token}"
 
 
 class UserAnswer(models.Model):
@@ -67,7 +247,9 @@ class UserAnswer(models.Model):
 
 class QuestionReview(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="reviews")
+    question = models.ForeignKey(
+        Question, on_delete=models.CASCADE, related_name="reviews"
+    )
     next_review_at = models.DateTimeField(null=True, blank=True, db_index=True)
     interval_days = models.PositiveSmallIntegerField(default=0)
     repetitions = models.PositiveSmallIntegerField(default=0)
@@ -76,7 +258,9 @@ class QuestionReview(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["user", "question"], name="unique_question_review")
+            models.UniqueConstraint(
+                fields=["user", "question"], name="unique_question_review"
+            )
         ]
 
 
@@ -125,7 +309,11 @@ class Comment(models.Model):
 
 
 class SimulationTemplate(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="simulation_templates")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="simulation_templates",
+    )
     name = models.CharField(max_length=120)
     discipline = models.CharField(max_length=100, blank=True, default="")
     exam_ids = models.JSONField(default=list)
@@ -155,7 +343,9 @@ class ErrorReport(models.Model):
         Question, on_delete=models.CASCADE, related_name="error_reports"
     )
     description = models.TextField(max_length=5000)
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.OPEN
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

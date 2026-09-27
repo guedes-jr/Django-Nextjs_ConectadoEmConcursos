@@ -115,7 +115,7 @@ class UsersAdminTests(Base):
 class ContentAdminTests(Base):
     def test_lists_uncommented_questions_and_edits(self):
         q = Question.objects.create(
-            source_id="q1",
+            external_id="q1",
             discipline="Matemática",
             banca="CESPE",
             year=2024,

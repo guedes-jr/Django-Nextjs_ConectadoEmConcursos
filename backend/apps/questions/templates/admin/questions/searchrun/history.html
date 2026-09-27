@@ -1,0 +1,7 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div id="content-main"><p><a class="addlink" href="{% url 'admin:questions_questionsource_search' %}">Buscar questões por fonte</a> · <a href="{% url 'admin:questions_searchrun_changelist' %}">Lista completa</a></p>
+<table id="result_list"><thead><tr><th>Busca</th><th>Fonte</th><th>Status</th><th>Filtros</th><th>Contadores</th><th>Início</th><th>Ações</th></tr></thead><tbody>
+{% for run in runs %}<tr><th><a href="{% url 'admin:questions_searchrun_change' run.pk %}">#{{ run.pk }}</a></th><td>{{ run.source }}</td><td>{{ run.get_status_display }}</td><td><code>{{ run.filters }}</code></td><td>{{ run.counts }}</td><td>{{ run.started_at }}</td><td><a href="{% url 'admin:questions_question_changelist' %}?search_run={{ run.pk }}">Ver fila</a>{% if run.next_page %} · <a href="{% url 'admin:questions_searchrun_continue' run.pk %}">Continuar</a>{% endif %} · <a href="{% url 'admin:questions_searchrun_rerun' run.pk %}">Executar novamente</a>{% if run.duplicates_preview %} · <a href="{% url 'admin:questions_searchrun_import_skipped' run.pk %}">Importar descartadas</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="7">Nenhuma busca executada.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}
