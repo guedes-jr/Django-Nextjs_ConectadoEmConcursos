@@ -3,7 +3,7 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-    dependencies = [("questions", "0015_question_search_run")]
+    dependencies = [("questions", "0016_searchrun_limit")]
     operations = [
         migrations.CreateModel(name="OfficialExamPortal", fields=[
             ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
