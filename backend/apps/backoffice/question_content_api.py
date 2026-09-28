@@ -1,7 +1,10 @@
 """API administrativa para fontes, buscas e fila de questões."""
 
 import json
+import zipfile
+from tempfile import SpooledTemporaryFile
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import FileResponse
 from django.utils import timezone
@@ -13,6 +16,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
+from apps.backoffice.audit import log as audit_log
 from apps.questions import moderation
 from apps.questions.ingest import run as run_search
 from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
@@ -140,6 +144,7 @@ def _question_payload(question, duplicates: list[dict] | None = None):
         "year": question.year,
         "number": question.number,
         "exam": question.exam.title if question.exam else None,
+        "exam_id": question.exam_id,
         "external_id": question.external_id,
         "content_hash": question.content_hash
         or content_hash(question.statement, question.options),
@@ -240,7 +245,9 @@ def question_search(request):
             return _validation_response(exc)
         except AdapterNotConfigured as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(_run_payload(run), status=status.HTTP_201_CREATED)
+        payload = _run_payload(run)
+        audit_log(request, action="question_search.started", resource_type="search_run", resource_id=run.id, after={"source": source.slug, "dry_run": run.dry_run, "limit": run.limit})
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     queryset = SearchRun.objects.select_related("source", "started_by", "parent").order_by("-started_at")
     if source := request.query_params.get("source"):
@@ -287,7 +294,9 @@ def _resume_run(request, pk, page):
         return _validation_response(exc)
     except AdapterNotConfigured as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-    return Response(_run_payload(run), status=status.HTTP_201_CREATED)
+    payload = _run_payload(run)
+    audit_log(request, action="question_search.resumed", resource_type="search_run", resource_id=run.id, after={"parent": parent.id, "page": page, "dry_run": run.dry_run})
+    return Response(payload, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -453,7 +462,9 @@ def _moderate(request, action):
                 moderation.reject(question, request.user, request.data.get("reason"), request.data.get("reason_code"))
         except ValidationError as exc:
             return _validation_response(exc)
-        changed.append(_question_payload(question, []))
+        payload = _question_payload(question, [])
+        audit_log(request, action=f"question.{action}d", resource_type="question", resource_id=question.id, before={"status": Question.Status.PENDING}, after={"status": question.status, "review_note": question.review_note}, reason=str(request.data.get("reason") or request.data.get("reason_code") or ""))
+        changed.append(payload)
     return Response({"results": changed})
 
 
@@ -685,7 +696,29 @@ def official_exam_export(request):
             "paired_with": document.paired_with_id,
             "download": {"status": latest.status, "sha256": latest.sha256, "bytes": latest.bytes_count, "final_url": latest.final_url} if latest else None,
         })
-    return Response({"format": "official-exam-manual-package/v1", "generated_at": timezone.now(), "count": len(payload), "documents": payload})
+    package = {"format": "official-exam-manual-package/v1", "generated_at": timezone.now().isoformat(), "count": len(payload), "documents": payload}
+    if request.query_params.get("include_files") not in {"1", "true"}:
+        return Response(package)
+
+    ready = [item for item in documents if (latest := max(item.downloads.all(), key=lambda row: row.created_at, default=None)) and latest.status == OfficialExamDownload.Status.DONE and latest.file]
+    total_bytes = sum(max(item.downloads.filter(status=OfficialExamDownload.Status.DONE).order_by("-created_at").first().bytes_count, 0) for item in ready)
+    max_files = int(getattr(settings, "OFFICIAL_EXAM_EXPORT_MAX_FILES", 50))
+    max_bytes = int(getattr(settings, "OFFICIAL_EXAM_EXPORT_MAX_BYTES", 500 * 1024 * 1024))
+    if len(ready) > max_files or total_bytes > max_bytes:
+        return Response({"detail": f"O pacote excede o limite de {max_files} PDFs ou {max_bytes // (1024 * 1024)} MB. Refine os filtros."}, status=status.HTTP_400_BAD_REQUEST)
+    archive = SpooledTemporaryFile(max_size=5 * 1024 * 1024, mode="w+b")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr("manifest.json", json.dumps(package, ensure_ascii=False, indent=2))
+        for item in ready:
+            latest = item.downloads.filter(status=OfficialExamDownload.Status.DONE).order_by("-created_at").first()
+            filename = f"pdfs/{item.id}-{latest.sha256[:12] or latest.id}.pdf"
+            with latest.file.open("rb") as source, zipped.open(filename, "w") as target:
+                for chunk in iter(lambda: source.read(64 * 1024), b""):
+                    target.write(chunk)
+    archive.seek(0)
+    response = FileResponse(archive, as_attachment=True, filename="acervo-provas-oficiais.zip", content_type="application/zip")
+    response["X-Official-Exam-Package"] = "manual-package-v1"
+    return response
 
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
@@ -721,7 +754,9 @@ def official_exam_download(request, pk):
         result.finished_at = timezone.now()
         result.save(update_fields=["status", "error_message", "finished_at"])
         return Response({"detail": "Não foi possível enviar o download para a fila."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-    return Response({"id": result.id, "status": result.status, "detail": "Download enviado para processamento."}, status=status.HTTP_202_ACCEPTED)
+    payload = {"id": result.id, "status": result.status, "detail": "Download enviado para processamento."}
+    audit_log(request, action="official_exam.download_requested", resource_type="official_exam_document", resource_id=document.id, after={"download_id": result.id, "portal": document.portal.slug})
+    return Response(payload, status=status.HTTP_202_ACCEPTED)
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
@@ -769,7 +804,9 @@ def official_exam_pair(request, pk):
     if pair.paired_with_id != document.pk:
         pair.paired_with = document
         pair.save(update_fields=["paired_with", "updated_at"])
-    return Response(_document_payload(document))
+    payload = _document_payload(document)
+    audit_log(request, action="official_exam.paired", resource_type="official_exam_document", resource_id=document.id, after={"paired_with": pair.id, "portal": document.portal.slug})
+    return Response(payload)
 
 # Catálogo de bancas: deliberadamente separado das fontes de questões. Ele apenas
 # padroniza nomes para os próximos cadastros e não reescreve registros existentes.
@@ -829,7 +866,9 @@ def bancas(request):
             _banca_write(banca, request.data, request.user)
         except ValidationError as exc:
             return _validation_response(exc)
-        return Response(_banca_payload(banca), status=status.HTTP_201_CREATED)
+        payload = _banca_payload(banca)
+        audit_log(request, action="banca.created", resource_type="banca", resource_id=banca.id, after=payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     queryset = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by").order_by("name")
     if request.query_params.get("active") in {"0", "1"}:
@@ -850,11 +889,14 @@ def banca_detail(request, pk):
         return Response({"detail": "Banca não encontrada."}, status=status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
         return Response(_banca_payload(banca))
+    before = _banca_payload(banca)
     try:
         _banca_write(banca, request.data, request.user)
     except ValidationError as exc:
         return _validation_response(exc)
-    return Response(_banca_payload(banca))
+    payload = _banca_payload(banca)
+    audit_log(request, action="banca.updated", resource_type="banca", resource_id=banca.id, before=before, after=payload)
+    return Response(payload)
 
 
 @api_view(["GET", "POST"])
@@ -872,7 +914,9 @@ def banca_aliases(request, pk):
         alias = BancaAlias.objects.create(banca=banca, alias=alias_value)
     except ValidationError as exc:
         return _validation_response(exc)
-    return Response({"id": alias.id, "alias": alias.alias, "created_at": alias.created_at}, status=status.HTTP_201_CREATED)
+    payload = {"id": alias.id, "alias": alias.alias, "created_at": alias.created_at}
+    audit_log(request, action="banca.alias_added", resource_type="banca", resource_id=banca.id, after={"alias": alias.alias})
+    return Response(payload, status=status.HTTP_201_CREATED)
 
 MANUAL_SOURCE_SLUG = "manual"
 
@@ -906,7 +950,9 @@ def manual_questions(request):
         question = Question(source=_manual_source(), status=Question.Status.DRAFT)
         try: _manual_question_write(question, request.data)
         except ValidationError as exc: return _validation_response(exc)
-        return Response(_question_payload(question, []), status=status.HTTP_201_CREATED)
+        payload = _question_payload(question, [])
+        audit_log(request, action="question.manual_created", resource_type="question", resource_id=question.id, after={"status": question.status, "banca": question.banca})
+        return Response(payload, status=status.HTTP_201_CREATED)
     qs = Question.objects.filter(source__slug=MANUAL_SOURCE_SLUG).select_related("exam").order_by("-updated_at")
     return Response({"results": [_question_payload(q, []) for q in qs[:200]]})
 
@@ -916,8 +962,10 @@ def manual_question_detail(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
     if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED}: return Response({"detail": "A questão já está em revisão ou publicada."}, status=status.HTTP_409_CONFLICT)
+    before = {"status": question.status, "banca": question.banca, "statement": question.statement}
     try: _manual_question_write(question, request.data)
     except ValidationError as exc: return _validation_response(exc)
+    audit_log(request, action="question.manual_updated", resource_type="question", resource_id=question.id, before=before, after={"status": question.status, "banca": question.banca, "statement": question.statement})
     return Response(_question_payload(question, []))
 
 @api_view(["POST"])
@@ -929,4 +977,5 @@ def manual_question_submit(request, pk):
     try: _manual_question_validate({field: getattr(question, field) for field in ("statement", "banca", "discipline", "year", "options", "correct_answer", "source_url")}, question.pk)
     except ValidationError as exc: return _validation_response(exc)
     question.status = Question.Status.PENDING; question.rejection_reason = ""; question.rejection_reason_code = ""; question.save(update_fields=["status", "rejection_reason", "rejection_reason_code", "updated_at"])
+    audit_log(request, action="question.manual_submitted", resource_type="question", resource_id=question.id, before={"status": Question.Status.DRAFT}, after={"status": question.status})
     return Response(_question_payload(question, []))

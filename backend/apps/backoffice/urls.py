@@ -1,11 +1,20 @@
 from django.urls import path
 
+from apps.notifications import admin_api
+
 from . import question_content_api, views
 
 app_name = "backoffice"
 
 urlpatterns = [
     path("overview/", views.overview, name="overview"),
+    path("editorial-dashboard/", views.editorial_dashboard, name="editorial-dashboard"),
+    path("diagnostics/overview/", views.diagnostics_overview, name="diagnostics-overview"),
+    path("diagnostics/services/", views.diagnostics_services, name="diagnostics-services"),
+    path("diagnostics/database/", views.diagnostics_database, name="diagnostics-database"),
+    path("diagnostics/logs/", views.diagnostics_logs, name="diagnostics-logs"),
+    path("diagnostics/scripts/", views.diagnostics_scripts, name="diagnostics-scripts"),
+    path("audit/", views.audit_events, name="audit-events"),
     path("users/", views.list_users, name="users"),
     path("users/<int:pk>/", views.update_user, name="user-detail"),
     path("users/<int:pk>/subscription/", views.assign_subscription, name="user-subscription"),
@@ -60,4 +69,10 @@ urlpatterns = [
     path("staff/", views.staff, name="staff"),
     path("staff/<int:pk>/", views.staff_detail, name="staff-detail"),
     path("reports/study/", views.study_reports, name="study-reports"),
+    path("reports/business/", views.business_reports, name="business-reports"),
+    path("notifications/", admin_api.admin_notifications, name="admin-notifications"),
+    path("notifications/<int:pk>/", admin_api.admin_notification_detail, name="admin-notification-detail"),
+    path("notifications/<int:pk>/publish/", admin_api.admin_notification_publish, name="admin-notification-publish"),
+    path("notifications/<int:pk>/close/", admin_api.admin_notification_close, name="admin-notification-close"),
+    path("notifications/<int:pk>/archive/", admin_api.admin_notification_archive, name="admin-notification-archive"),
 ]

@@ -25,6 +25,10 @@ import {
   Newspaper,
   Building2,
   HelpCircle,
+  Bell,
+  History,
+  Activity,
+  ChevronDown,
 } from "lucide-react";
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
@@ -60,8 +64,18 @@ const navGroups = [
       { href: "/admin/fila-questoes", label: "Fila de revisão", icon: ClipboardCheck },
       { href: "/admin/acervo-provas", label: "Acervo de provas", icon: Archive },
       { href: "/admin/conteudo", label: "Conteúdo", icon: FileText },
-      { href: "/admin/relatorios", label: "Relatórios de estudo", icon: BarChart3 },
       { href: "/admin/backups", label: "Backups", icon: Database },
+      { href: "/admin/notificacoes", label: "Notificações", icon: Bell },
+      { href: "/admin/auditoria", label: "Auditoria", icon: History },
+      { href: "/admin/diagnostico", label: "Diagnóstico", icon: Activity },
+    ],
+  },
+  {
+    label: "Relatórios",
+    items: [
+      { href: "/admin/relatorios", label: "Estudo e uso", icon: BarChart3 },
+      { href: "/admin/relatorios/negocio", label: "Negócio e receita", icon: BarChart3 },
+      { href: "/admin/operacao", label: "Painel editorial", icon: Activity },
     ],
   },
 ];
@@ -73,6 +87,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { me, isLoading } = useMe();
   const [open, setOpen] = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState("Visão geral");
 
   useEffect(() => {
     if (isLoading) return;
@@ -91,21 +106,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  const currentLabel = flatItems.find((item) =>
-    item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href),
-  )?.label;
+  const isActive = (href: string) => href === "/admin" ? pathname === "/admin" : pathname === href || (pathname.startsWith(`${href}/`) && !flatItems.some((item) => item.href !== href && item.href.startsWith(`${href}/`) && (pathname === item.href || pathname.startsWith(`${item.href}/`))));
+  const currentLabel = flatItems.find((item) => isActive(item.href))?.label;
 
   const nav = (
-    <nav className="flex-1 space-y-5 px-3 py-4">
-      {navGroups.map((group) => (
-        <div key={group.label}>
-          <p className="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            {group.label}
-          </p>
-          <ul className="space-y-1">
+    <nav className="admin-nav-scroll flex-1 space-y-3 overflow-y-auto px-3 py-5">
+      {navGroups.map((group) => {
+        const expanded = expandedGroup === group.label;
+        return <div key={group.label}>
+          <button type="button" onClick={() => setExpandedGroup(expanded ? "" : group.label)} className="flex w-full items-center justify-between px-3 pb-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-indigo-200/70 hover:text-white">
+            {group.label}<ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+          </button>
+          {expanded && <ul className="space-y-1">
             {group.items.map((item) => {
-              const active =
-                item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
+              const active = isActive(item.href);
               const Icon = item.icon;
               return (
                 <li key={item.href}>
@@ -113,10 +127,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     href={item.href}
                     onClick={() => setOpen(false)}
                     className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       active
-                        ? "bg-indigo-600 text-white dark:bg-indigo-500/10 dark:text-indigo-300"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50",
+                        ? "bg-white/18 text-white shadow-sm ring-1 ring-white/15"
+                        : "text-indigo-100/75 hover:bg-white/10 hover:text-white",
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
@@ -125,24 +139,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </li>
               );
             })}
-          </ul>
-        </div>
-      ))}
+          </ul>}
+        </div>;
+      })}
     </nav>
   );
 
   const footer = (
-    <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+    <div className="border-t border-white/10 p-3">
       <div className="space-y-1">
         <Link
           href="/"
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
+          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-100/75 hover:bg-white/10 hover:text-white"
         >
           <ExternalLink className="h-4 w-4" /> Ver o site
         </Link>
         <a
           href={adminUrl()}
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
+          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-100/75 hover:bg-white/10 hover:text-white"
         >
           <ExternalLink className="h-4 w-4" /> Admin Django
         </a>
@@ -157,13 +171,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 
   const brand = (
-    <div className="flex items-center gap-2.5 px-5 py-5">
-      <div className="grid h-9 w-9 place-items-center rounded-lg bg-indigo-600 text-white">
+    <div className="flex items-center gap-2.5 border-b border-white/10 px-5 py-5">
+      <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-cyan-300 to-indigo-400 text-slate-950 shadow-lg shadow-indigo-950/20">
         <GraduationCap className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">Conectado em Concursos</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">Painel de gestão</p>
+        <p className="truncate text-sm font-semibold text-white">Conectado em Concursos</p>
+        <p className="text-xs text-indigo-100/65">Painel de gestão</p>
       </div>
     </div>
   );
@@ -181,7 +195,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform dark:border-slate-800 dark:bg-slate-900 lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-indigo-950/20 bg-gradient-to-b from-indigo-950 via-indigo-900 to-slate-950 shadow-2xl shadow-indigo-950/20 transition-transform lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -200,7 +214,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           >
             <Menu className="h-5 w-5" />
           </button>
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">{currentLabel ?? "Painel"}</p>
+          <p className="text-sm font-semibold text-white">{currentLabel ?? "Painel"}</p>
           <div className="ml-auto flex items-center gap-3">
             <ThemeToggle />
             <p className="text-xs text-slate-500 dark:text-slate-300">

@@ -59,3 +59,20 @@ class OfficialExamApiTests(TestCase):
         answer_key.refresh_from_db()
         self.assertEqual(self.proof.paired_with_id, answer_key.id)
         self.assertEqual(answer_key.paired_with_id, self.proof.id)
+
+    def test_export_with_files_returns_staff_only_zip_package(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from io import BytesIO
+        import zipfile
+
+        download = OfficialExamDownload.objects.create(
+            document=self.proof, started_by=self.user, status=OfficialExamDownload.Status.DONE,
+            sha256="a" * 64, bytes_count=14,
+        )
+        download.file.save("prova.pdf", SimpleUploadedFile("prova.pdf", b"%PDF-1.4 teste"))
+        response = self.client.get("/api/backoffice/content/official-exams/export/?include_files=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        with zipfile.ZipFile(BytesIO(b"".join(response.streaming_content))) as package:
+            self.assertIn("manifest.json", package.namelist())
+            self.assertTrue(any(name.startswith("pdfs/") for name in package.namelist()))

@@ -28,7 +28,7 @@ import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { BadgeViolet } from "@/components/admin/StatusBadge";
 
-const emptyCreate = { username: "", email: "", password: "" };
+const emptyCreate: { username: string; email: string; password: string; role: "admin" | "editor" | "reviewer" } = { username: "", email: "", password: "", role: "reviewer" };
 
 export default function AdminStaffPage() {
   const [rows, setRows] = useState<StaffRow[]>([]);
@@ -78,6 +78,7 @@ export default function AdminStaffPage() {
         username: createForm.username,
         email: createForm.email || undefined,
         password: createForm.password,
+        role: createForm.role,
       });
       setNotice(`Staff "${createForm.username}" criado com sucesso.`);
       setCreateOpen(false);
@@ -106,6 +107,7 @@ export default function AdminStaffPage() {
         email: editing.email,
         first_name: editing.first_name,
         last_name: editing.last_name,
+        role: editing.roles[0] || "reviewer",
       });
       setNotice(`Usuário "${editing.username}" atualizado.`);
       setEditOpen(false);
@@ -138,7 +140,7 @@ export default function AdminStaffPage() {
             <TableRow className="hover:bg-transparent">
               <TableHead>Usuário</TableHead>
               <TableHead>Nome</TableHead>
-              <TableHead>Superuser</TableHead>
+              <TableHead>Papel</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Último login</TableHead>
               <TableHead>Registrado em</TableHead>
@@ -178,11 +180,7 @@ export default function AdminStaffPage() {
                     {[user.first_name, user.last_name].filter(Boolean).join(" ") || "—"}
                   </TableCell>
                   <TableCell>
-                    {user.is_superuser ? (
-                      <BadgeViolet>Superuser</BadgeViolet>
-                    ) : (
-                      <span className="text-xs text-slate-400">Staff</span>
-                    )}
+                    {user.is_superuser ? <BadgeViolet>Superuser</BadgeViolet> : <BadgeViolet>{user.roles?.[0] || "admin"}</BadgeViolet>}
                   </TableCell>
                   <TableCell>
                     <span
@@ -254,6 +252,12 @@ export default function AdminStaffPage() {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="staff-role">Papel administrativo</Label>
+              <select id="staff-role" className="flex h-10 w-full rounded-md border border-slate-200 bg-transparent px-3 text-sm dark:border-slate-700" value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as "admin" | "editor" | "reviewer" })}>
+                <option value="reviewer">Revisor — fila e revisão</option><option value="editor">Editor — conteúdo e avisos</option><option value="admin">Administrador — gestão completa</option>
+              </select>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="staff-password">Senha *</Label>
               <Input
                 id="staff-password"
@@ -319,6 +323,12 @@ export default function AdminStaffPage() {
                   onChange={(e) => setEditing({ ...editing, email: e.target.value })}
                 />
               </div>
+              {!editing.is_superuser && <div className="space-y-2">
+                <Label htmlFor="edit-role">Papel administrativo</Label>
+                <select id="edit-role" className="flex h-10 w-full rounded-md border border-slate-200 bg-transparent px-3 text-sm dark:border-slate-700" value={editing.roles?.[0] || "reviewer"} onChange={(e) => setEditing({ ...editing, roles: [e.target.value as "admin" | "editor" | "reviewer"] })}>
+                  <option value="reviewer">Revisor</option><option value="editor">Editor</option><option value="admin">Administrador</option>
+                </select>
+              </div>}
               <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-700">
                 <div>
                   <p className="text-sm font-medium text-slate-800 dark:text-slate-100">Acesso de staff</p>

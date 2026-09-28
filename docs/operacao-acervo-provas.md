@@ -23,7 +23,7 @@ materiais sem licença/permissão de uso registrada.
    pode ser repetido após confirmação explícita.
 7. Confira URL final, HTTP, tamanho, SHA-256 e eventuais erros. Use **Arquivo** para
    baixar o PDF privado como staff, quando necessário.
-8. Exporte o pacote manual JSON aplicando os filtros desejados.
+8. Exporte o pacote JSON para metadados ou o ZIP staff-only com `include_files=1` para incluir os PDFs privados já baixados, aplicando os filtros desejados.
 9. A equipe prepara CSV, JSON ou XML das questões a partir de uma fonte autorizada e
    usa a fonte manual. As questões seguem para a fila de revisão; não devem ser
    publicadas diretamente.

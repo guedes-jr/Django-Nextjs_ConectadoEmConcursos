@@ -79,3 +79,5 @@ out/
 
 # Backups locais (banco + midia) - nao versionar
 backend/backups/
+# Documentos privados baixados ou enviados; não versionar
+backend/private/

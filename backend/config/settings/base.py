@@ -237,3 +237,14 @@ QUESTIONS_IMPORT_LIMIT = int(os.getenv("QUESTIONS_IMPORT_LIMIT", "500"))
 #       },
 #   }
 QUESTIONS_SOURCES = json.loads(os.getenv("QUESTIONS_SOURCES", "{}"))
+
+OFFICIAL_EXAM_EXPORT_MAX_FILES = int(os.getenv("OFFICIAL_EXAM_EXPORT_MAX_FILES", "50"))
+OFFICIAL_EXAM_EXPORT_MAX_BYTES = int(os.getenv("OFFICIAL_EXAM_EXPORT_MAX_BYTES", str(500 * 1024 * 1024)))
+
+AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
+AUDIT_EXPORT_MAX_ROWS = int(os.getenv("AUDIT_EXPORT_MAX_ROWS", "1000"))
+REPORT_EXPORT_MAX_ROWS = int(os.getenv("REPORT_EXPORT_MAX_ROWS", "1000"))
+
+DIAGNOSTICS_ENABLED = os.getenv("DIAGNOSTICS_ENABLED", "0") == "1"
+# Lista explícita de arquivos que podem aparecer no diagnóstico; não aceita caminhos enviados pelo navegador.
+DIAGNOSTICS_LOG_FILES = tuple(path.strip() for path in os.getenv("DIAGNOSTICS_LOG_FILES", "").split(",") if path.strip())
