@@ -215,6 +215,22 @@ def _percentage_change(current, previous):
     return round(((current - previous) / previous) * 100, 1)
 
 
+def _activity_user_ids(since, until):
+    answers = UserAnswer.objects.filter(created_at__gte=since, created_at__lt=until).order_by().values_list("user_id", flat=True)
+    studies = StudySession.objects.filter(completed_at__gte=since, completed_at__lt=until).order_by().values_list("block__plan__user_id", flat=True)
+    chats = ChatUsage.objects.filter(created_at__gte=since, created_at__lt=until).order_by().values_list("user_id", flat=True)
+    return answers.union(studies, chats)
+
+
+def _cohort_retention(until, days):
+    cohort_start = until - dt.timedelta(days=days * 2)
+    cohort_end = until - dt.timedelta(days=days)
+    cohort = User.objects.filter(date_joined__gte=cohort_start, date_joined__lt=cohort_end)
+    total = cohort.count()
+    retained = cohort.filter(id__in=_activity_user_ids(cohort_end, until)).count()
+    return {"window_days": days, "cohort_size": total, "retained": retained, "rate_percent": round((retained / total) * 100, 1) if total else None}
+
+
 def _top_values(queryset, *fields, label):
     return [
         {"label": row[label] or "Não informado", "count": row["count"]}
@@ -374,6 +390,10 @@ def business_reports(request):
     queue_dates = list(pending_questions.order_by("created_at").values_list("created_at", flat=True)[:10000])
     queue_average_age_hours = round(sum((until - created).total_seconds() / 3600 for created in queue_dates) / len(queue_dates), 1) if queue_dates else 0
     payments = PaymentEvent.objects.filter(created_at__gte=since, created_at__lt=until)
+    retention = {str(window): _cohort_retention(until, window) for window in (7, 30, 90)}
+    recent_activity_ids = _activity_user_ids(until - dt.timedelta(days=30), until)
+    expiring = Subscription.objects.filter(status=Subscription.Status.ACTIVE, current_period_end__gt=until, current_period_end__lte=until + dt.timedelta(days=7)).count()
+    dormant_paid = Subscription.objects.filter(status=Subscription.Status.ACTIVE).exclude(user_id__in=recent_activity_ids).count()
 
     payload = {
         "period": {"since": since, "until": until, "days": days, "generated_at": timezone.now()},
@@ -395,6 +415,7 @@ def business_reports(request):
             "signup_to_active_subscription_percent": round((signed_up_with_active_subscription / current_users) * 100, 1) if current_users else 0,
             "daily_signups": [{"date": row["date"], "count": row["count"]} for row in User.objects.filter(date_joined__gte=since, date_joined__lt=until).annotate(date=TruncDate("date_joined")).values("date").annotate(count=Count("id")).order_by("date")],
             "acquisition": {"available": False, "message": "UTM/referrer persistido ainda não está disponível."},
+            "retention_cohorts": retention,
         },
         "product": {
             "questions_answered": answers.count(),
@@ -421,6 +442,8 @@ def business_reports(request):
             "payments_failed": payments.filter(type=PaymentEvent.Type.FAILED).count(),
             "renewals": payments.filter(type=PaymentEvent.Type.RENEWED).count(),
             "cancellations": payments.filter(type=PaymentEvent.Type.CANCELED).count(),
+            "users_at_risk": {"expiring_within_7_days": expiring, "paid_without_activity_30_days": dormant_paid, "pending_payment": Subscription.objects.filter(status=Subscription.Status.PENDING).count()},
+            "support": {"available": False, "message": "Não existe uma fonte de tickets/suporte integrada."},
         },
     }
     if financial_access:
@@ -436,6 +459,9 @@ def business_reports(request):
             "plan_distribution": [{"plan": row["plan__name"], "cycle": row["cycle"], "count": row["count"]} for row in active.values("plan__name", "cycle").annotate(count=Count("id")).order_by("plan__name", "cycle")],
             "received_revenue": None,
             "received_revenue_status": "indisponível: PaymentEvent não possui valor monetário normalizado.",
+            "average_ticket_mrr": round(mrr / active.count(), 2) if active.count() else 0,
+            "churn_events": payments.filter(type=PaymentEvent.Type.CANCELED).count(),
+            "reactivations": payments.filter(type=PaymentEvent.Type.RENEWED).count(),
         })
 
     audit_log(request, action="report.viewed", resource_type="business_report", context={"since": since, "until": until, "financial_access": financial_access})

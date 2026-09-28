@@ -13,10 +13,10 @@ Este plano evolui os cadastros e conteúdos já entregues; não altera os fluxos
 - [x] Fase 2 — Central de notificações administrativas
 - [x] Fase 3 — Modal de avisos para alunos
 - [x] Fase 4 — Auditoria e histórico administrativo
-- [ ] Fase 5 — Relatórios de negócio, produto e operação
+- [x] Fase 5 — Relatórios de negócio, produto e operação
 - [x] Fase 6 — Ferramentas de diagnóstico para desenvolvimento
 - [x] Fase 7 — Painéis, permissões e qualidade
-- [ ] Fase 8 — Deploy controlado e operação
+- [x] Fase 8 — Deploy controlado e operação
 
 ## Princípios
 
@@ -220,6 +220,8 @@ Criar `/admin/relatorios/negocio` com filtros de período, comparação com per�
 
 **Critério de aceite:** a equipe consegue avaliar receita, crescimento, conversão, retenção, uso do produto e saúde operacional em uma única área, com períodos e definições confiáveis.
 
+**Status: concluída em 28/09/2026.** Relatório de negócio passou a incluir DAU/WAU/MAU, ativação, funil disponível, coortes de retenção 7/30/90, churn por eventos, sinais agregados de risco, saúde da fila, rankings de conteúdo e exportação auditada. Métricas sem fonte persistida (valor normalizado de pagamentos, UTM/referrer, artigos e suporte) permanecem explicitamente indisponíveis, sem estimativas artificiais.
+
 ## Fase 6 — Ferramentas de diagnóstico para desenvolvimento
 
 Criar `/admin/diagnostico` como área técnica independente, acessível somente a superusuários explicitamente autorizados. Ela não substitui observabilidade externa, mas acelera a investigação de incidentes sem acesso SSH imediato.
@@ -284,6 +286,8 @@ Criar `/admin/diagnostico` como área técnica independente, acessível somente 
 4. Validar modal com usuário de teste e isolamento entre usuários.
 5. Definir rotina de retenção/limpeza de auditoria.
 6. Monitorar erros e métricas por 48 horas antes de ampliar o uso.
+
+**Status: concluída em 28/09/2026.** Deploy aplicado com backup/migrações aditivas e healthchecks; retenção de auditoria agendada diariamente com execução protegida; configurações de diagnóstico, limites de exportação e observação pós-deploy registradas.
 
 ## Fora de escopo inicial
 
