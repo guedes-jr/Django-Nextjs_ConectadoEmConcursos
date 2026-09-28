@@ -39,7 +39,7 @@ export default function FontesQuestoesPage() {
       <PageHeader
         title="Fontes de questões"
         description="Escolha uma fonte autorizada, refine os filtros e envie o resultado para a fila de revisão."
-        actions={<><Button variant="outline" asChild><a href={adminUrl("questions/questionsource/add/")}>Cadastrar fonte</a></Button><Button onClick={() => setDialogOpen(true)}><Search className="h-4 w-4" /> Nova busca</Button></>}
+        actions={<><Button variant="outline" asChild><a href={adminUrl("questions/questionsource/add/")}>Cadastrar fonte</a></Button><Button onClick={() => setDialogOpen(true)} className="bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md dark:bg-blue-500 dark:text-blue-950 dark:hover:bg-blue-400"><Search className="h-4 w-4" /> Nova busca</Button></>}
       />
       {feedback && <Notice kind={feedback.kind}>{feedback.message}</Notice>}
       <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">

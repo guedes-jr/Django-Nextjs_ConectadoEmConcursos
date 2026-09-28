@@ -17,7 +17,9 @@ except ImportError:
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.db import connection
+from django.contrib.auth.forms import PasswordResetForm
+from django.contrib.sessions.models import Session
+from django.db import connection, transaction
 from django.http import HttpResponse
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Avg, Count, F, Max, Q, Sum
@@ -29,7 +31,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from apps.notifications.models import AdminNotification, NotificationRecipient
+from apps.notifications.models import AdminNotification, Notification, NotificationCategory, NotificationPreference, NotificationRecipient
 from apps.billing.models import PaymentEvent, Plan, Subscription
 from apps.chat.models import ChatUsage, Conversation, Message
 from apps.concursos.models import Concurso, NewsArticle
@@ -37,6 +39,7 @@ from apps.questions import moderation
 from apps.questions.moderation import REJECTION_REASONS
 from apps.questions.models import Exam, OfficialExamDownload, Question, UserAnswer
 from apps.studies.models import StudySession
+from apps.core.models import Profile
 from apps.workspace.models import (
     CommunityPost,
     ExamSubmission,
@@ -46,7 +49,7 @@ from apps.workspace.models import (
 
 from . import services
 from .audit import log as audit_log
-from .models import AuditEvent
+from .models import AuditEvent, UserManagementMeta
 from .serializers import PlanSerializer, SubscriptionAdminSerializer
 
 User = get_user_model()
@@ -562,86 +565,189 @@ def overview(request):
     )
 
 
+def _user_activity_at(user_id):
+    values = [
+        UserAnswer.objects.filter(user_id=user_id).aggregate(value=Max("created_at"))["value"],
+        StudySession.objects.filter(block__plan__user_id=user_id).aggregate(value=Max("completed_at"))["value"],
+        SimulationRun.objects.filter(user_id=user_id).aggregate(value=Max("created_at"))["value"],
+        Notification.objects.filter(user_id=user_id).aggregate(value=Max("created_at"))["value"],
+    ]
+    return max((value for value in values if value), default=None)
+
+
+def _user_payload(user, request=None, include_detail=False):
+    sub = getattr(user, "subscription", None)
+    meta, _ = UserManagementMeta.objects.get_or_create(user=user)
+    profile, _ = Profile.objects.get_or_create(user=user)
+    activity_at = _user_activity_at(user.id)
+    avatar = profile.avatar.url if profile.avatar else None
+    if avatar and request:
+        avatar = request.build_absolute_uri(avatar)
+    payload = {
+        "id": user.id, "username": user.username, "email": user.email,
+        "first_name": user.first_name, "last_name": user.last_name, "avatar": avatar,
+        "is_staff": user.is_staff, "is_active": user.is_active,
+        "date_joined": user.date_joined.isoformat(), "last_login": user.last_login.isoformat() if user.last_login else None,
+        "last_activity_at": activity_at.isoformat() if activity_at else None,
+        "tags": meta.tags, "block_reason": meta.block_reason,
+        "subscription": {"id": sub.id, "plan": sub.plan.name, "plan_slug": sub.plan.slug, "status": sub.status, "cycle": sub.cycle, "current_period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None} if sub else None,
+    }
+    if include_detail:
+        payload.update({
+            "profile": {field: getattr(profile, field) for field in ("phone", "state", "city", "profession", "target_role", "study_hours_per_day", "disciplines", "is_public", "show_in_ranking")},
+            "preferences": {item.category: item.enabled for item in NotificationPreference.objects.filter(user=user)},
+            "terms": {"accepted": None, "detail": "O aceite histórico não foi registrado para este cadastro."},
+            "internal_notes": meta.internal_notes,
+            "risk": {"inactive_30_days": not activity_at or activity_at < timezone.now() - dt.timedelta(days=30), "subscription_expiring": bool(sub and sub.current_period_end and sub.current_period_end <= timezone.now() + dt.timedelta(days=7))},
+        })
+    return payload
+
+
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 def list_users(request):
     search = request.query_params.get("search", "").strip()
     limit = min(100, max(1, int(request.query_params.get("limit", 50))))
     offset = max(0, int(request.query_params.get("offset", 0)))
-    qs = User.objects.all()
+    qs = User.objects.select_related("subscription__plan", "profile", "management_meta").all()
     if search:
-        qs = qs.filter(username__icontains=search) | qs.filter(email__icontains=search)
-    rows = []
-    for u in qs.order_by("-date_joined")[offset:offset + limit]:
-        sub = getattr(u, "subscription", None)
-        rows.append(
-            {
-                "id": u.id,
-                "username": u.username,
-                "email": u.email,
-                "is_staff": u.is_staff,
-                "is_active": u.is_active,
-                "date_joined": u.date_joined.isoformat(),
-                "subscription": (
-                    {
-                        "id": sub.id,
-                        "plan": sub.plan.name,
-                        "plan_slug": sub.plan.slug,
-                        "status": sub.status,
-                        "cycle": sub.cycle,
-                    }
-                    if sub
-                    else None
-                ),
-            }
-        )
+        qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search) | Q(first_name__icontains=search) | Q(last_name__icontains=search))
+    if request.query_params.get("status") == "active": qs = qs.filter(is_active=True)
+    if request.query_params.get("status") == "blocked": qs = qs.filter(is_active=False)
+    if plan := request.query_params.get("plan"): qs = qs.filter(subscription__plan__slug=plan)
+    if subscription := request.query_params.get("subscription"): qs = qs.filter(subscription__status=subscription)
+    if registered_from := parse_datetime(request.query_params.get("registered_from", "")): qs = qs.filter(date_joined__gte=registered_from)
+    if registered_to := parse_datetime(request.query_params.get("registered_to", "")): qs = qs.filter(date_joined__lte=registered_to)
+    rows = [_user_payload(user, request) for user in qs.order_by("-date_joined")[offset:offset + limit]]
+    activity = request.query_params.get("activity")
+    if activity in {"active", "inactive"}:
+        cutoff = timezone.now() - dt.timedelta(days=30)
+        rows = [row for row in rows if bool(row["last_activity_at"] and parse_datetime(row["last_activity_at"]) >= cutoff) == (activity == "active")]
     return Response({"results": rows, "total": qs.count(), "offset": offset, "limit": limit})
 
 
-@api_view(["PATCH"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAdminUser])
 def update_user(request, pk):
-    try:
-        user = User.objects.get(pk=pk)
-    except User.DoesNotExist:
-        return Response(
-            {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
-        )
-    before = {"is_active": user.is_active}
-    if "is_active" in request.data and isinstance(request.data["is_active"], bool):
-        user.is_active = request.data["is_active"]
-        user.save(update_fields=["is_active"])
-        audit_log(request, action="user.access_updated", resource_type="user", resource_id=user.id, before=before, after={"is_active": user.is_active})
-    return Response({"id": user.id, "is_active": user.is_active})
+    user = User.objects.select_related("subscription__plan", "profile", "management_meta").filter(pk=pk).first()
+    if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET": return Response(_user_payload(user, request, include_detail=True))
+    before = _user_payload(user, request, include_detail=True)
+    data = request.data
+    profile, _ = Profile.objects.get_or_create(user=user)
+    meta, _ = UserManagementMeta.objects.get_or_create(user=user)
+    errors = {}
+    if "email" in data:
+        email = str(data["email"]).strip().lower()
+        if not email or User.objects.exclude(pk=user.pk).filter(email__iexact=email).exists(): errors["email"] = "Informe um e-mail único e válido."
+        else: user.email = email
+    for field in ("first_name", "last_name"):
+        if field in data: setattr(user, field, str(data[field]).strip()[:150])
+    if "is_active" in data:
+        if not isinstance(data["is_active"], bool): errors["is_active"] = "Informe um estado de acesso válido."
+        else:
+            user.is_active = data["is_active"]
+            if user.is_active: meta.block_reason = ""
+    for field in ("phone", "state", "city", "profession", "target_role", "study_hours_per_day", "disciplines", "is_public", "show_in_ranking"):
+        if field in data: setattr(profile, field, data[field])
+    if "tags" in data:
+        if not isinstance(data["tags"], list) or any(not isinstance(x, str) or len(x) > 40 for x in data["tags"]): errors["tags"] = "Use etiquetas de até 40 caracteres."
+        else: meta.tags = sorted(set(x.strip() for x in data["tags"] if x.strip()))[:20]
+    if "internal_notes" in data: meta.internal_notes = str(data["internal_notes"])[:5000]
+    if errors: return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+    with transaction.atomic():
+        user.save(); profile.save(); meta.updated_by = request.user; meta.save()
+    audit_log(request, action="user.updated", resource_type="user", resource_id=user.id, before=before, after=_user_payload(user, request, include_detail=True))
+    return Response(_user_payload(user, request, include_detail=True))
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def user_history(request, pk):
+    user = User.objects.filter(pk=pk).first()
+    if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    def rows(qs, fields, order_by="-created_at"): return [{key: (value.isoformat() if hasattr(value, "isoformat") else value) for key, value in zip(fields, row)} for row in qs.values_list(*fields).order_by(order_by)[:20]]
+    return Response({
+        "access": [{"at": event.created_at, "action": event.action, "reason": event.reason} for event in AuditEvent.objects.filter(resource_type="user", resource_id=str(user.id))[:30]],
+        "studies": rows(StudySession.objects.filter(block__plan__user=user), ("block__date", "minutes", "completed_at"), "-completed_at"),
+        "questions": rows(UserAnswer.objects.filter(user=user), ("created_at", "is_correct")),
+        "simulations": rows(SimulationRun.objects.filter(user=user), ("created_at", "score")),
+        "payments": rows(PaymentEvent.objects.filter(user=user), ("created_at", "type", "processed")),
+        "notifications": rows(Notification.objects.filter(user=user), ("created_at", "title", "is_read")),
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def user_action(request, pk):
+    user = User.objects.filter(pk=pk).first()
+    if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    action = str(request.data.get("action", "")); reason = str(request.data.get("reason", "")).strip()[:500]
+    meta, _ = UserManagementMeta.objects.get_or_create(user=user)
+    if action == "block":
+        if not reason: return Response({"reason": "Informe o motivo do bloqueio."}, status=status.HTTP_400_BAD_REQUEST)
+        user.is_active = False; user.save(update_fields=["is_active"]); meta.block_reason = reason; meta.updated_by = request.user; meta.save()
+    elif action == "unblock":
+        user.is_active = True; user.save(update_fields=["is_active"]); meta.block_reason = ""; meta.updated_by = request.user; meta.save()
+    elif action == "password_reset":
+        if not user.email: return Response({"detail": "O usuário não possui e-mail cadastrado."}, status=status.HTTP_400_BAD_REQUEST)
+        PasswordResetForm({"email": user.email}).save(request=request, use_https=request.is_secure(), email_template_name="registration/password_reset_email.html")
+    elif action == "verify_email":
+        from allauth.account.models import EmailAddress
+        EmailAddress.objects.update_or_create(user=user, email=user.email, defaults={"verified": True, "primary": True})
+    elif action == "logout_all":
+        removed = 0
+        for session in Session.objects.all():
+            try:
+                if str(session.get_decoded().get("_auth_user_id")) == str(user.id): session.delete(); removed += 1
+            except Exception: continue
+    else: return Response({"detail": "Ação não permitida."}, status=status.HTTP_400_BAD_REQUEST)
+    audit_log(request, action=f"user.{action}", resource_type="user", resource_id=user.id, reason=reason, after={"is_active": user.is_active})
+    return Response({"ok": True, "user": _user_payload(user, request, include_detail=True)})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def user_notification(request, pk):
+    user = User.objects.filter(pk=pk, is_active=True).first()
+    if not user: return Response({"detail": "Usuário ativo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    title, body = str(request.data.get("title", "")).strip(), str(request.data.get("body", "")).strip()
+    category = str(request.data.get("category", NotificationCategory.FEEDBACK))
+    if not title or len(title) > 120: return Response({"title": "Informe um título de até 120 caracteres."}, status=status.HTTP_400_BAD_REQUEST)
+    if category not in NotificationCategory.values: return Response({"category": "Categoria inválida."}, status=status.HTTP_400_BAD_REQUEST)
+    item = Notification.objects.create(user=user, actor=request.user, category=category, title=title, body=body[:2000], link=str(request.data.get("link", ""))[:255])
+    audit_log(request, action="user.notification_sent", resource_type="user", resource_id=user.id, after={"notification_id": item.id, "category": category})
+    return Response({"id": item.id, "created_at": item.created_at}, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
 def assign_subscription(request, pk):
-    try:
-        user = User.objects.get(pk=pk)
-    except User.DoesNotExist:
-        return Response(
-            {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
-        )
+    user = User.objects.filter(pk=pk).first()
+    if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
     plan = Plan.objects.filter(slug=request.data.get("plan", "")).first()
-    if not plan:
-        return Response(
-            {"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST
-        )
+    if not plan: return Response({"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST)
     cycle = request.data.get("cycle", Subscription.Cycle.MONTHLY)
-    status_ = (
-        Subscription.Status.ACTIVE
-        if plan.monthly_price == 0
-        else Subscription.Status.PENDING
-    )
-    sub, _ = Subscription.objects.update_or_create(
-        user=user,
-        defaults={"plan": plan, "cycle": cycle, "status": status_},
-    )
-    payload = {"id": sub.id, "status": sub.status, "plan": plan.name}
+    if cycle not in Subscription.Cycle.values: return Response({"cycle": "Ciclo inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    status_ = request.data.get("status", Subscription.Status.ACTIVE if plan.monthly_price == 0 else Subscription.Status.PENDING)
+    if status_ not in Subscription.Status.values: return Response({"status": "Status inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    period_end = parse_datetime(request.data.get("current_period_end", "")) if request.data.get("current_period_end") else None
+    sub, _ = Subscription.objects.update_or_create(user=user, defaults={"plan": plan, "cycle": cycle, "status": status_, "current_period_end": period_end})
+    payload = {"id": sub.id, "status": sub.status, "plan": plan.name, "current_period_end": sub.current_period_end}
     audit_log(request, action="subscription.assigned", resource_type="subscription", resource_id=sub.id, after=payload)
     return Response(payload)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def subscriptions_overview(request):
+    now = timezone.now()
+    active = Subscription.objects.filter(status=Subscription.Status.ACTIVE)
+    expiring = active.filter(current_period_end__gte=now, current_period_end__lte=now + dt.timedelta(days=30)).count()
+    def price_expression(cycle):
+        return "monthly_price" if cycle == Subscription.Cycle.MONTHLY else "semiannual_price" if cycle == Subscription.Cycle.SEMIANNUAL else "annual_price"
+    mrr = sum((getattr(item.plan, price_expression(item.cycle)) / (1 if item.cycle == Subscription.Cycle.MONTHLY else 6 if item.cycle == Subscription.Cycle.SEMIANNUAL else 12) for item in active.select_related("plan")), start=0)
+    return Response({"total": Subscription.objects.count(), "active": active.count(), "pending": Subscription.objects.filter(status=Subscription.Status.PENDING).count(), "canceled": Subscription.objects.filter(status=Subscription.Status.CANCELED).count(), "expiring_30_days": expiring, "mrr_estimated": str(mrr.quantize(__import__("decimal").Decimal("0.01")))})
 
 
 @api_view(["GET"])
@@ -652,6 +758,11 @@ def list_subscriptions(request):
     qs = Subscription.objects.select_related("user", "plan").order_by("-created_at")
     if status_filter:
         qs = qs.filter(status=status_filter)
+    if plan_filter := request.query_params.get("plan", "").strip(): qs = qs.filter(plan__slug=plan_filter)
+    if cycle_filter := request.query_params.get("cycle", "").strip(): qs = qs.filter(cycle=cycle_filter)
+    if request.query_params.get("expires_within"):
+        try: qs = qs.filter(current_period_end__gte=timezone.now(), current_period_end__lte=timezone.now() + dt.timedelta(days=int(request.query_params["expires_within"])))
+        except ValueError: pass
     if search:
         qs = qs.filter(user__username__icontains=search) | qs.filter(
             user__email__icontains=search
@@ -681,10 +792,70 @@ def update_subscription(request, pk):
         sub.cycle = data["cycle"]
     if "status" in data:
         sub.status = data["status"]
+    if "current_period_end" in data:
+        value = data["current_period_end"]
+        parsed = parse_datetime(value) if isinstance(value, str) and value else value
+        if value and not parsed: return Response({"current_period_end": "Informe uma data de vencimento válida."}, status=status.HTTP_400_BAD_REQUEST)
+        sub.current_period_end = parsed
     sub.save()
     payload = SubscriptionAdminSerializer(sub).data
     audit_log(request, action="subscription.updated", resource_type="subscription", resource_id=sub.id, before=before, after={"plan": sub.plan.slug, "cycle": sub.cycle, "status": sub.status})
     return Response(payload)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def plans_overview(request):
+    plans_qs = Plan.objects.annotate(
+        subscribers_total=Count("subscription"),
+        subscribers_active=Count("subscription", filter=Q(subscription__status=Subscription.Status.ACTIVE)),
+        subscribers_pending=Count("subscription", filter=Q(subscription__status=Subscription.Status.PENDING)),
+        subscribers_canceled=Count("subscription", filter=Q(subscription__status=Subscription.Status.CANCELED)),
+    ).order_by("sort_order", "name")
+    cycle_divisor = {"mensal": 1, "semestral": 6, "anual": 12}
+    items, total_mrr = [], 0
+    for item in plans_qs:
+        active = item.subscribers_active
+        unit_price = {"mensal": item.monthly_price, "semestral": item.semiannual_price, "anual": item.annual_price}
+        estimated_mrr = sum(float(unit_price.get(cycle, 0) or 0) / cycle_divisor[cycle] for cycle in Subscription.objects.filter(plan=item, status=Subscription.Status.ACTIVE).values_list("cycle", flat=True))
+        total_mrr += estimated_mrr
+        items.append({"id": item.id, "subscribers_total": item.subscribers_total, "subscribers_active": active, "subscribers_pending": item.subscribers_pending, "subscribers_canceled": item.subscribers_canceled, "mrr_estimated": f"{estimated_mrr:.2f}", "retention_rate": round((active / item.subscribers_total) * 100, 1) if item.subscribers_total else None})
+    return Response({"total": len(items), "published": sum(p.status == Plan.Status.PUBLISHED and p.is_active for p in plans_qs), "draft": sum(p.status == Plan.Status.DRAFT for p in plans_qs), "archived": sum(p.status == Plan.Status.ARCHIVED for p in plans_qs), "mrr_estimated": f"{total_mrr:.2f}", "plans": items})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def plans_bulk(request):
+    ids = request.data.get("ids", [])
+    action = request.data.get("action", "")
+    if not isinstance(ids, list) or not ids or not all(str(value).isdigit() for value in ids):
+        return Response({"detail": "Selecione ao menos um plano válido."}, status=status.HTTP_400_BAD_REQUEST)
+    if action not in {"publish", "draft", "archive", "activate", "deactivate"}:
+        return Response({"detail": "Ação em massa inválida."}, status=status.HTTP_400_BAD_REQUEST)
+    queryset = Plan.objects.filter(id__in=ids)
+    if queryset.count() != len(set(map(int, ids))):
+        return Response({"detail": "Um ou mais planos não foram encontrados."}, status=status.HTTP_404_NOT_FOUND)
+    values = {"status": {"publish": Plan.Status.PUBLISHED, "draft": Plan.Status.DRAFT, "archive": Plan.Status.ARCHIVED}.get(action)} if action in {"publish", "draft", "archive"} else {"is_active": action == "activate"}
+    changed = queryset.update(**values)
+    audit_log(request, action="plan.bulk_updated", resource_type="plan", context={"ids": ids, "action": action, "changed": changed})
+    return Response({"updated": changed})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def plan_duplicate(request, pk):
+    plan = Plan.objects.filter(pk=pk).first()
+    if not plan:
+        return Response({"detail": "Plano não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    base_slug = re.sub(r"[^a-z0-9-]", "-", f"{plan.slug}-copia".lower()).strip("-")[:45] or "plano-copia"
+    slug, suffix = base_slug, 2
+    while Plan.objects.filter(slug=slug).exists():
+        slug = f"{base_slug[:40]}-{suffix}"
+        suffix += 1
+    clone = Plan.objects.create(slug=slug, name=f"{plan.name} (cópia)", description=plan.description, monthly_price=plan.monthly_price, semiannual_price=plan.semiannual_price, annual_price=plan.annual_price, features=plan.features, status=Plan.Status.DRAFT, is_highlighted=False, trial_days=plan.trial_days, is_active=False, sort_order=plan.sort_order + 1)
+    payload = PlanSerializer(clone).data
+    audit_log(request, action="plan.duplicated", resource_type="plan", resource_id=clone.id, after=payload, context={"source_plan_id": plan.id})
+    return Response(payload, status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET", "POST"])
@@ -697,7 +868,29 @@ def plans(request):
         audit_log(request, action="plan.created", resource_type="plan", resource_id=plan.id, after=ser.data)
         return Response(ser.data, status=status.HTTP_201_CREATED)
     qs = Plan.objects.order_by("sort_order", "name")
-    return Response({"results": PlanSerializer(qs, many=True).data})
+    query = request.query_params.get("q", "").strip()
+    if query:
+        qs = qs.filter(Q(name__icontains=query) | Q(slug__icontains=query))
+    plan_status = request.query_params.get("status", "").strip()
+    if plan_status:
+        qs = qs.filter(status=plan_status)
+    active = request.query_params.get("active", "").strip()
+    if active in {"true", "false"}:
+        qs = qs.filter(is_active=active == "true")
+    try:
+        price_min = request.query_params.get("price_min")
+        price_max = request.query_params.get("price_max")
+        if price_min: qs = qs.filter(monthly_price__gte=price_min)
+        if price_max: qs = qs.filter(monthly_price__lte=price_max)
+    except (TypeError, ValueError):
+        return Response({"detail": "Faixa de preço inválida."}, status=status.HTTP_400_BAD_REQUEST)
+    results = PlanSerializer(qs, many=True).data
+    # JSONField string lookups differ between SQLite and PostgreSQL. Benefits are
+    # filtered in Python to keep the administrative search portable.
+    if query:
+        normalized_query = query.casefold()
+        results = [item for item in results if normalized_query in item["name"].casefold() or normalized_query in item["slug"].casefold() or any(normalized_query in str(feature).casefold() for feature in item.get("features", []))]
+    return Response({"results": results})
 
 
 @api_view(["PATCH", "DELETE"])
@@ -890,12 +1083,23 @@ def questions_admin(request):
             {"id": question.id, "status": question.status}
         )
 
-    if mod_action == "reopen":
-        note = (request.data.get("review_note") or "").strip()
-        moderation.reopen(question, request.user, note)
-        return Response(
-            {"id": question.id, "status": question.status}
-        )
+    if mod_action == "edit_content":
+        if question.status != Question.Status.APPROVED:
+            return Response({"detail": "A edição direta é permitida apenas para questões em produção."}, status=status.HTTP_409_CONFLICT)
+        fields = {name: request.data.get(name) for name in ("statement", "banca", "discipline", "year", "options", "correct_answer", "explanation")}
+        errors = {}
+        if not isinstance(fields["statement"], str) or not fields["statement"].strip(): errors["statement"] = "Informe o enunciado."
+        if not isinstance(fields["banca"], str) or not fields["banca"].strip(): errors["banca"] = "Informe a banca."
+        if not isinstance(fields["discipline"], str) or not fields["discipline"].strip(): errors["discipline"] = "Informe a disciplina."
+        if not isinstance(fields["options"], list) or len(fields["options"]) < 2 or any(not isinstance(value, str) or not value.strip() for value in fields["options"]): errors["options"] = "Informe ao menos duas alternativas."
+        if not isinstance(fields["correct_answer"], int) or not isinstance(fields["options"], list) or fields["correct_answer"] < 0 or fields["correct_answer"] >= len(fields["options"]): errors["correct_answer"] = "Selecione uma alternativa correta válida."
+        if errors: return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        before = {name: getattr(question, name) for name in fields}
+        for name, value in fields.items(): setattr(question, name, value.strip() if isinstance(value, str) else value)
+        question.content_hash = ""
+        question.save()
+        audit_log(request, action="question.content_edited", resource_type="question", resource_id=question.id, before=before, after={name: getattr(question, name) for name in fields}, context={"source": question.source.slug if question.source else None})
+        return Response({"id": question.id, "status": question.status})
 
     # Sem action: edição de rascunho de explicação antes de aprovar
     if "explanation" in request.data:
@@ -1426,7 +1630,37 @@ def editorial_exam_detail(request, pk):
     return Response(payload)
 
 def _article_payload(item):
-    return {"id": item.id, "title": item.title, "slug": item.slug, "summary": item.summary, "body": item.body, "category": item.category, "image_url": item.image_url, "origin": item.origin, "editorial_status": item.editorial_status, "scheduled_for": item.scheduled_for, "is_published": item.is_published}
+    return {"id": item.id, "title": item.title, "slug": item.slug, "summary": item.summary, "body": item.body, "category": item.category, "image_url": item.image_url, "seo_title": item.seo_title, "seo_description": item.seo_description, "tags": item.tags, "is_featured": item.is_featured, "is_pinned": item.is_pinned, "origin": item.origin, "editorial_status": item.editorial_status, "scheduled_for": item.scheduled_for, "is_published": item.is_published}
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def editorial_news_overview(request):
+    qs = NewsArticle.objects.all()
+    return Response({"total": qs.count(), "draft": qs.filter(editorial_status=NewsArticle.EditorialStatus.DRAFT).count(), "scheduled": qs.filter(editorial_status=NewsArticle.EditorialStatus.SCHEDULED).count(), "published": qs.filter(editorial_status=NewsArticle.EditorialStatus.PUBLISHED).count(), "archived": qs.filter(editorial_status=NewsArticle.EditorialStatus.ARCHIVED).count(), "featured": qs.filter(is_featured=True).count()})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def editorial_news_bulk(request):
+    ids, action = request.data.get("ids", []), request.data.get("action")
+    if not isinstance(ids, list) or not ids or action not in {"published", "archived", "draft"}: return Response({"detail": "Selecione artigos e uma ação válida."}, status=status.HTTP_400_BAD_REQUEST)
+    qs = NewsArticle.objects.filter(id__in=ids)
+    qs.update(editorial_status=action, is_published=action == "published", published_at=timezone.now() if action == "published" else None)
+    audit_log(request, action="article.bulk_updated", resource_type="article", context={"ids": ids, "action": action})
+    return Response({"updated": qs.count()})
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def editorial_news_duplicate(request, pk):
+    item = NewsArticle.objects.filter(pk=pk).first()
+    if not item: return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if item.origin != Concurso.Origin.MANUAL: return Response({"detail": "Somente artigos manuais podem ser duplicados."}, status=status.HTTP_409_CONFLICT)
+    base = f"{item.slug}-copia"[:250]; slug = base; index = 2
+    while NewsArticle.objects.filter(slug=slug).exists(): slug = f"{base[:245]}-{index}"; index += 1
+    copy = NewsArticle.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL, slug=slug, title=f"{item.title} (cópia)", summary=item.summary, body=item.body, category=item.category, image_url=item.image_url, seo_title=item.seo_title, seo_description=item.seo_description, tags=item.tags, editorial_status=NewsArticle.EditorialStatus.DRAFT, is_published=False, author=request.user, updated_by=request.user)
+    payload = _article_payload(copy); audit_log(request, action="article.duplicated", resource_type="article", resource_id=copy.id, after=payload, context={"source_id": item.id}); return Response(payload, status=status.HTTP_201_CREATED)
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAdminUser])
@@ -1437,22 +1671,29 @@ def editorial_news(request):
         if not title or not body: return Response({"detail": "Informe título e conteúdo do artigo."}, status=status.HTTP_400_BAD_REQUEST)
         base = slugify(request.data.get("slug") or title)[:250] or "artigo"; slug = base; index = 2
         while NewsArticle.objects.filter(slug=slug).exists(): slug = f"{base[:245]}-{index}"; index += 1
-        item = NewsArticle.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL, title=title, body=body, slug=slug, summary=str(request.data.get("summary", "")).strip(), category=str(request.data.get("category", "")).strip(), image_url=str(request.data.get("image_url", "")).strip(), editorial_status=NewsArticle.EditorialStatus.DRAFT, is_published=False, author=request.user, updated_by=request.user)
+        item = NewsArticle.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL, title=title, body=body, slug=slug, summary=str(request.data.get("summary", "")).strip(), category=str(request.data.get("category", "")).strip(), image_url=str(request.data.get("image_url", "")).strip(), seo_title=str(request.data.get("seo_title", "")).strip(), seo_description=str(request.data.get("seo_description", "")).strip(), tags=request.data.get("tags", []) if isinstance(request.data.get("tags", []), list) else [], is_featured=bool(request.data.get("is_featured", False)), is_pinned=bool(request.data.get("is_pinned", False)), editorial_status=NewsArticle.EditorialStatus.DRAFT, is_published=False, author=request.user, updated_by=request.user)
         payload = _article_payload(item)
         audit_log(request, action="article.created", resource_type="article", resource_id=item.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
-    return Response({"results": [_article_payload(item) for item in NewsArticle.objects.order_by("-created_at")[:200]]})
+    qs = NewsArticle.objects.order_by("-created_at")
+    status_filter = request.query_params.get("status", "").strip(); search = request.query_params.get("search", "").strip(); category = request.query_params.get("category", "").strip()
+    if status_filter: qs = qs.filter(editorial_status=status_filter)
+    if category: qs = qs.filter(category__iexact=category)
+    if search: qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search) | Q(category__icontains=search))
+    return Response({"results": [_article_payload(item) for item in qs[:200]]})
 
 @api_view(["PATCH"])
 @permission_classes([IsAdminUser])
 def editorial_news_detail(request, pk):
     item = NewsArticle.objects.filter(pk=pk).first()
     if not item: return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-    protected = {"title", "body", "summary", "category", "image_url", "slug"}
+    protected = {"title", "body", "summary", "category", "image_url", "slug", "seo_title", "seo_description", "tags", "is_featured", "is_pinned"}
     if item.origin == Concurso.Origin.IMPORTED and protected.intersection(request.data): return Response({"detail": "Campos de notícia importada são protegidos contra sincronização."}, status=status.HTTP_409_CONFLICT)
     if item.origin == Concurso.Origin.MANUAL:
         for field in protected:
-            if field in request.data: setattr(item, field, str(request.data[field]).strip())
+            if field in request.data:
+                value = request.data[field]
+                setattr(item, field, value if field == "tags" and isinstance(value, list) else (bool(value) if field in {"is_featured", "is_pinned"} else str(value).strip()))
     if "editorial_status" in request.data:
         value=request.data["editorial_status"]
         if value not in NewsArticle.EditorialStatus.values: return Response({"editorial_status": ["Estado inválido."]}, status=status.HTTP_400_BAD_REQUEST)

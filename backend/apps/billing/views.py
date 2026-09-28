@@ -10,7 +10,7 @@ from apps.billing.serializers import PlanSerializer, SubscribeSerializer, Subscr
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
 def plans(request):
-    return Response(PlanSerializer(Plan.objects.filter(is_active=True), many=True).data)
+    return Response(PlanSerializer(Plan.objects.filter(is_active=True, status=Plan.Status.PUBLISHED), many=True).data)
 
 
 @api_view(["GET", "POST"])

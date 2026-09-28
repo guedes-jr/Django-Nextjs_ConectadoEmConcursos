@@ -3,12 +3,21 @@ from django.db import models
 
 
 class Plan(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Rascunho"
+        PUBLISHED = "published", "Publicado"
+        ARCHIVED = "archived", "Arquivado"
+
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=80)
     monthly_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     semiannual_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     annual_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     features = models.JSONField(default=list)
+    description = models.CharField(max_length=240, blank=True, default="")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PUBLISHED)
+    is_highlighted = models.BooleanField(default=False)
+    trial_days = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
 

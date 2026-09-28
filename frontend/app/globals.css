@@ -962,6 +962,17 @@ html:not(.dark) .landing-page {
   color: #172b4d !important;
   --django-glass: #ffffff;
 }
+html:not(.dark) .landing-page footer {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+html:not(.dark) .landing-page footer h3 { color: #0f172a !important; }
+html.dark .landing-page footer {
+  background: #020617 !important;
+  border-color: #1e293b !important;
+  color: #cbd5e1 !important;
+}
 html:not(.dark) .landing-page > section:not(:first-of-type):not(.cta-premium-section),
 html:not(.dark) .landing-page .how-section,
 html:not(.dark) .landing-page .stats-section,

@@ -32,7 +32,6 @@ import {
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 const navGroups = [
   {
@@ -222,10 +221,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </p>
           </div>
         </header>
-
-        <div className="fixed bottom-5 right-5 z-40 rounded-xl bg-slate-900 p-1 shadow-lg ring-1 ring-white/20 dark:bg-slate-800" aria-label="Preferência de tema">
-          <ThemeToggle />
-        </div>
 
         <main
           className={cn(

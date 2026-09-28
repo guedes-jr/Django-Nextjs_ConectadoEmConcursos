@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Search, Pencil, Loader2 } from "lucide-react";
+import { Search, Pencil, Loader2, AlertCircle, CircleDollarSign, Clock3, Users } from "lucide-react";
 import { backoffice, SubscriptionRow, Plan, formatDate, cycleLabel } from "@/lib/backoffice";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
 import { PageHeader } from "@/components/admin/PageHeader";
+import { FloatingNotice } from "@/components/admin/FloatingNotice";
 
 const statusOptions = [
   { value: "all", label: "Todos os status" },
@@ -30,6 +31,7 @@ const statusOptions = [
 
 export default function AdminSubscriptionsPage() {
   const [rows, setRows] = useState<SubscriptionRow[]>([]);
+  const [overview, setOverview] = useState<{ total: number; active: number; pending: number; canceled: number; expiring_30_days: number; mrr_estimated: string } | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -48,12 +50,14 @@ export default function AdminSubscriptionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [subs, allPlans] = await Promise.all([
+      const [subs, allPlans, summary] = await Promise.all([
         backoffice.listSubscriptions({ status: statusFilter === "all" ? undefined : statusFilter, search: search || undefined }),
         backoffice.listPlans(),
+        backoffice.subscriptionsOverview(),
       ]);
       setRows(subs.results);
       setPlans(allPlans.results);
+      setOverview(summary);
     } catch {
       setError("Não foi possível carregar as assinaturas.");
     } finally {
@@ -98,8 +102,10 @@ export default function AdminSubscriptionsPage() {
         description="Acompanhe e atualize o status das assinaturas dos alunos."
       />
 
-      {notice && <Notice kind="success">{notice}</Notice>}
+      <FloatingNotice message={notice} onDismiss={() => setNotice(null)} />
       {error && <Notice kind="error">{error}</Notice>}
+
+      {overview && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[["Ativas", overview.active, Users, "text-emerald-600"], ["Pendentes", overview.pending, AlertCircle, "text-amber-600"], ["Canceladas", overview.canceled, AlertCircle, "text-rose-600"], ["Vencem em 30 dias", overview.expiring_30_days, Clock3, "text-orange-600"], ["MRR estimado", `R$ ${overview.mrr_estimated}`, CircleDollarSign, "text-indigo-600"]].map(([label, value, Icon, color]: any) => <Card key={label} className="p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">{label}</p><Icon className={`h-4 w-4 ${color}`} /></div><p className="mt-2 text-2xl font-bold">{value}</p></Card>)}</div>}
 
       <div className="flex flex-wrap gap-3">
         <div className="relative min-w-56 flex-1 sm:max-w-xs">
@@ -168,7 +174,7 @@ export default function AdminSubscriptionsPage() {
                   </TableCell>
                   <TableCell className="text-slate-500">{formatDate(sub.created_at)}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(sub)} disabled={busy === sub.id} aria-label="Editar">
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(sub)} disabled={busy === sub.id} aria-label="Editar assinatura" title="Editar assinatura" className="rounded-full bg-amber-400 text-amber-950 shadow-sm transition hover:bg-amber-300 hover:text-amber-950 hover:shadow-md dark:bg-amber-400 dark:text-amber-950 dark:hover:bg-amber-300">
                       <Pencil className="h-4 w-4" />
                     </Button>
                   </TableCell>

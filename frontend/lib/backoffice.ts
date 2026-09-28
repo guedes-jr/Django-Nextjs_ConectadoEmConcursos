@@ -68,8 +68,17 @@ export type Plan = {
   semiannual_price: string;
   annual_price: string;
   features: string[];
+  description: string;
+  status: "draft" | "published" | "archived";
+  is_highlighted: boolean;
+  trial_days: number;
   is_active: boolean;
   sort_order: number;
+};
+
+export type PlansOverview = {
+  total: number; published: number; draft: number; archived: number; mrr_estimated: string;
+  plans: Array<{ id: number; subscribers_total: number; subscribers_active: number; subscribers_pending: number; subscribers_canceled: number; mrr_estimated: string; retention_rate: number | null }>;
 };
 
 export type ProofRow = {
@@ -202,6 +211,10 @@ export type PlanPayload = {
   semiannual_price?: string | number;
   annual_price?: string | number;
   features?: string[];
+  description?: string;
+  status?: "draft" | "published" | "archived";
+  is_highlighted?: boolean;
+  trial_days?: number;
   is_active?: boolean;
   sort_order?: number;
 };
@@ -209,12 +222,16 @@ export type PlanPayload = {
 export const backoffice = {
   overview: () => http.get<Overview>("/api/backoffice/overview/").then((r) => r.data),
 
-  listUsers: (opts: { search?: string; limit?: number } = {}) => {
+  listUsers: (opts: { search?: string; limit?: number; status?: string; plan?: string; subscription?: string; activity?: string } = {}) => {
     const params = new URLSearchParams();
-    if (opts.search) params.set("search", opts.search);
-    if (opts.limit) params.set("limit", String(opts.limit));
+    Object.entries(opts).forEach(([key, value]) => { if (value) params.set(key, String(value)); });
     return http.get<{ results: UserRow[]; total: number }>(`/api/backoffice/users/?${params}`).then((r) => r.data);
   },
+  getUser: (id: number) => http.get<any>(`/api/backoffice/users/${id}/`).then((r) => r.data),
+  updateUser: (id: number, data: Record<string, unknown>) => http.patch<any>(`/api/backoffice/users/${id}/`, data).then((r) => r.data),
+  userHistory: (id: number) => http.get<any>(`/api/backoffice/users/${id}/history/`).then((r) => r.data),
+  userAction: (id: number, action: string, reason = "") => http.post<any>(`/api/backoffice/users/${id}/actions/`, { action, reason }).then((r) => r.data),
+  sendUserNotification: (id: number, data: { title: string; body?: string; category?: string; link?: string }) => http.post(`/api/backoffice/users/${id}/notification/`, data).then((r) => r.data),
   setUserActive: (id: number, isActive: boolean) =>
     http.patch<UserRow>(`/api/backoffice/users/${id}/`, { is_active: isActive }).then((r) => r.data),
   assignSubscription: (userId: number, plan: string, cycle: string) =>
@@ -222,7 +239,8 @@ export const backoffice = {
       .post<{ id: number; status: string; plan: string }>(`/api/backoffice/users/${userId}/subscription/`, { plan, cycle })
       .then((r) => r.data),
 
-  listSubscriptions: (opts: { status?: string; search?: string } = {}) => {
+  subscriptionsOverview: () => http.get<{ total: number; active: number; pending: number; canceled: number; expiring_30_days: number; mrr_estimated: string }>("/api/backoffice/subscriptions/overview/").then((r) => r.data),
+  listSubscriptions: (opts: { status?: string; search?: string; plan?: string; cycle?: string; expires_within?: number } = {}) => {
     const params = new URLSearchParams();
     if (opts.status) params.set("status", opts.status);
     if (opts.search) params.set("search", opts.search);
@@ -239,7 +257,14 @@ export const backoffice = {
       })
       .then((r) => r.data),
 
-  listPlans: () => http.get<{ results: Plan[] }>("/api/backoffice/plans/").then((r) => r.data),
+  listPlans: (opts: { q?: string; status?: string; active?: boolean; price_min?: number; price_max?: number } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(opts).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
+    return http.get<{ results: Plan[] }>(`/api/backoffice/plans/?${params}`).then((r) => r.data);
+  },
+  plansOverview: () => http.get<PlansOverview>("/api/backoffice/plans/overview/").then((r) => r.data),
+  bulkPlans: (ids: number[], action: "publish" | "draft" | "archive" | "activate" | "deactivate") => http.post<{ updated: number }>("/api/backoffice/plans/bulk/", { ids, action }).then((r) => r.data),
+  duplicatePlan: (id: number) => http.post<Plan>(`/api/backoffice/plans/${id}/duplicate/`).then((r) => r.data),
   createPlan: (data: PlanPayload) => http.post<Plan>("/api/backoffice/plans/", data).then((r) => r.data),
   updatePlan: (id: number, data: Partial<PlanPayload>) =>
     http.patch<Plan>(`/api/backoffice/plans/${id}/`, data).then((r) => r.data),
@@ -285,8 +310,8 @@ export const backoffice = {
       .get<{ total: number; results: QuestionAdminRow[] }>(`/api/backoffice/content/questions/?${params}`)
       .then((r) => r.data);
   },
-  updateQuestion: (id: number, data: { explanation?: string; is_active?: boolean }) =>
-    http.patch<{ id: number; explanation: string; is_active: boolean }>("/api/backoffice/content/questions/", { id, ...data }).then((r) => r.data),
+  updateQuestion: (id: number, data: { action?: string; statement?: string; banca?: string; discipline?: string; year?: number; options?: string[]; correct_answer?: number; explanation?: string }) =>
+    http.patch<{ id: number; status?: string; explanation?: string }>("/api/backoffice/content/questions/", { id, ...data }).then((r) => r.data),
 
   listNews: (opts: { published?: boolean } = {}) => {
     const params = new URLSearchParams();
@@ -389,15 +414,17 @@ export const editorial = {
   updateExam: (id: number, data: Partial<EditorialExam>) => http.patch<EditorialExam>(`/api/backoffice/content/editorial/provas/${id}/`, data).then(r => r.data),
 };
 
-export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
+export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
 export const manualQuestions = {
   list: () => http.get<{results: ManualQuestion[]}>("/api/backoffice/content/questions/manual/").then(r => r.data),
   create: (data: Omit<ManualQuestion, "id" | "status" | "exam" | "rejection_reason" | "updated_at">) => http.post<ManualQuestion>("/api/backoffice/content/questions/manual/", data).then(r => r.data),
   update: (id: number, data: Omit<Partial<ManualQuestion>, "exam"> & { exam?: number | null }) => http.patch<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/`, data).then((r) => r.data),
+  publish: (id: number) => http.post<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/publish/`).then(r => r.data),
+  unpublish: (id: number) => http.post<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/unpublish/`).then(r => r.data),
   submit: (id: number) => http.post<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/submit/`).then(r => r.data),
 };
-export type EditorialArticle = { id:number; title:string; slug:string; summary:string; body:string; category:string; image_url:string; origin:"manual"|"imported"; editorial_status:"draft"|"scheduled"|"published"|"archived"; is_published:boolean; scheduled_for?: string | null };
-export const editorialArticles = { list:()=>http.get<{results:EditorialArticle[]}>("/api/backoffice/content/editorial/artigos/").then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
+export type EditorialArticle = { id:number; title:string; slug:string; summary:string; body:string; category:string; image_url:string; seo_title:string; seo_description:string; tags:string[]; is_featured:boolean; is_pinned:boolean; origin:"manual"|"imported"; editorial_status:"draft"|"scheduled"|"published"|"archived"; is_published:boolean; scheduled_for?: string | null };
+export const editorialArticles = { list:(opts:{status?:string;search?:string;category?:string}={})=>{const q=new URLSearchParams();Object.entries(opts).forEach(([k,v])=>{if(v)q.set(k,v)});return http.get<{results:EditorialArticle[]}>(`/api/backoffice/content/editorial/artigos/?${q}`).then(r=>r.data)}, overview:()=>http.get<{total:number;draft:number;scheduled:number;published:number;archived:number;featured:number}>("/api/backoffice/content/editorial/artigos/overview/").then(r=>r.data), bulk:(ids:number[],action:"draft"|"published"|"archived")=>http.post<{updated:number}>("/api/backoffice/content/editorial/artigos/bulk/",{ids,action}).then(r=>r.data), duplicate:(id:number)=>http.post<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/duplicate/`).then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
 export type BancaCatalogRow={id:number;name:string;slug:string;official_url:string;description:string;image_url:string;is_active:boolean;is_featured:boolean;aliases:{id:number;alias:string}[];questions_count:number;exams_count:number};
 export const bancasAdmin={list:()=>http.get<{results:BancaCatalogRow[]}>("/api/backoffice/content/bancas/").then(r=>r.data),create:(data:Partial<BancaCatalogRow>)=>http.post<BancaCatalogRow>("/api/backoffice/content/bancas/",data).then(r=>r.data),update:(id:number,data:Partial<BancaCatalogRow>)=>http.patch<BancaCatalogRow>(`/api/backoffice/content/bancas/${id}/`,data).then(r=>r.data),addAlias:(id:number,alias:string)=>http.post(`/api/backoffice/content/bancas/${id}/aliases/`,{alias}).then(r=>r.data)};
 

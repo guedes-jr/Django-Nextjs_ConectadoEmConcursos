@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Search, ShieldCheck, UserPlus, Pencil } from "lucide-react";
 import { backoffice, UserRow, Plan, formatDate, cycleLabel } from "@/lib/backoffice";
@@ -26,6 +27,9 @@ export default function AdminUsersPage() {
   const [rows, setRows] = useState<UserRow[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [subscriptionFilter, setSubscriptionFilter] = useState("");
+  const [activityFilter, setActivityFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +43,7 @@ export default function AdminUsersPage() {
     setLoading(true);
     setError(null);
     try {
-      const [users, allPlans] = await Promise.all([backoffice.listUsers({ search }), backoffice.listPlans()]);
+      const [users, allPlans] = await Promise.all([backoffice.listUsers({ search, status: statusFilter, subscription: subscriptionFilter, activity: activityFilter }), backoffice.listPlans()]);
       setRows(users.results);
       setPlans(allPlans.results);
     } catch {
@@ -47,12 +51,12 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, statusFilter, subscriptionFilter, activityFilter]);
 
   useEffect(() => {
     const timer = setTimeout(() => void load(), search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [search, load]);
+  }, [search, statusFilter, subscriptionFilter, activityFilter, load]);
 
   const toggleActive = async (user: UserRow) => {
     setBusy(user.id);
@@ -108,15 +112,7 @@ export default function AdminUsersPage() {
       {notice && <Notice kind="success">{notice}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
 
-      <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nome ou e-mail..."
-          className="pl-9"
-        />
-      </div>
+      <div className="grid gap-3 md:grid-cols-4"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome ou e-mail..." className="pl-9" /></div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-md border bg-transparent px-3 text-sm"><option value="">Todos os acessos</option><option value="active">Ativos</option><option value="blocked">Bloqueados</option></select><select value={subscriptionFilter} onChange={(e) => setSubscriptionFilter(e.target.value)} className="rounded-md border bg-transparent px-3 text-sm"><option value="">Todas as assinaturas</option><option value="active">Ativas</option><option value="pending_payment">Pagamento pendente</option><option value="canceled">Canceladas</option></select><select value={activityFilter} onChange={(e) => setActivityFilter(e.target.value)} className="rounded-md border bg-transparent px-3 text-sm"><option value="">Toda atividade</option><option value="active">Ativos nos últimos 30 dias</option><option value="inactive">Inativos há 30 dias</option></select></div>
 
       <Card className="overflow-hidden">
         <Table>
@@ -179,7 +175,8 @@ export default function AdminUsersPage() {
                   <TableCell>
                     <StatusBadge status={user.is_active ? "active" : "blocked"} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="space-x-2 text-right">
+                    <Button asChild size="sm" className="gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"><Link href={`/admin/usuarios/${user.id}`}><Pencil className="h-3.5 w-3.5" /> Gerenciar</Link></Button>
                     <Button
                       variant={user.is_active ? "outline" : "secondary"}
                       size="sm"

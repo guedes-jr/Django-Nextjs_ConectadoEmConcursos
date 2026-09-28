@@ -11,5 +11,7 @@ class ManualQuestionsApiTests(TestCase):
   response=self.client.post('/api/backoffice/content/questions/manual/',payload,format='json'); self.assertEqual(response.status_code,201); self.assertEqual(response.data['status'],'draft')
   sent=self.client.post(f"/api/backoffice/content/questions/manual/{response.data['id']}/submit/",{},format='json'); self.assertEqual(sent.status_code,200); self.assertEqual(sent.data['status'],Question.Status.PENDING)
   self.assertEqual(self.client.get('/api/backoffice/content/questions/queue/').data['total'],1)
- def test_reference_is_required(self):
-  response=self.client.post('/api/backoffice/content/questions/manual/',{'statement':'x','banca':'FGV','discipline':'D','year':2026,'options':['A','B'],'correct_answer':0},format='json'); self.assertEqual(response.status_code,400); self.assertIn('source_url',response.data)
+ def test_reference_is_optional_and_admin_can_publish(self):
+  response=self.client.post('/api/backoffice/content/questions/manual/',{'statement':'x','banca':'FGV','discipline':'D','year':2026,'options':['A','B'],'correct_answer':0},format='json'); self.assertEqual(response.status_code,201); self.assertEqual(response.data['status'], Question.Status.DRAFT)
+  published=self.client.post(f"/api/backoffice/content/questions/manual/{response.data['id']}/publish/",{},format='json'); self.assertEqual(published.status_code,200); self.assertEqual(published.data['status'],Question.Status.APPROVED)
+  self.assertTrue(Question.objects.filter(pk=response.data['id'],status=Question.Status.APPROVED).exists())

@@ -26,3 +26,17 @@ class AuditEvent(models.Model):
         if self.pk:
             raise RuntimeError("Eventos de auditoria são imutáveis.")
         return super().save(*args, **kwargs)
+
+
+class UserManagementMeta(models.Model):
+    """Metadados internos do backoffice; nunca expostos ao usuário final."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="management_meta")
+    internal_notes = models.TextField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    block_reason = models.CharField(max_length=500, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_user_management_meta")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Metadados de gestão de usuário"
+        verbose_name_plural = "Metadados de gestão de usuários"

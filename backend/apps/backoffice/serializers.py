@@ -6,7 +6,7 @@ from apps.billing.models import Plan, Subscription
 class PlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = Plan
-        fields = ["id", "slug", "name", "monthly_price", "semiannual_price", "annual_price", "features", "is_active", "sort_order"]
+        fields = ["id", "slug", "name", "description", "monthly_price", "semiannual_price", "annual_price", "features", "status", "is_highlighted", "trial_days", "is_active", "sort_order"]
 
 
 class SubscriptionAdminSerializer(serializers.ModelSerializer):
@@ -18,4 +18,4 @@ class SubscriptionAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Subscription
-        fields = ["id", "user_id", "username", "email", "plan_slug", "plan_name", "cycle", "status", "created_at", "updated_at"]
+        fields = ["id", "user_id", "username", "email", "plan_slug", "plan_name", "cycle", "status", "gateway", "current_period_end", "created_at", "updated_at"]

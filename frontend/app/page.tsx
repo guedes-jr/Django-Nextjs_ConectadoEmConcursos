@@ -22,7 +22,6 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { listPlans, type ApiPlan } from "@/lib/plans";
 import { formatBRL } from "@/utils/format";
 
@@ -195,7 +194,6 @@ export default function LandingPage() {
             </a>
           </nav>
           <div className="flex items-center gap-2">
-            <ThemeToggle />
             <Link
               href="/login"
               className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-sm font-bold text-blue-900 shadow-sm transition hover:bg-amber-300"
@@ -812,7 +810,7 @@ export default function LandingPage() {
       <button
         type="button"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-5 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
+        className="fixed bottom-20 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
         aria-label="Voltar ao topo"
         title="Voltar ao topo"
       >

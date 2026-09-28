@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 
@@ -59,6 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-white text-slate-900" suppressHydrationWarning>
         <ThemeProvider>
           {children}
+          <ThemeToggle />
           <InstallPrompt />
           <ServiceWorkerRegister />
         </ThemeProvider>

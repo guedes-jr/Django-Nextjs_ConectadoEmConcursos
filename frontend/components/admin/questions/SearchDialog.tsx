@@ -202,10 +202,10 @@ export function SearchDialog({ open, onOpenChange, onFinished }: Props) {
               <ArrowLeft className="h-4 w-4" /> Trocar de fonte
             </Button>
           )}
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading} className="bg-rose-600 text-white shadow-sm transition hover:bg-rose-700 hover:shadow-md dark:bg-rose-500 dark:text-rose-950 dark:hover:bg-rose-400">
             Cancelar
           </Button>
-          <Button onClick={() => void run()} disabled={loading || step !== 2 || !source || missingRequired.length > 0}>
+          <Button onClick={() => void run()} disabled={loading || step !== 2 || !source || missingRequired.length > 0} className="bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md disabled:bg-slate-400 disabled:text-slate-100 dark:bg-blue-500 dark:text-blue-950 dark:hover:bg-blue-400">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             Executar busca
           </Button>

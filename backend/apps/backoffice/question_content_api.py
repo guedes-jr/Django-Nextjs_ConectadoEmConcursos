@@ -929,7 +929,7 @@ def _manual_question_validate(data, exclude_id=None):
     if not statement: errors["statement"] = ["Informe o enunciado."]
     if not banca: errors["banca"] = ["Informe a banca."]
     if not discipline: errors["discipline"] = ["Informe a disciplina."]
-    if not reference.startswith(("https://", "http://")): errors["source_url"] = ["Informe uma URL de referência HTTP(S)."]
+    if reference and not reference.startswith(("https://", "http://")): errors["source_url"] = ["Informe uma URL de referência HTTP(S) ou deixe o campo em branco."]
     if not isinstance(options, list) or len(options) < 2 or any(not isinstance(x, str) or not x.strip() for x in options): errors["options"] = ["Informe ao menos duas alternativas preenchidas."]
     if not isinstance(answer, int) or not isinstance(options, list) or answer < 0 or answer >= len(options): errors["correct_answer"] = ["Escolha uma alternativa válida como gabarito."]
     if statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"]).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, banca e ano."]
@@ -953,20 +953,47 @@ def manual_questions(request):
         payload = _question_payload(question, [])
         audit_log(request, action="question.manual_created", resource_type="question", resource_id=question.id, after={"status": question.status, "banca": question.banca})
         return Response(payload, status=status.HTTP_201_CREATED)
-    qs = Question.objects.filter(source__slug=MANUAL_SOURCE_SLUG).select_related("exam").order_by("-updated_at")
-    return Response({"results": [_question_payload(q, []) for q in qs[:200]]})
+    # A gestão exibe todo o acervo publicado; rascunhos e rejeitadas podem
+    # incluir fontes importadas para fins de acompanhamento. As ações de edição
+    # direta continuam restritas ao cadastro manual nos endpoints específicos.
+    qs = Question.objects.select_related("exam", "source").order_by("-updated_at")
+    return Response({"results": [_question_payload(q, []) for q in qs[:500]]})
 
 @api_view(["PATCH"])
 @permission_classes([IsAdminUser])
 def manual_question_detail(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
-    if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED}: return Response({"detail": "A questão já está em revisão ou publicada."}, status=status.HTTP_409_CONFLICT)
+    if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED, Question.Status.APPROVED}: return Response({"detail": "A questão está na fila de revisão e não pode ser alterada aqui."}, status=status.HTTP_409_CONFLICT)
     before = {"status": question.status, "banca": question.banca, "statement": question.statement}
     try: _manual_question_write(question, request.data)
     except ValidationError as exc: return _validation_response(exc)
     audit_log(request, action="question.manual_updated", resource_type="question", resource_id=question.id, before=before, after={"status": question.status, "banca": question.banca, "statement": question.statement})
     return Response(_question_payload(question, []))
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def manual_question_publish(request, pk):
+    question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
+    if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    try: _manual_question_validate({field: getattr(question, field) for field in ("statement", "banca", "discipline", "year", "options", "correct_answer", "source_url")}, question.pk)
+    except ValidationError as exc: return _validation_response(exc)
+    before = {"status": question.status}
+    question.status = Question.Status.APPROVED; question.reviewed_by = request.user; question.reviewed_at = timezone.now(); question.rejection_reason = ""; question.rejection_reason_code = ""; question.save(update_fields=["status", "reviewed_by", "reviewed_at", "rejection_reason", "rejection_reason_code", "updated_at"])
+    audit_log(request, action="question.manual_published", resource_type="question", resource_id=question.id, before=before, after={"status": question.status})
+    return Response(_question_payload(question, []))
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def manual_question_unpublish(request, pk):
+    question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
+    if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if question.status != Question.Status.APPROVED: return Response({"detail": "Somente questões em produção podem ser retiradas."}, status=status.HTTP_409_CONFLICT)
+    question.status = Question.Status.DRAFT; question.save(update_fields=["status", "updated_at"])
+    audit_log(request, action="question.manual_unpublished", resource_type="question", resource_id=question.id, before={"status": Question.Status.APPROVED}, after={"status": question.status})
+    return Response(_question_payload(question, []))
+
 
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
