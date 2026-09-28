@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, Eye, EyeOff, Trash2, PenLine } from "lucide-react";
+import { Building2, Eye, EyeOff, FilePlus2, HelpCircle, Newspaper, PenLine, Search, Trash2 } from "lucide-react";
 import {
   backoffice,
   ProofRow,
@@ -36,6 +36,14 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "questions", label: "Questões sem comentário" },
   { key: "community", label: "Moderação" },
   { key: "concursos", label: "Concursos" },
+];
+
+const managementItems = [
+  { href: "/admin/bancas", title: "Bancas", description: "Nomes canônicos, siglas e aliases.", icon: Building2 },
+  { href: "/admin/concursos", title: "Concursos", description: "Cadastros, editais e curadoria.", icon: Building2 },
+  { href: "/admin/provas", title: "Provas", description: "Metadados, vínculos e visibilidade.", icon: FilePlus2 },
+  { href: "/admin/questoes", title: "Questões", description: "Criação, edição e revisão editorial.", icon: HelpCircle },
+  { href: "/admin/artigos", title: "Artigos", description: "Rascunhos, publicação e agenda.", icon: Newspaper },
 ];
 
 function CardTable({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
@@ -122,10 +130,16 @@ export default function AdminContentPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Conteúdo"
-        description="Modere e complemente o conteúdo aplicado."
+        title="Conteúdos"
+        description="Centralize os cadastros, a publicação e a moderação de todo o conteúdo da plataforma."
       />
 
+      <section aria-labelledby="content-management-title">
+        <div className="mb-3 flex items-baseline justify-between gap-4"><div><h2 id="content-management-title" className="text-base font-semibold text-slate-900 dark:text-slate-100">Gerenciamento editorial</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Cadastre e mantenha os principais conteúdos em um único lugar.</p></div></div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{managementItems.map(({ href, title, description, icon: Icon }) => <Link key={href} href={href} className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-400 hover:shadow-sm dark:border-slate-700 dark:bg-slate-900"><Icon className="mb-3 h-5 w-5 text-indigo-600 transition group-hover:scale-110 dark:text-indigo-400" /><h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3><p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{description}</p></Link>)}</div>
+      </section>
+
+      <section aria-labelledby="content-operation-title"><div className="mb-3"><h2 id="content-operation-title" className="text-base font-semibold text-slate-900 dark:text-slate-100">Operação e moderação</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Acompanhe envios, publicações e interações da comunidade.</p></div>
       <Tabs value={tab} onValueChange={(v: string) => setTab(v as TabKey)}>
         <TabsList className="h-auto flex-wrap justify-start">
           {tabs.map((item) => (
@@ -135,6 +149,8 @@ export default function AdminContentPage() {
           ))}
         </TabsList>
       </Tabs>
+
+      </section>
 
       {notice && <Notice kind="success">{notice}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}

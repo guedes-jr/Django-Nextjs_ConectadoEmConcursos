@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowDown, ArrowUp, CalendarRange, Check, ListOrdered, Plus, Save, Trash2, Waypoints } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowDown, ArrowUp, CalendarRange, Check, ListOrdered, Plus, Save, Search, Trash2, Waypoints, X } from "lucide-react";
 import { listQuestionDisciplines } from "@/lib/questions";
 import { createStudyPlan, updateStudyPlan, getStudyPlan, KIND_LABELS, WEEKDAY_LABELS, WEEKDAY_SHORT, type PlanInput, type PlanKind, type StudyBlockKind } from "@/lib/studies";
 
@@ -43,7 +43,8 @@ export default function NewStudyPage() {
   const [title, setTitle] = useState("");
   const [examDate, setExamDate] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [disciplineSearch, setDisciplineSearch] = useState("");
+  const [weekdays, setWeekdays] = useState<number[]>([]);
   const [minutes, setMinutes] = useState(60);
   const [schedule, setSchedule] = useState<DayRow[]>([]);
   const [cycle, setCycle] = useState<Row[]>([]);
@@ -86,14 +87,22 @@ export default function NewStudyPage() {
   }, [kind, editId, schedule.length, selected.length, autoSchedule, minutes]);
 
   function toggleWeekday(weekday: number) {
-    const next = weekdays.includes(weekday) ? weekdays.filter((item) => item !== weekday) : [...weekdays, weekday].sort();
-    setWeekdays(next);
-    setSchedule((items) => items.map((item, index) => next.includes(index) ? item : { ...item, disciplines: [], minutes: 0 }));
+    setWeekdays((currentWeekdays) => currentWeekdays.includes(weekday)
+      ? currentWeekdays.filter((item) => item !== weekday)
+      : [...currentWeekdays, weekday].sort((a, b) => a - b));
   }
 
-  function toggleDiscipline(discipline: string) {
-    setSelected((values) => values.includes(discipline) ? values.filter((item) => item !== discipline) : [...values, discipline]);
+  function addDiscipline(discipline: string) {
+    setSelected((values) => values.includes(discipline) ? values : [...values, discipline]);
+    setDisciplineSearch("");
   }
+
+  function removeDiscipline(discipline: string) {
+    setSelected((values) => values.filter((item) => item !== discipline));
+  }
+
+  const normalizedDisciplineSearch = disciplineSearch.trim().toLocaleLowerCase("pt-BR");
+  const matchingDisciplines = disciplines.filter((discipline) => !selected.includes(discipline) && (!normalizedDisciplineSearch || discipline.toLocaleLowerCase("pt-BR").includes(normalizedDisciplineSearch)));
 
   function defaultMinutes(dayDisciplines: string[]) {
     return Math.round(minutes / Math.max(1, dayDisciplines.length));
@@ -172,8 +181,17 @@ export default function NewStudyPage() {
 
           <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
             <h2 className="text-lg font-bold">Disciplinas e disponibilidade</h2>
-            <div><span className="mb-2 block text-sm font-semibold">Disciplinas</span><div className="grid max-h-52 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-3 dark:border-slate-700 sm:grid-cols-2">{disciplines.map((discipline) => <label key={discipline} className="flex cursor-pointer items-center gap-2 rounded-lg p-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"><input type="checkbox" checked={selected.includes(discipline)} onChange={() => toggleDiscipline(discipline)} />{discipline}</label>)}{!disciplines.length && <p className="text-sm text-slate-500">Nenhuma disciplina disponível na base de questões.</p>}</div></div>
-            <div><span className="mb-2 block text-sm font-semibold">Dias da semana disponíveis</span><div className="flex flex-wrap gap-2">{DAYS.map((day, weekday) => <label key={day} className={`cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold ${weekdays.includes(weekday) ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 dark:border-slate-700"}`}><input className="sr-only" type="checkbox" checked={weekdays.includes(weekday)} onChange={() => toggleWeekday(weekday)} />{day}</label>)}</div></div>
+            <div>
+              <label htmlFor="discipline-search" className="mb-2 block text-sm font-semibold">Disciplinas</label>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                {selected.length > 0 && <div className="mb-3 flex flex-wrap gap-2" aria-label="Disciplinas selecionadas">{selected.map((discipline) => <span key={discipline} className="inline-flex items-center gap-1 rounded-lg bg-blue-100 py-1 pl-2 pr-1 text-sm font-semibold text-blue-800 dark:bg-blue-950/70 dark:text-blue-200">{discipline}<button type="button" onClick={() => removeDiscipline(discipline)} className="rounded-md p-0.5 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:bg-blue-900" aria-label={`Remover ${discipline}`}><X size={14} /></button></span>)}</div>}
+                <div className="relative"><Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input id="discipline-search" value={disciplineSearch} onChange={(event) => setDisciplineSearch(event.target.value)} className={`${I} pl-10`} placeholder="Pesquise uma disciplina para adicionar" autoComplete="off" /></div>
+                {disciplineSearch.trim() && <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-slate-200 p-1 dark:border-slate-700">{matchingDisciplines.map((discipline) => <button key={discipline} type="button" onClick={() => addDiscipline(discipline)} className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus:bg-blue-50 focus:outline-none dark:hover:bg-slate-700 dark:focus:bg-slate-700"><span>{discipline}</span><Plus size={16} className="text-blue-600" /></button>)}{matchingDisciplines.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">Nenhuma disciplina disponível com esse nome.</p>}</div>}
+                {!disciplines.length && <p className="mt-2 text-sm text-slate-500">Nenhuma disciplina disponível na base de questões.</p>}
+                {!disciplineSearch.trim() && <p className="mt-2 text-xs text-slate-500">Pesquise pelo nome e adicione as disciplinas que farão parte do plano.</p>}
+              </div>
+            </div>
+            <fieldset><legend className="mb-2 block text-sm font-semibold">Dias da semana disponíveis</legend><div className="flex flex-wrap gap-2">{DAYS.map((day, weekday) => { const selectedDay = weekdays.includes(weekday); return <button key={day} type="button" aria-pressed={selectedDay} onClick={() => toggleWeekday(weekday)} className={`min-h-11 rounded-xl border px-3 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${selectedDay ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 hover:border-blue-400 dark:border-slate-700"}`}>{day}<span className="sr-only">: {selectedDay ? "selecionado" : "não selecionado"}</span></button>; })}</div><p className="mt-2 text-xs text-slate-500">Selecione os dias em que você pretende estudar.</p></fieldset>
             <div className="grid gap-4 sm:grid-cols-2"><div><label htmlFor="minutes" className="mb-2 block text-sm font-semibold">Minutos por dia de estudo</label><input id="minutes" type="number" min={25} max={480} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} className={`${I} max-w-44`} /></div>{kind === "ciclo" && <p className="self-end text-xs text-slate-500 dark:text-slate-400">O ciclo gira uma etapa por dia; etapas da fila que ultrapassarem o tempo total ainda entram no dia.</p>}</div>
           </section>
 

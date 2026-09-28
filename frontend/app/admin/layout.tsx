@@ -8,7 +8,6 @@ import {
   Users,
   CreditCard,
   Package,
-  FileText,
   BarChart3,
   Database,
   LogOut,
@@ -47,9 +46,9 @@ const navGroups = [
     ],
   },
   {
-    label: "Cadastros e conteúdos",
+    label: "Conteúdos",
     items: [
-      { href: "/admin/cadastros", label: "Visão geral", icon: LayoutDashboard },
+      { href: "/admin/conteudo", label: "Visão geral", icon: LayoutDashboard },
       { href: "/admin/bancas", label: "Bancas", icon: Building2 },
       { href: "/admin/concursos", label: "Concursos", icon: Trophy },
       { href: "/admin/provas", label: "Provas", icon: FilePlus2 },
@@ -63,7 +62,6 @@ const navGroups = [
       { href: "/admin/fontes-questoes", label: "Fontes de questões", icon: Search },
       { href: "/admin/fila-questoes", label: "Fila de revisão", icon: ClipboardCheck },
       { href: "/admin/acervo-provas", label: "Acervo de provas", icon: Archive },
-      { href: "/admin/conteudo", label: "Conteúdo", icon: FileText },
       { href: "/admin/backups", label: "Backups", icon: Database },
       { href: "/admin/notificacoes", label: "Notificações", icon: Bell },
       { href: "/admin/auditoria", label: "Auditoria", icon: History },
@@ -214,9 +212,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           >
             <Menu className="h-5 w-5" />
           </button>
-          <p className="text-sm font-semibold text-white">{currentLabel ?? "Painel"}</p>
+          <p className="text-sm font-semibold text-slate-800 dark:text-white">{currentLabel ?? "Painel"}</p>
           <div className="ml-auto flex items-center gap-3">
-            <ThemeToggle />
             <p className="text-xs text-slate-500 dark:text-slate-300">
               {me.first_name || me.username}
               <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -225,6 +222,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </p>
           </div>
         </header>
+
+        <div className="fixed bottom-5 right-5 z-40 rounded-xl bg-slate-900 p-1 shadow-lg ring-1 ring-white/20 dark:bg-slate-800" aria-label="Preferência de tema">
+          <ThemeToggle />
+        </div>
 
         <main
           className={cn(

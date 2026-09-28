@@ -1,3 +1,5 @@
-import Link from "next/link";import {Building2,FilePlus2,HelpCircle,Newspaper} from "lucide-react";import {PageHeader} from "@/components/admin/PageHeader";import {Card,CardContent} from "@/components/ui/card";
-const items=[{href:"/admin/bancas",title:"Bancas",text:"Nomes canônicos e aliases.",icon:Building2},{href:"/admin/concursos",title:"Concursos",text:"Cadastros manuais e curadoria.",icon:Building2},{href:"/admin/provas",title:"Provas",text:"Vínculos, metadados e visibilidade.",icon:FilePlus2},{href:"/admin/questoes",title:"Questões",text:"Rascunhos e envio à revisão.",icon:HelpCircle},{href:"/admin/artigos",title:"Artigos",text:"Rascunhos, publicação e agenda.",icon:Newspaper}];
-export default function CadastrosPage(){return <div className="space-y-6"><PageHeader title="Cadastros e conteúdos" description="Escolha o tipo de conteúdo que deseja manter."/><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map(i=>{const Icon=i.icon;return <Link key={i.href} href={i.href}><Card className="h-full transition hover:border-indigo-400"><CardContent className="p-5"><Icon className="mb-3 h-5 w-5 text-indigo-600"/><h2 className="font-semibold">{i.title}</h2><p className="mt-1 text-sm text-slate-500">{i.text}</p></CardContent></Card></Link>})}</div></div>}
+import { redirect } from "next/navigation";
+
+export default function CadastrosPage() {
+  redirect("/admin/conteudo");
+}
