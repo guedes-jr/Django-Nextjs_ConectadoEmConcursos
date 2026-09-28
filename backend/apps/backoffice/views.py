@@ -34,7 +34,7 @@ from rest_framework.response import Response
 from apps.notifications.models import AdminNotification, Notification, NotificationCategory, NotificationPreference, NotificationRecipient
 from apps.billing.models import PaymentEvent, Plan, Subscription
 from apps.chat.models import ChatUsage, Conversation, Message
-from apps.concursos.models import Concurso, NewsArticle
+from apps.concursos.models import Concurso, EditorialCategory, NewsArticle
 from apps.questions import moderation
 from apps.questions.moderation import REJECTION_REASONS
 from apps.questions.models import Exam, OfficialExamDownload, Question, UserAnswer
@@ -1631,6 +1631,25 @@ def editorial_exam_detail(request, pk):
 
 def _article_payload(item):
     return {"id": item.id, "title": item.title, "slug": item.slug, "summary": item.summary, "body": item.body, "category": item.category, "image_url": item.image_url, "seo_title": item.seo_title, "seo_description": item.seo_description, "tags": item.tags, "is_featured": item.is_featured, "is_pinned": item.is_pinned, "origin": item.origin, "editorial_status": item.editorial_status, "scheduled_for": item.scheduled_for, "is_published": item.is_published}
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+def editorial_categories(request):
+    if request.method == "GET": return Response({"results": [{"id": item.id, "name": item.name, "slug": item.slug, "is_active": item.is_active} for item in EditorialCategory.objects.all()]})
+    from django.utils.text import slugify
+    name = str(request.data.get("name", "")).strip()
+    if not name: return Response({"name": ["Informe o nome da categoria."]}, status=status.HTTP_400_BAD_REQUEST)
+    item, created = EditorialCategory.objects.get_or_create(name=name, defaults={"slug": slugify(name)[:80]})
+    return Response({"id": item.id, "name": item.name, "slug": item.slug, "is_active": item.is_active}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def editorial_news_history(request, pk):
+    if not NewsArticle.objects.filter(pk=pk).exists(): return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    events = AuditEvent.objects.filter(resource_type="article", resource_id=str(pk)).select_related("actor").order_by("-created_at")[:100]
+    return Response({"results": [_audit_payload(event) for event in events]})
+
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])

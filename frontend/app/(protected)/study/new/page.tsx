@@ -10,6 +10,9 @@ import { createStudyPlan, updateStudyPlan, getStudyPlan, KIND_LABELS, WEEKDAY_LA
 const KIND_ICONS = { trilha: Waypoints, cronograma: CalendarRange, ciclo: ListOrdered };
 const DAYS = WEEKDAY_SHORT;
 const GOALS = ["Técnico Judiciário", "Analista Judiciário", "Policial Civil", "Policial Federal", "Auditor Fiscal", "Professor", "Área Administrativa", "Outro objetivo"];
+const DEFAULT_DISCIPLINES = [
+  "Administração Geral", "Administração Pública", "Arquivologia", "Atualidades", "Contabilidade Geral", "Contabilidade Pública", "Direito Administrativo", "Direito Ambiental", "Direito Civil", "Direito Constitucional", "Direito do Trabalho", "Direito Empresarial", "Direito Internacional", "Direito Penal", "Direito Previdenciário", "Direito Processual Civil", "Direito Processual Penal", "Direito Tributário", "Economia", "Estatística", "Ética no Serviço Público", "Finanças Públicas", "Geografia", "Gestão de Pessoas", "História", "Informática", "Legislação Especial", "Língua Inglesa", "Língua Portuguesa", "Matemática", "Matemática Financeira", "Pedagogia", "Português", "Raciocínio Lógico", "Redação", "Tecnologia da Informação",
+];
 const CYCLE_KINDS: { value: StudyBlockKind; label: string }[] = [
   { value: "theory", label: "Teoria" },
   { value: "questions", label: "Questões" },
@@ -52,7 +55,10 @@ export default function NewStudyPage() {
   const [reminderTime, setReminderTime] = useState("19:00");
 
   useEffect(() => {
-    void listQuestionDisciplines().then(setDisciplines).catch(() => setDisciplines([])).finally(() => setLoading(false));
+    void listQuestionDisciplines()
+      .then((items) => setDisciplines([...new Set([...DEFAULT_DISCIPLINES, ...items])].sort((a, b) => a.localeCompare(b, "pt-BR"))))
+      .catch(() => setDisciplines(DEFAULT_DISCIPLINES))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -191,7 +197,27 @@ export default function NewStudyPage() {
                 {!disciplineSearch.trim() && <p className="mt-2 text-xs text-slate-500">Pesquise pelo nome e adicione as disciplinas que farão parte do plano.</p>}
               </div>
             </div>
-            <fieldset><legend className="mb-2 block text-sm font-semibold">Dias da semana disponíveis</legend><div className="flex flex-wrap gap-2">{DAYS.map((day, weekday) => { const selectedDay = weekdays.includes(weekday); return <button key={day} type="button" aria-pressed={selectedDay} onClick={() => toggleWeekday(weekday)} className={`min-h-11 rounded-xl border px-3 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${selectedDay ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 hover:border-blue-400 dark:border-slate-700"}`}>{day}<span className="sr-only">: {selectedDay ? "selecionado" : "não selecionado"}</span></button>; })}</div><p className="mt-2 text-xs text-slate-500">Selecione os dias em que você pretende estudar.</p></fieldset>
+            <fieldset>
+              <legend className="mb-2 block text-sm font-semibold">Dias da semana disponíveis</legend>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="group" aria-label="Dias disponíveis para estudo">
+                {DAYS.map((day, weekday) => {
+                  const selectedDay = weekdays.includes(weekday);
+                  return (
+                    <label key={day} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors focus-within:ring-2 focus-within:ring-blue-400 focus-within:ring-offset-2 dark:focus-within:ring-offset-slate-900 ${selectedDay ? "border-blue-600 bg-blue-50 text-blue-800 dark:bg-blue-950/50 dark:text-blue-100" : "border-slate-300 bg-white text-slate-700 hover:border-blue-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedDay}
+                        onChange={() => toggleWeekday(weekday)}
+                        className="h-4 w-4 shrink-0 rounded border-slate-400 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
+                      />
+                      <span>{day}</span>
+                      {selectedDay && <span className="ml-auto text-xs font-medium text-blue-600 dark:text-blue-300">Selecionado</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Marque todos os dias em que você pretende estudar.</p>
+            </fieldset>
             <div className="grid gap-4 sm:grid-cols-2"><div><label htmlFor="minutes" className="mb-2 block text-sm font-semibold">Minutos por dia de estudo</label><input id="minutes" type="number" min={25} max={480} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} className={`${I} max-w-44`} /></div>{kind === "ciclo" && <p className="self-end text-xs text-slate-500 dark:text-slate-400">O ciclo gira uma etapa por dia; etapas da fila que ultrapassarem o tempo total ainda entram no dia.</p>}</div>
           </section>
 

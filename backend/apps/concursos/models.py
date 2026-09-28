@@ -91,3 +91,23 @@ class NewsArticle(models.Model):
 
     def __str__(self):
         return self.title
+
+class ArticleView(models.Model):
+    article = models.ForeignKey(NewsArticle, on_delete=models.CASCADE, related_name="views")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    session_key = models.CharField(max_length=80, blank=True, db_index=True)
+    referrer = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["article", "created_at"])]
+
+
+class EditorialCategory(models.Model):
+    name = models.CharField(max_length=64, unique=True)
+    slug = models.SlugField(max_length=80, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]

@@ -11,7 +11,7 @@ import { getStudyAlerts } from "@/lib/studies";
 
 const primary = [
   { label: "Painel", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Questões", href: "/questions", icon: HelpCircle },
+  { label: "Questões", href: "/questions", icon: ListChecks },
   { label: "Provas", href: "/exams", icon: FileText },
   { label: "Simulados", href: "/simulations", icon: ClipboardList },
   { label: "Área de Estudos", href: "/study", icon: CalendarDays },

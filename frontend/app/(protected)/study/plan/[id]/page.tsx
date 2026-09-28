@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, BookOpen, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Coffee, Loader2, Pause, Play, RotateCcw, Settings2, Target, Timer, Trash2 } from "lucide-react";
 import { createInterval, deleteStudyPlan, getStudyPlan, listIntervals, getStudyAlerts, recordStudySession, replanStudy, updateStudyBlock, KIND_LABELS, WEEKDAY_SHORT, type StudyBlock, type StudyInterval, type StudyPlan } from "@/lib/studies";
@@ -61,8 +61,9 @@ function Ring({ progress, children }: { progress: number; children: ReactNode })
   );
 }
 
-export default function StudyPlanDetailPage({ params }: { params: { id: string } }) {
-  const planId = Number(params.id);
+export default function StudyPlanDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const planId = Number(id);
   const router = useRouter();
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [blocks, setBlocks] = useState<Record<string, StudyBlock[]>>({});

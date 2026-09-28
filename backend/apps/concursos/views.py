@@ -4,7 +4,7 @@ from django.db.models import Case, Count, F, Q, When
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .models import Concurso, NewsArticle
+from .models import ArticleView, Concurso, NewsArticle
 
 
 AREAS = [
@@ -221,4 +221,6 @@ def news_detail(request, slug):
     item = NewsArticle.objects.filter(slug=slug, is_published=True).first()
     if not item:
         return Response({"detail": "Notícia não encontrada."}, status=404)
+    if not request.session.session_key: request.session.save()
+    ArticleView.objects.create(article=item, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key or "", referrer=request.META.get("HTTP_REFERER", "")[:500])
     return Response(news_repr(item))
