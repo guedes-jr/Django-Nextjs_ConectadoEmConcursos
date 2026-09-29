@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, CircleHelp, ClipboardCheck, Filter, List, MessageSquare, RotateCcw, Search, StickyNote, X } from "lucide-react";
 import { QuestionContent } from "@/components/QuestionContent";
 import { useMe } from "@/lib/useMe";
@@ -86,6 +86,7 @@ export default function QuestionsPage() {
   const [queryReady, setQueryReady] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [restoredSession, setRestoredSession] = useState(false);
+  const restoredEmptyFiltersHandled = useRef(false);
   const [progress, setProgress] = useState<ProgressFilter>("all");
   const [mode, setMode] = useState<StudyMode>("practice");
   const [focusIndex, setFocusIndex] = useState(0);
@@ -203,6 +204,20 @@ export default function QuestionsPage() {
           page_size: pageSize,
         });
         if (cancelled) return;
+        const hasRestoredFilters = Boolean(search || discipline || banca || year || favoritesOnly || progress !== "all");
+        if (restoredSession && !restoredEmptyFiltersHandled.current && hasRestoredFilters && data.count === 0) {
+          restoredEmptyFiltersHandled.current = true;
+          setRestoredSession(false);
+          setSearch("");
+          setDiscipline("");
+          setBanca("");
+          setYear("");
+          setFavoritesOnly(false);
+          setProgress("all");
+          setPage(1);
+          setFocusIndex(0);
+          return;
+        }
         setQuestions(data.results);
         setTotal(data.count);
         setFocusIndex((current) => current >= data.results.length ? 0 : current);
