@@ -972,7 +972,7 @@ def update_proof_status(request):
     return Response({"id": proof.id, "status": proof.status})
 
 
-@api_view(["GET", "PATCH"])
+@api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAdminUser])
 def questions_admin(request):
     if request.method == "GET":
@@ -1037,16 +1037,37 @@ def questions_admin(request):
             }
         )
 
-    # PATCH — todas as escritas passam pelo moderation.py
     pk = request.data.get("id")
     try:
-        question = Question.objects.get(pk=pk)
+        question = Question.objects.select_related("source").get(pk=pk)
     except Question.DoesNotExist:
         return Response(
             {"detail": "Questão não encontrada."}, status=status.HTTP_404_NOT_FOUND
         )
 
+    if request.method == "DELETE":
+        before = {"status": question.status, "source": question.source.slug if question.source else None, "banca": question.banca, "discipline": question.discipline, "year": question.year}
+        question_id = question.id
+        question.delete()
+        audit_log(request, action="question.deleted", resource_type="question", resource_id=question_id, before=before)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH — todas as escritas passam pelo moderation.py
     mod_action = request.data.get("action", "").strip()
+
+    if mod_action in {"unpublish", "publish"}:
+        if mod_action == "unpublish" and question.status != Question.Status.APPROVED:
+            return Response({"detail": "Somente questões em produção podem ser retiradas."}, status=status.HTTP_409_CONFLICT)
+        if mod_action == "publish" and question.status != Question.Status.DRAFT:
+            return Response({"detail": "Somente rascunhos podem voltar para produção."}, status=status.HTTP_409_CONFLICT)
+        before = {"status": question.status}
+        question.status = Question.Status.DRAFT if mod_action == "unpublish" else Question.Status.APPROVED
+        if mod_action == "publish":
+            question.reviewed_by = request.user
+            question.reviewed_at = timezone.now()
+        question.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        audit_log(request, action=f"question.{mod_action}ed", resource_type="question", resource_id=question.id, before=before, after={"status": question.status}, context={"source": question.source.slug if question.source else None})
+        return Response({"id": question.id, "status": question.status})
 
     if mod_action == "approve":
         explanation = request.data.get("explanation")

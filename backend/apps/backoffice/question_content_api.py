@@ -150,6 +150,10 @@ def _question_payload(question, duplicates: list[dict] | None = None):
         or content_hash(question.statement, question.options),
         "source_url": question.source_url,
         "source": _source_payload(source) if source else None,
+        "origin": "manual" if source and source.slug == MANUAL_SOURCE_SLUG else "imported",
+        "created_by": question.created_by.username if question.created_by else None,
+        "imported_by": question.search_run.started_by.username if question.search_run and question.search_run.started_by else None,
+        "added_by": question.created_by.username if question.created_by else (question.search_run.started_by.username if question.search_run and question.search_run.started_by else None),
         "review_note": question.review_note,
         "duplicates": duplicates,
         "conflict": any(item["answer_conflict"] for item in duplicates),
@@ -947,7 +951,7 @@ def _manual_question_write(question, data):
 @permission_classes([IsAdminUser])
 def manual_questions(request):
     if request.method == "POST":
-        question = Question(source=_manual_source(), status=Question.Status.DRAFT)
+        question = Question(source=_manual_source(), created_by=request.user, status=Question.Status.DRAFT)
         try: _manual_question_write(question, request.data)
         except ValidationError as exc: return _validation_response(exc)
         payload = _question_payload(question, [])
@@ -956,7 +960,7 @@ def manual_questions(request):
     # A gestão exibe todo o acervo publicado; rascunhos e rejeitadas podem
     # incluir fontes importadas para fins de acompanhamento. As ações de edição
     # direta continuam restritas ao cadastro manual nos endpoints específicos.
-    qs = Question.objects.select_related("exam", "source").order_by("-updated_at")
+    qs = Question.objects.select_related("exam", "source", "created_by", "search_run__started_by").order_by("-updated_at")
     return Response({"results": [_question_payload(q, []) for q in qs[:500]]})
 
 @api_view(["PATCH"])

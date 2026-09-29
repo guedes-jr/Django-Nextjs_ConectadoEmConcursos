@@ -310,8 +310,9 @@ export const backoffice = {
       .get<{ total: number; results: QuestionAdminRow[] }>(`/api/backoffice/content/questions/?${params}`)
       .then((r) => r.data);
   },
-  updateQuestion: (id: number, data: { action?: string; statement?: string; banca?: string; discipline?: string; year?: number; options?: string[]; correct_answer?: number; explanation?: string }) =>
+  updateQuestion: (id: number, data: { action?: "approve" | "reject" | "edit_content" | "unpublish" | "publish"; statement?: string; banca?: string; discipline?: string; year?: number; options?: string[]; correct_answer?: number; explanation?: string }) =>
     http.patch<{ id: number; status?: string; explanation?: string }>("/api/backoffice/content/questions/", { id, ...data }).then((r) => r.data),
+  deleteQuestion: (id: number) => http.delete("/api/backoffice/content/questions/", { data: { id } }),
 
   listNews: (opts: { published?: boolean } = {}) => {
     const params = new URLSearchParams();
@@ -414,7 +415,7 @@ export const editorial = {
   updateExam: (id: number, data: Partial<EditorialExam>) => http.patch<EditorialExam>(`/api/backoffice/content/editorial/provas/${id}/`, data).then(r => r.data),
 };
 
-export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
+export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; origin?: "manual" | "imported"; created_by?: string | null; imported_by?: string | null; added_by?: string | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
 export const manualQuestions = {
   list: () => http.get<{results: ManualQuestion[]}>("/api/backoffice/content/questions/manual/").then(r => r.data),
   create: (data: Omit<ManualQuestion, "id" | "status" | "exam" | "rejection_reason" | "updated_at">) => http.post<ManualQuestion>("/api/backoffice/content/questions/manual/", data).then(r => r.data),

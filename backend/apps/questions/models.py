@@ -219,6 +219,13 @@ class Question(models.Model):
         REJECTED = "rejected", "Rejeitada"
 
     external_id = models.CharField(max_length=64, null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_questions",
+    )
     source = models.ForeignKey(
         QuestionSource,
         on_delete=models.SET_NULL,

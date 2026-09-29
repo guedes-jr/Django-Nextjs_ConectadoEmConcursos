@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from apps.backoffice import services
 from apps.billing.models import Plan, Subscription
 from apps.concursos.models import NewsArticle
-from apps.questions.models import Question
+from apps.questions.models import Question, QuestionSource, SearchRun
 from apps.workspace.models import CommunityPost, ExamSubmission
 
 User = get_user_model()
@@ -132,6 +132,40 @@ class ContentAdminTests(Base):
         self.assertEqual(response.status_code, 200)
         q.refresh_from_db()
         self.assertEqual(q.explanation, "Resposta explicada")
+
+    def test_lists_import_author_and_manages_publication_and_deletion(self):
+        source = QuestionSource.objects.create(slug="fonte-teste", name="Fonte de teste", kind=QuestionSource.Kind.OPEN_DATASET)
+        run = SearchRun.objects.create(source=source, started_by=self.staff)
+        question = Question.objects.create(
+            source=source,
+            search_run=run,
+            discipline="Matemática",
+            banca="CEBRASPE",
+            year=2025,
+            statement="Questão importada para gestão.",
+            options=["A", "B"],
+            correct_answer=0,
+            status=Question.Status.APPROVED,
+        )
+
+        listed = self.client.get("/api/backoffice/content/questions/manual/")
+        item = next(row for row in listed.data["results"] if row["id"] == question.id)
+        self.assertEqual(item["origin"], "imported")
+        self.assertEqual(item["added_by"], self.staff.username)
+
+        withdrawn = self.client.patch("/api/backoffice/content/questions/", {"id": question.id, "action": "unpublish"}, format="json")
+        self.assertEqual(withdrawn.status_code, 200)
+        question.refresh_from_db()
+        self.assertEqual(question.status, Question.Status.DRAFT)
+
+        restored = self.client.patch("/api/backoffice/content/questions/", {"id": question.id, "action": "publish"}, format="json")
+        self.assertEqual(restored.status_code, 200)
+        question.refresh_from_db()
+        self.assertEqual(question.status, Question.Status.APPROVED)
+
+        deleted = self.client.delete("/api/backoffice/content/questions/", {"id": question.id}, format="json")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(Question.objects.filter(pk=question.id).exists())
 
     def test_toggles_news(self):
         news = NewsArticle.objects.create(
