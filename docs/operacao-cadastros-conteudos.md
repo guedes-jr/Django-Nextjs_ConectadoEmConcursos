@@ -34,3 +34,30 @@ cd backend && .venv/bin/python manage.py publish_scheduled_news
 - Restaurar o backup apenas se a migração ou os dados forem comprometidos.
 - As migrações são aditivas e não fazem backfill nem exclusão de dados existentes.
 - Interromper o agendador de artigos antes de retornar a uma versão que não conheça os estados editoriais.
+
+
+## Permissões administrativas
+
+Os endpoints do backoffice exigem usuário ativo e `is_staff`. As escritas são
+controladas pelos grupos `Administrador`, `Editor` e `Revisor`:
+
+| Operação | Staff sem papel | Editor | Revisor | Administrador | Superusuário |
+| --- | --- | --- | --- | --- | --- |
+| Ler cadastros editoriais | sim | sim | sim | sim | sim |
+| Editar cadastros e questões manuais | não | sim | não | sim | sim |
+| Enviar, aprovar, rejeitar e publicar questões | não | não | sim | sim | sim |
+| Criar/editar rascunho de campanha | não | sim | não | sim | sim |
+| Publicar, encerrar e arquivar campanha | não | não | não | sim | sim |
+| Gerir usuários, planos e backups | não | não | não | sim | sim |
+| Consultar/exportar auditoria completa | não | não | não | não | sim |
+| Gerir staff e papéis | não | não | não | não | sim |
+
+Papéis são cumulativos. Não existe fallback administrativo para staff sem grupo.
+A migração histórica `0003_create_backoffice_roles` preservou os staffs existentes
+no grupo Administrador; novos acessos devem receber papel explicitamente.
+Diagnóstico possui ainda a permissão adicional descrita em `operacao-diagnostico.md`.
+Os relatórios financeiros mantêm a checagem separada de `view_financial_reports`.
+
+Autores de campanhas consultam apenas id, nome de usuário e e-mail de destinatários
+ativos em `/api/backoffice/notifications/options/`, sem acesso ao cadastro completo
+de usuários. Essa consulta fornece também os nomes dos planos ativos.

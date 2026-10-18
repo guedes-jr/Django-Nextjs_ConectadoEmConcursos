@@ -7,6 +7,7 @@ nunca misturar conteúdo de origens diferentes na mesma fila de aprovação.
 import json
 
 from django.core.exceptions import ValidationError
+from apps.backoffice.audit import audited_command
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.questions.ingest import run
@@ -24,6 +25,7 @@ class Command(BaseCommand):
         parser.add_argument("--parent", type=int, default=None, help="Execução a continuar.")
         parser.add_argument("--dry-run", action="store_true")
 
+    @audited_command("sync_questions")
     def handle(self, *args, **options):
         slugs = [part.strip() for part in options["source"].split(",") if part.strip()]
         if len(slugs) != 1:

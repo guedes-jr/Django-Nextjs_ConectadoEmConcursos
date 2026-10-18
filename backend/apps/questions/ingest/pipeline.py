@@ -17,6 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.questions.models import Exam, Question, QuestionStemToken, QuestionSource
+from apps.backoffice.audit import log as audit_log
 from apps.questions.naming import normalize_banca, normalize_discipline
 
 from .base import QuestionItem
@@ -204,6 +205,9 @@ def _create(
     )
     refresh_stem_index(question, checker)
     checker.index(question)
+    audit_log(actor=search_run.started_by if search_run else None, action="question.import_created", resource_type="question", resource_id=question.pk,
+              after={"status": question.status, "source_id": source.pk, "search_run_id": search_run.pk if search_run else None},
+              context={"entrypoint": "questions.ingest.pipeline"})
     counts.bump("created")
     counts.bump("pending")
     if match:
@@ -237,6 +241,7 @@ def _update_existing(
     if dry_run:
         return question
 
+    before = {"status": question.status, "content_hash": question.content_hash}
     _refresh_metadata(question, item)
     if search_run is not None:
         question.search_run = search_run
@@ -254,6 +259,11 @@ def _update_existing(
     question.save()
     refresh_stem_index(question, checker)
     checker.index(question)
+    audit_log(actor=search_run.started_by if search_run else None, action="question.reopened" if invalidation else "question.import_updated",
+              resource_type="question", resource_id=question.pk, before=before,
+              after={"status": question.status, "content_hash": question.content_hash, "search_run_id": search_run.pk if search_run else None},
+              reason="Conteúdo alterado na fonte." if invalidation else "",
+              context={"entrypoint": "questions.ingest.pipeline"})
     return question
 
 

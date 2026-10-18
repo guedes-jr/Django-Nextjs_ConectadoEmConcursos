@@ -20,7 +20,10 @@ class AuditEvent(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["resource_type", "resource_id", "-created_at"])]
-        permissions = [("view_financial_reports", "Pode visualizar indicadores financeiros")]
+        permissions = [
+            ("view_financial_reports", "Pode visualizar indicadores financeiros"),
+            ("access_diagnostics", "Pode acessar diagnóstico técnico"),
+        ]
 
     def save(self, *args, **kwargs):
         if self.pk:

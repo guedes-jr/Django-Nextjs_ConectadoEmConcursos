@@ -18,9 +18,15 @@ class PlanSerializer(serializers.ModelSerializer):
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     plan = PlanSerializer(read_only=True)
+    access_active = serializers.SerializerMethodField()
+
+    def get_access_active(self, sub):
+        from django.utils import timezone
+        return sub.status == "active" and (sub.current_period_end > timezone.now() if sub.current_period_end else sub.gateway == "local")
+
     class Meta:
         model = Subscription
-        fields = ["id", "plan", "cycle", "status", "created_at", "updated_at"]
+        fields = ["id", "plan", "cycle", "status", "gateway", "provider_status", "current_period_end", "cancel_at_period_end", "access_active", "created_at", "updated_at"]
 
 
 class SubscribeSerializer(serializers.Serializer):

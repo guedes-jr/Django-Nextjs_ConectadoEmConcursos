@@ -1,0 +1,23 @@
+[Unit]
+Description=Conectado Next.js
+After=network.target
+
+[Service]
+Type=exec
+User=deploy
+Group=www-data
+WorkingDirectory=/var/www/conectado-em-concursos/frontend
+Environment=NODE_ENV=production
+Environment=APP_PUBLIC_URL=https://conectadoemconcursos.com
+Environment=NEXT_TELEMETRY_DISABLED=1
+# Node 24 deve estar disponível em /usr/bin/node (ajustar se necessário).
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3001
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

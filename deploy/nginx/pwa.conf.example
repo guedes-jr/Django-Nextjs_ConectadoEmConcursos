@@ -1,0 +1,25 @@
+# Incluir no server HTTPS público, adaptando a porta ao Next do ambiente.
+# Preservar/reaplicar os headers de segurança do server ao adicionar headers locais.
+location = /sw.js {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache off;
+    proxy_no_cache 1;
+    proxy_hide_header Cache-Control;
+    proxy_hide_header Service-Worker-Allowed;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+    add_header Service-Worker-Allowed "/" always;
+    add_header X-Content-Type-Options nosniff always;
+}
+
+location = /manifest.webmanifest {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache off;
+    proxy_no_cache 1;
+    proxy_hide_header Cache-Control;
+    add_header Cache-Control "no-cache" always;
+    add_header X-Content-Type-Options nosniff always;
+}

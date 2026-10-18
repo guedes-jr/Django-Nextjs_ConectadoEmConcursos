@@ -6,4 +6,4 @@ class CoreConfig(AppConfig):
     name = 'apps.core'
 
     def ready(self):
-        from . import signals
+        from . import signals, deployment_checks  # noqa: F401

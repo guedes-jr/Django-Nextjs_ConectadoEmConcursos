@@ -1,9 +1,10 @@
 from django.urls import path
-from .views import health
+from .views import health, readiness
 from apps.core.api import change_password, csrf, me, password_reset_confirm, password_reset_request
 
 urlpatterns = [
     path("health/", health),
+    path("ready/", readiness),
     path("me/", me),
     path("csrf/", csrf),
     path("password/reset/", password_reset_request),

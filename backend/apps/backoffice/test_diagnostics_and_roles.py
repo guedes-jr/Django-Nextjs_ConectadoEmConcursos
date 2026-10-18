@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
 from rest_framework.test import APITestCase
 
@@ -9,6 +9,7 @@ class DiagnosticsAndRolesTests(APITestCase):
         self.superuser = get_user_model().objects.create_user(
             username="diagnostics-super", password="safe-password", is_staff=True, is_superuser=True
         )
+        self.superuser.user_permissions.add(Permission.objects.get(content_type__app_label="backoffice", codename="access_diagnostics"))
         self.client.force_authenticate(self.superuser)
 
     @override_settings(DIAGNOSTICS_ENABLED=True, DIAGNOSTICS_LOG_FILES=())

@@ -1,5 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
+# Avoid macOS file watcher limits during local development.
+export WATCHPACK_POLLING ?= true
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BACKEND_DIR := $(ROOT_DIR)/backend
@@ -127,3 +129,11 @@ commit-chore: _check-msg ## Adiciona tudo e cria um commit do tipo chore
 
 push: ## Envia os commits locais para o repositório remoto
 	@git push
+
+.PHONY: test-e2e
+test-e2e: ## Executa Playwright com backend temporário isolado
+	@$(NPM) run test:e2e
+
+.PHONY: deploy-plan
+deploy-plan: ## Mostra o plano de atualização de produção sem executar operações
+	@bash scripts/update.sh --plan

@@ -1,9 +1,11 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
 
 export function BackToTop() {
+  const pathname = usePathname();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -14,6 +16,8 @@ export function BackToTop() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  if (pathname === "/lousa" || pathname === "/chatIA") return null;
 
   return (
     <button

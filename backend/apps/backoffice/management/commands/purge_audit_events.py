@@ -1,6 +1,8 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
+from apps.backoffice.audit import audited_command, log as audit_log
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
@@ -13,6 +15,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--confirm", action="store_true")
 
+    @audited_command("purge_audit_events")
     def handle(self, *args, **opts):
         retention_days = int(getattr(settings, "AUDIT_RETENTION_DAYS", 365))
         if retention_days < 30:
@@ -23,10 +26,8 @@ class Command(BaseCommand):
         if not opts["confirm"]:
             self.stdout.write(f"{count} evento(s) elegíveis; execute com --confirm para remover.")
             return
-        queryset.delete()
-        AuditEvent.objects.create(
-            action="audit.retention.purged",
-            resource_type="audit_event",
-            context={"retention_days": retention_days, "cutoff": cutoff.isoformat(), "deleted_count": count, "command": "purge_audit_events"},
-        )
+        with transaction.atomic():
+            queryset.delete()
+            audit_log(action="audit.retention.purged", resource_type="audit_event",
+                      context={"retention_days": retention_days, "cutoff": cutoff, "deleted_count": count, "command": "purge_audit_events"})
         self.stdout.write(self.style.SUCCESS(f"{count} evento(s) removido(s); execução registrada na auditoria."))

@@ -1,736 +1,193 @@
 #!/usr/bin/env bash
-
+# Atualização in-place com janela de manutenção. Não executa importações/sync.
 set -Eeuo pipefail
 umask 027
+exec 3>&1
 
-# ============================================================
-# Conectado em Concursos
-# Atualização segura de produção
-# ============================================================
-
-APP_NAME="Conectado em Concursos"
-
-PROJECT_DIR="/var/www/conectado-em-concursos"
-BACKEND_DIR="${PROJECT_DIR}/backend"
-FRONTEND_DIR="${PROJECT_DIR}/frontend"
-VENV_DIR="${BACKEND_DIR}/.venv"
-
-BRANCH="main"
-
-DJANGO_SERVICE="conectado-concursos-django.service"
-NEXT_SERVICE="conectado-concursos-next.service"
-REDIS_SERVICE="redis-server.service"
-
-DOMAIN="https://conectadoemconcursos.com"
-NEXT_PORT="${NEXT_PORT:-3001}"
+PROJECT_DIR="${PROJECT_DIR:-/var/www/conectado-em-concursos}"
+BRANCH="${DEPLOY_BRANCH:-main}"
+DOMAIN="${DEPLOY_DOMAIN:-https://conectadoemconcursos.com}"
+PUBLIC_HOST="${DOMAIN#https://}"
 DJANGO_PORT="${DJANGO_PORT:-8001}"
-NEXT_LOCAL_URL="http://127.0.0.1:${NEXT_PORT}"
-DJANGO_LOCAL_URL="http://127.0.0.1:${DJANGO_PORT}"
+NEXT_PORT="${NEXT_PORT:-3001}"
+MAINTENANCE_FILE="${MAINTENANCE_FILE:-/srv/conectado/maintenance}"
+LOG_DIR="${DEPLOY_LOG_DIR:-/home/deploy/logs/conectado-concursos}"
+LOCK_FILE="${DEPLOY_LOCK_FILE:-/srv/conectado/update.lock}"
+BACKEND_DIR="$PROJECT_DIR/backend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+PYTHON="$BACKEND_DIR/.venv/bin/python"
+SERVICES=(conectado-concursos-django.service conectado-concursos-next.service conectado-concursos-worker.service)
+TIMERS=(conectado-concursos-publish.timer conectado-concursos-backup.timer)
+JOBS=(conectado-concursos-publish.service conectado-concursos-backup.service)
+MAINTENANCE_ENTERED=0
+SUCCESS=0
 
-LOCK_FILE="/tmp/conectado-concursos-update.lock"
-
-LOG_DIR="/home/deploy/logs/conectado-concursos"
-LOG_FILE="${LOG_DIR}/update-$(date '+%Y%m%d-%H%M%S').log"
-
-PYTHON="${VENV_DIR}/bin/python"
-
-GIT="$(command -v git)"
-NPM="$(command -v npm)"
-CURL="$(command -v curl)"
-FLOCK="$(command -v flock)"
-APT_GET="$(command -v apt-get || true)"
-SYSTEMCTL="/usr/bin/systemctl"
-
-
-# ============================================================
-# Funções
-# ============================================================
-
+fail() { echo "ERRO: $*" >&2; if [[ "${LOG_CAPTURED:-0}" == 1 ]]; then echo "ERRO: $*" >&3; fi; exit 1; }
 log() {
-    echo
-    echo "=================================================================="
-    echo "[$(date '+%d/%m/%Y %H:%M:%S')] $1"
-    echo "=================================================================="
+    local line="[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
+    printf '%s\n' "$line"
+    if [[ "${LOG_CAPTURED:-0}" == 1 ]]; then printf '%s\n' "$line" >&3; fi
 }
-
-erro() {
-    echo
-    echo "ERRO: $1"
-    echo
-    echo "Consulte o log:"
-    echo "$LOG_FILE"
-    echo
-    exit 1
-}
-
-
-# Executa manage.py em ambiente limpo.
-#
-# Não usamos:
-#
-#   source backend/.env
-#
-# porque o .env contém valores com caracteres especiais.
-# O Django carrega o arquivo usando python-dotenv.
-#
-# DJANGO_ENV é definido explicitamente para selecionar prod.py.
+control() { sudo -n systemctl "$@"; }
 django() {
-
-    cd "$BACKEND_DIR"
-
-    env -i \
-        HOME="$HOME" \
-        USER="$(id -un)" \
-        LANG="${LANG:-C.UTF-8}" \
-        PATH="${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-        DJANGO_ENV="production" \
-        "$PYTHON" manage.py "$@"
+    (
+        cd "$BACKEND_DIR"
+        # Não interpretar .env como shell nem propagar configurações de desenvolvimento.
+        env -i HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+            PATH="$BACKEND_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+            DJANGO_ENV=production "$PYTHON" manage.py "$@"
+    )
 }
-
-python_dependencies_installed() {
-
-    "$PYTHON" - <<'PY' >/dev/null 2>&1
-from importlib.metadata import version
-
-for package in (
-    "channels",
-    "channels-redis",
-    "cryptography",
-    "daphne",
-    "django-picklefield",
-    "django-q2",
-    "redis",
-):
-    version(package)
-PY
+cleanup() {
+    local result=$?
+    trap - EXIT
+    if [[ "$MAINTENANCE_ENTERED" == 1 && "$SUCCESS" != 1 ]]; then
+        log "Falha: manutenção mantida em $MAINTENANCE_FILE; sem restauração automática de banco/código."
+        : > "$MAINTENANCE_FILE"
+        control stop "${TIMERS[@]}" || true
+        control stop "${JOBS[@]}" "${SERVICES[@]}" || true
+        log "Preserve o backup e o log. Siga docs/operacao-deploy.md para recuperação."
+    fi
+    exit "$result"
 }
-
-ensure_redis() {
-
-    if command -v redis-server >/dev/null 2>&1 \
-        && command -v redis-cli >/dev/null 2>&1; then
-
-        echo "Redis Server: já instalado."
-
-    else
-
-        [[ -n "$APT_GET" ]] || \
-            erro "Redis Server ausente e apt-get não encontrado."
-
-        echo "Redis Server ausente. Instalando redis-server e redis-tools..."
-
-        if ! sudo -n "$APT_GET" update; then
-            erro "Não foi possível atualizar os pacotes para instalar o Redis Server."
-        fi
-
-        if ! sudo -n "$APT_GET" install -y redis-server redis-tools; then
-            erro "Não foi possível instalar o Redis Server."
-        fi
-
-        command -v redis-server >/dev/null 2>&1 || \
-            erro "redis-server não foi instalado corretamente."
-
-        command -v redis-cli >/dev/null 2>&1 || \
-            erro "redis-cli não foi instalado corretamente."
-
-    fi
-
-    "$SYSTEMCTL" cat "$REDIS_SERVICE" >/dev/null 2>&1 || \
-        erro "Serviço $REDIS_SERVICE não encontrado."
-
-    if ! "$SYSTEMCTL" is-enabled --quiet "$REDIS_SERVICE" >/dev/null 2>&1 \
-        || ! "$SYSTEMCTL" is-active --quiet "$REDIS_SERVICE" >/dev/null 2>&1; then
-
-        sudo -n "$SYSTEMCTL" enable --now "$REDIS_SERVICE" || \
-            erro "Não foi possível habilitar e iniciar $REDIS_SERVICE."
-
-    fi
-
-    for attempt in {1..5}; do
-
-        REDIS_PING="$(redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null || true)"
-
-        if [[ "$REDIS_PING" == "PONG" ]]; then
-            break
-        fi
-
-        sleep 1
-
+wait_http() {
+    local url="$1" expected="$2" attempt code
+    shift 2
+    for attempt in {1..12}; do
+        code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --connect-timeout 2 --max-time 8 "$@" "$url" || true)"
+        if [[ "$code" == "$expected" ]]; then return 0; fi
+        sleep 2
     done
-
-    [[ "$REDIS_PING" == "PONG" ]] || \
-        erro "Redis Server não respondeu PONG em 127.0.0.1:6379."
-
-    echo "Redis Server: OK"
+    fail "A verificação HTTP não atingiu $expected após 12 tentativas."
 }
+check_admin() {
+    local url="$1" headers
+    headers="$(curl --silent --show-error --max-time 10 --dump-header - --output /dev/null "$url")"
+    # Aceitar apenas login do mesmo domínio com retorno à rota pedida.
+    printf '%s\n' "$headers" | "$PYTHON" -c '
+import re, sys
+from urllib.parse import urljoin, urlsplit, parse_qs
+headers = sys.stdin.read().replace("\r", "")
+assert re.search(r"^HTTP/[0-9.]+ (302|303|307|308) ", headers, re.M)
+location = re.search(r"^location: (.+)$", headers, re.M | re.I).group(1)
+origin = urlsplit(sys.argv[1])
+target = urlsplit(urljoin(sys.argv[1], location))
+assert (target.scheme, target.netloc) == (origin.scheme, origin.netloc)
+assert target.path == "/login"
+assert parse_qs(target.query).get("next") == [origin.path]
+' "$url"
 
-frontend_backend_configured() {
-
-    local variable
-    local env_file
-    local configured
-
-    for variable in NEXT_PUBLIC_API_BASE_URL NEXT_PUBLIC_BACKEND_URL; do
-
-        if [[ -n "${!variable:-}" ]]; then
-            continue
-        fi
-
-        configured=0
-
-        for env_file in \
-            "$FRONTEND_DIR/.env.production.local" \
-            "$FRONTEND_DIR/.env.local" \
-            "$FRONTEND_DIR/.env.production"; do
-
-            if [[ -f "$env_file" ]] \
-                && grep -q "^${variable}=." "$env_file"; then
-
-                configured=1
-                break
-
-            fi
-
-        done
-
-        [[ "$configured" == "1" ]] || return 1
-
-    done
-
-    return 0
 }
-
-check_next_admin_route() {
-
-    local label="$1"
-    local url="$2"
-    local headers=""
-    local status=""
-    local location=""
-    local line
-
-    if ! headers="$(
-        "$CURL" \
-            --silent \
-            --show-error \
-            --dump-header - \
-            --output /dev/null \
-            --max-time 15 \
-            "$url"
-    )"; then
-
-        echo "$label: sem resposta"
-        return 1
-
-    fi
-
-    while IFS= read -r line; do
-
-        line="${line%$'\r'}"
-
-        if [[ "$line" =~ ^HTTP/[0-9.]+[[:space:]]+([0-9]{3}) ]]; then
-            status="${BASH_REMATCH[1]}"
-
-        elif [[ "$line" =~ ^[[:space:]]*[Ll]ocation:[[:space:]]*(.*)$ ]]; then
-            location="${BASH_REMATCH[1]}"
-
-        fi
-
-    done <<< "$headers"
-
-    echo "$label: HTTP ${status:-000}${location:+ -> $location}"
-
-    case "$status" in
-
-        301|302|303|307|308)
-            # Páginas protegidas podem redirecionar para o login; ambos os formatos são válidos.
-            if [[ "$location" == *"/?next="* || "$location" == *"/login?next="* || "$location" == "?next=" ]]; then
-                return 0
-            fi
-            ;;
-
+main() {
+    case "${1:---plan}" in
+        --plan)
+            cat <<'PLAN'
+Plano de atualização (nenhum comando operacional foi executado):
+1. Validar usuário, ferramentas, serviços, branch e árvore Git limpa.
+2. Buscar main com fast-forward; não alterar a árvore ativa ainda.
+3. Ativar manutenção no proxy e confirmar HTTP 503 público.
+4. Parar timers, jobs, worker, backend e frontend; criar backup com o código anterior.
+5. Atualizar código e dependências; validar Django, tipos e build.
+6. Aplicar migrações e coletar estáticos com os escritores parados.
+7. Iniciar aplicação/worker e verificar prontidão local.
+8. Remover manutenção, verificar HTTPS/admin/PWA e iniciar timers.
+Falhas após a entrada em manutenção mantêm o tráfego bloqueado e os serviços parados.
+A operação exige scripts/update.sh --apply no servidor provisionado.
+PLAN
+            return ;;
+        --apply) [[ "$#" == 1 ]] || fail "Use somente --plan ou --apply." ;;
+        *) fail "Use --plan (padrão, sem efeitos) ou --apply." ;;
     esac
-
-    return 1
-}
-
-
-# ============================================================
-# Log
-# ============================================================
-
-mkdir -p "$LOG_DIR"
-
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-
-# ============================================================
-# Lock
-# Impede duas atualizações simultâneas
-# ============================================================
-
-exec 9>"$LOCK_FILE"
-
-if ! "$FLOCK" -n 9; then
-    erro "Já existe uma atualização em execução."
-fi
-
-
-# ============================================================
-# Tratamento de erro
-# ============================================================
-
-trap '
-    STATUS=$?
-
-    echo
-    echo "=================================================================="
-    echo "ATUALIZAÇÃO INTERROMPIDA"
-    echo "Etapa com erro. Código de saída: $STATUS"
-    echo "Log: '"$LOG_FILE"'"
-    echo "=================================================================="
-
-    exit $STATUS
-' ERR
-
-
-# ============================================================
-# 1. Validações
-# ============================================================
-
-log "1/12 - Validando ambiente"
-
-if [[ "$(id -un)" != "deploy" ]]; then
-    erro "Este atualizador deve ser executado pelo usuário deploy."
-fi
-
-[[ -d "$PROJECT_DIR/.git" ]] || \
-    erro "Repositório Git não encontrado em $PROJECT_DIR"
-
-[[ -d "$BACKEND_DIR" ]] || \
-    erro "Diretório backend não encontrado."
-
-[[ -d "$FRONTEND_DIR" ]] || \
-    erro "Diretório frontend não encontrado."
-
-[[ -x "$PYTHON" ]] || \
-    erro "Virtualenv Python não encontrado em $VENV_DIR"
-
-[[ -f "$BACKEND_DIR/.env" ]] || \
-    erro "Arquivo backend/.env não encontrado."
-
-[[ -f "$BACKEND_DIR/requirements.txt" ]] || \
-    erro "requirements.txt não encontrado."
-
-[[ -f "$FRONTEND_DIR/package.json" ]] || \
-    erro "frontend/package.json não encontrado."
-
-[[ -f "$FRONTEND_DIR/package-lock.json" ]] || \
-    erro "frontend/package-lock.json não encontrado."
-
-[[ -n "$GIT" ]] || erro "git não encontrado."
-[[ -n "$NPM" ]] || erro "npm não encontrado."
-[[ -n "$CURL" ]] || erro "curl não encontrado."
-[[ -n "$FLOCK" ]] || erro "flock não encontrado."
-
-frontend_backend_configured || \
-    erro "NEXT_PUBLIC_API_BASE_URL e NEXT_PUBLIC_BACKEND_URL precisam estar configurados para o build do frontend."
-
-echo "Projeto.....: $PROJECT_DIR"
-echo "Backend.....: $BACKEND_DIR"
-echo "Frontend....: $FRONTEND_DIR"
-echo "Branch......: $BRANCH"
-echo "Django......: $DJANGO_SERVICE"
-echo "Next.js.....: $NEXT_SERVICE"
-echo "Portas......: Next $NEXT_PORT / Django $DJANGO_PORT"
-echo "Domínio.....: $DOMAIN"
-
-
-# ============================================================
-# 2. Validar serviços
-# ============================================================
-
-log "2/12 - Validando serviços da aplicação"
-
-if ! "$SYSTEMCTL" list-unit-files "$DJANGO_SERVICE" \
-    --no-legend 2>/dev/null | grep -q "$DJANGO_SERVICE"; then
-
-    erro "Serviço $DJANGO_SERVICE não encontrado."
-fi
-
-if ! "$SYSTEMCTL" list-unit-files "$NEXT_SERVICE" \
-    --no-legend 2>/dev/null | grep -q "$NEXT_SERVICE"; then
-
-    erro "Serviço $NEXT_SERVICE não encontrado."
-fi
-
-echo "$DJANGO_SERVICE encontrado."
-echo "$NEXT_SERVICE encontrado."
-
-
-# ============================================================
-# 3. Validar Git
-# ============================================================
-
-log "3/12 - Validando repositório"
-
-cd "$PROJECT_DIR"
-
-CURRENT_BRANCH="$("$GIT" branch --show-current)"
-
-if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
-    erro "Branch atual '$CURRENT_BRANCH'. Esperado '$BRANCH'."
-fi
-
-# Não sobrescrever alterações locais em arquivos versionados.
-#
-# Arquivos não versionados são ignorados propositalmente.
-if ! TRACKED_STATUS="$("$GIT" status --porcelain --untracked-files=no)"; then
-    erro "Não foi possível verificar alterações locais no Git."
-fi
-
-if [[ -n "$TRACKED_STATUS" ]]; then
-
-    echo
-    "$GIT" status --short
-    echo
-
-    erro "Existem alterações locais em arquivos versionados. Faça commit ou stash antes de atualizar."
-fi
-
-OLD_COMMIT="$("$GIT" rev-parse HEAD)"
-
-echo "Commit atual: $OLD_COMMIT"
-
-
-# ============================================================
-# 4. Buscar atualização
-# ============================================================
-
-log "4/12 - Buscando atualizações"
-
-"$GIT" fetch --prune origin "$BRANCH"
-
-LOCAL_COMMIT="$("$GIT" rev-parse HEAD)"
-REMOTE_COMMIT="$("$GIT" rev-parse "origin/$BRANCH")"
-BASE_COMMIT="$("$GIT" merge-base HEAD "origin/$BRANCH")"
-
-echo "Local : $LOCAL_COMMIT"
-echo "Remoto: $REMOTE_COMMIT"
-
-if [[ "$LOCAL_COMMIT" == "$REMOTE_COMMIT" ]]; then
-
-    echo
-    echo "O código já está atualizado."
-
-elif [[ "$LOCAL_COMMIT" == "$BASE_COMMIT" ]]; then
-
-    echo
-    echo "Nova versão encontrada."
-    echo
-
-    "$GIT" merge --ff-only "origin/$BRANCH"
-
-elif [[ "$REMOTE_COMMIT" == "$BASE_COMMIT" ]]; then
-
-    erro "O servidor possui commits que ainda não estão no GitHub."
-
-else
-
-    erro "A branch local divergiu de origin/$BRANCH."
-
-fi
-
-NEW_COMMIT="$("$GIT" rev-parse HEAD)"
-
-[[ "$NEW_COMMIT" == "$REMOTE_COMMIT" ]] || \
-    erro "O commit implantado ($NEW_COMMIT) não corresponde ao remoto ($REMOTE_COMMIT)."
-
-echo
-echo "Commit anterior: $OLD_COMMIT"
-echo "Commit atual...: $NEW_COMMIT"
-
-
-# ============================================================
-# 5. Backend - dependências
-# ============================================================
-
-log "5/12 - Verificando e instalando dependências"
-
-if python_dependencies_installed; then
-
-    echo "Dependências Python de notificações encontradas. Sincronizando com requirements.txt..."
-
-else
-
-    echo "Dependências Python de notificações ausentes. Instalando requirements.txt..."
-
-fi
-
-"$PYTHON" -m pip install \
-    --disable-pip-version-check \
-    -r "$BACKEND_DIR/requirements.txt"
-
-if ! python_dependencies_installed; then
-    erro "Dependências Python de notificações não foram instaladas corretamente."
-fi
-
-"$PYTHON" -m pip check
-
-if ! "$PYTHON" -c "import gunicorn" >/dev/null 2>&1; then
-    erro "Gunicorn não está instalado no virtualenv."
-fi
-
-ensure_redis
-
-
-# ============================================================
-# 6. Django - verificações
-# ============================================================
-
-log "6/12 - Validando Django"
-
-django check --deploy
-
-echo
-echo "Verificando migrations ausentes..."
-
-django makemigrations \
-    --check \
-    --dry-run
-
-
-# ============================================================
-# 7. Frontend - dependências
-# ============================================================
-
-log "7/12 - Instalando dependências do frontend"
-
-cd "$FRONTEND_DIR"
-
-"$NPM" ci \
-    --include=dev \
-    --no-audit \
-    --no-fund
-
-
-# ============================================================
-# 8. Build Next.js
-# ============================================================
-
-log "8/12 - Gerando build do Next.js"
-
-cd "$FRONTEND_DIR"
-
-"$NPM" run build
-
-[[ -f "$FRONTEND_DIR/.next/BUILD_ID" ]] || \
-    erro "Build do Next.js não gerou .next/BUILD_ID."
-
-if grep -R -qE 'https?://(localhost|127\.0\.0\.1):8000' \
-    "$FRONTEND_DIR/.next/static" 2>/dev/null; then
-
-    erro "O build do frontend contém NEXT_PUBLIC_API_BASE_URL apontando para localhost. Configure a URL pública da API."
-
-fi
-
-echo "Build ID.....: $(<"$FRONTEND_DIR/.next/BUILD_ID")"
-
-
-# ============================================================
-# 9. Django - banco e estáticos
-# ============================================================
-
-log "9/12 - Aplicando migrations"
-
-django migrate --noinput
-
-log "Coletando arquivos estáticos"
-
-django collectstatic --noinput
-
-
-# ============================================================
-# 10. Reiniciar SOMENTE esta aplicação
-# ============================================================
-
-log "10/12 - Reiniciando serviços"
-
-echo "Reiniciando: $DJANGO_SERVICE"
-
-sudo -n "$SYSTEMCTL" restart "$DJANGO_SERVICE"
-
-echo "Reiniciando: $NEXT_SERVICE"
-
-sudo -n "$SYSTEMCTL" restart "$NEXT_SERVICE"
-
-
-# ============================================================
-# 11. Validar serviços
-# ============================================================
-
-log "11/12 - Validando processos"
-
-sleep 3
-
-if ! "$SYSTEMCTL" is-active --quiet "$DJANGO_SERVICE"; then
-
-    "$SYSTEMCTL" status "$DJANGO_SERVICE" \
-        --no-pager \
-        -l || true
-
-    erro "$DJANGO_SERVICE não iniciou."
-fi
-
-echo "$DJANGO_SERVICE: OK"
-
-if ! "$SYSTEMCTL" is-active --quiet "$NEXT_SERVICE"; then
-
-    "$SYSTEMCTL" status "$NEXT_SERVICE" \
-        --no-pager \
-        -l || true
-
-    erro "$NEXT_SERVICE não iniciou."
-fi
-
-echo "$NEXT_SERVICE: OK"
-
-
-# ============================================================
-# 12. Health checks
-# ============================================================
-
-log "12/12 - Executando health checks"
-
-
-# ------------------------------------------------------------
-# Next.js local
-# ------------------------------------------------------------
-
-NEXT_CODE="$(
-    "$CURL" \
-        --silent \
-        --output /dev/null \
-        --write-out '%{http_code}' \
-        --max-time 10 \
-        "$NEXT_LOCAL_URL/" \
-        || true
-)"
-
-if [[ "$NEXT_CODE" != "200" ]]; then
-    erro "Next.js local retornou HTTP $NEXT_CODE."
-fi
-
-echo "Next.js local: HTTP $NEXT_CODE"
-
-if ! check_next_admin_route "Next.js local /admin" "$NEXT_LOCAL_URL/admin"; then
-    erro "A rota local /admin não está sendo servida pelo Next.js."
-fi
-
-if ! check_next_admin_route "Next.js local /admin/usuarios" "$NEXT_LOCAL_URL/admin/usuarios"; then
-    erro "A rota local /admin/usuarios não está sendo servida pelo Next.js."
-fi
-
-
-# ------------------------------------------------------------
-# Django local
-# ------------------------------------------------------------
-
-DJANGO_CODE="$(
-    "$CURL" \
-        --silent \
-        --output /dev/null \
-        --write-out '%{http_code}' \
-        --max-time 10 \
-        -H "Host: conectadoemconcursos.com" \
-        -H "X-Forwarded-Proto: https" \
-        "$DJANGO_LOCAL_URL/api/health/" \
-        || true
-)"
-
-case "$DJANGO_CODE" in
-
-    200)
-        echo "Django local: HTTP $DJANGO_CODE"
-        ;;
-
-    *)
-        erro "Django local retornou HTTP $DJANGO_CODE."
-        ;;
-
-esac
-
-
-# ------------------------------------------------------------
-# HTTPS público
-# ------------------------------------------------------------
-
-PUBLIC_OK=0
-
-for attempt in {1..10}; do
-
-    PUBLIC_CODE="$(
-        "$CURL" \
-            --silent \
-            --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --max-time 15 \
-            "$DOMAIN/" \
-            || true
-    )"
-
-    if [[ "$PUBLIC_CODE" == "200" ]]; then
-
-        PUBLIC_OK=1
-        break
-
+    [[ "$(id -un)" == deploy ]] || fail "Execute como deploy."
+    [[ "$DOMAIN" =~ ^https://[a-zA-Z0-9.-]+$ ]] || fail "DEPLOY_DOMAIN deve ser uma origem HTTPS sem caminho/porta."
+    [[ "$DJANGO_PORT" =~ ^[0-9]+$ && "$NEXT_PORT" =~ ^[0-9]+$ ]] || fail "Portas inválidas."
+    [[ "$PROJECT_DIR" == /* && "$MAINTENANCE_FILE" == /* && "$LOCK_FILE" == /* ]] || fail "Use caminhos absolutos."
+    [[ ! -e "$MAINTENANCE_FILE" ]] || fail "Já existe uma manutenção; revisar antes de atualizar."
+    [[ -d "$PROJECT_DIR/.git" && -x "$PYTHON" && -f "$BACKEND_DIR/.env" ]] || fail "Repositório, virtualenv ou backend/.env ausente."
+    [[ -f "$FRONTEND_DIR/package-lock.json" ]] || fail "Lockfile do frontend ausente."
+    for tool in git npm node curl flock sudo systemctl redis-cli; do
+        command -v "$tool" >/dev/null || fail "Ferramenta ausente: $tool. Provisionar antes do deploy."
+    done
+    [[ "$(node -p 'process.versions.node.split(".")[0]')" == 24 ]] || fail "Node 24 é obrigatório."
+    [[ -w "$(dirname "$MAINTENANCE_FILE")" && -w "$(dirname "$LOCK_FILE")" ]] || fail "Diretórios de operação não provisionados."
+    mkdir -p "$LOG_DIR"
+    LOG_FILE="$LOG_DIR/update-$(date -u '+%Y%m%d-%H%M%S').log"
+    printf 'Log detalhado: %s\n' "$LOG_FILE"
+    exec >> "$LOG_FILE" 2>&1
+    LOG_CAPTURED=1
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || fail "Já existe uma atualização em execução."
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    cd "$PROJECT_DIR"
+    [[ "$(git branch --show-current)" == "$BRANCH" ]] || fail "Branch inesperada."
+    [[ -z "$(git status --porcelain)" ]] || fail "Há arquivos locais alterados/não rastreados; não serão sobrescritos."
+    for unit in "${SERVICES[@]}" "${TIMERS[@]}" "${JOBS[@]}"; do
+        systemctl cat "$unit" >/dev/null || fail "Unidade não provisionada: $unit."
+    done
+    systemctl is-active --quiet redis-server.service || fail "Redis não está ativo."
+    [[ "$(redis-cli -h 127.0.0.1 -p 6379 ping)" == PONG ]] || fail "Redis local indisponível."
+    OLD_COMMIT="$(git rev-parse HEAD)"
+    git fetch --prune origin "$BRANCH"
+    NEW_COMMIT="$(git rev-parse "origin/$BRANCH")"
+    git merge-base --is-ancestor "$OLD_COMMIT" "$NEW_COMMIT" || fail "Atualização não é fast-forward."
+    log "Release anterior $OLD_COMMIT; destino $NEW_COMMIT"
+    # Verifica as permissões sudo exatas antes de bloquear o tráfego.
+    sudo -n -l systemctl stop "${TIMERS[@]}" >/dev/null
+    sudo -n -l systemctl stop "${JOBS[@]}" "${SERVICES[@]}" >/dev/null
+    sudo -n -l systemctl start "${SERVICES[@]}" >/dev/null
+    sudo -n -l systemctl start "${TIMERS[@]}" >/dev/null
+    (set -o noclobber; : > "$MAINTENANCE_FILE")
+    MAINTENANCE_ENTERED=1
+    wait_http "$DOMAIN/api/health/" 503
+    control stop "${TIMERS[@]}"
+    control stop "${JOBS[@]}" "${SERVICES[@]}"
+    log "Criando backup antes de alterar código, dependências ou esquema"
+    django backup_db
+    git merge --ff-only "$NEW_COMMIT"
+    "$PYTHON" -m pip install --disable-pip-version-check -r "$BACKEND_DIR/requirements.txt"
+    "$PYTHON" -m pip check
+    "$PYTHON" -c 'import daphne'
+    django check --deploy --fail-level WARNING
+    django makemigrations --check --dry-run
+    (
+        cd "$FRONTEND_DIR"
+        npm ci --include=dev --no-audit --no-fund
+        NODE_ENV=production npm run check:production-env
+        npm run typecheck
+        E2E_RUN=0 NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 npm run build
+        [[ -s .next/BUILD_ID ]] || fail "Build sem identificador."
+    )
+    django migrate --noinput
+    django migrate --check
+    django collectstatic --noinput
+    control start "${SERVICES[@]}"
+    for unit in "${SERVICES[@]}"; do systemctl is-active --quiet "$unit" || fail "Serviço inativo: $unit"; done
+    wait_http "http://127.0.0.1:$DJANGO_PORT/api/ready/" 200 -H "Host: $PUBLIC_HOST" -H 'X-Forwarded-Proto: https'
+    wait_http "http://127.0.0.1:$NEXT_PORT/" 200
+    # Removida somente após os serviços locais passarem. Em falha posterior, recriar.
+    rm "$MAINTENANCE_FILE"
+    if ! (
+        wait_http "$DOMAIN/api/ready/" 200
+        wait_http "$DOMAIN/" 200
+        check_admin "$DOMAIN/admin" || exit 1
+        check_admin "$DOMAIN/admin/usuarios" || exit 1
+        curl --fail --silent --show-error --max-time 15 "$DOMAIN/sw.js" | "$PYTHON" -c '
+import pathlib, re, sys
+expected = pathlib.Path(sys.argv[1]).read_text().strip()
+match = re.search(r"const VERSION = \"([^\"\n]+)\";", sys.stdin.read())
+assert match and match.group(1) == expected
+' "$FRONTEND_DIR/.next/BUILD_ID" || exit 1
+        curl --fail --silent --show-error --max-time 15 "$DOMAIN/manifest.webmanifest" | "$PYTHON" -c 'import json,sys; assert json.load(sys.stdin).get("display") == "standalone"'
+    ); then
+        : > "$MAINTENANCE_FILE"
+        fail "Falha de homologação pública; manutenção reativada."
     fi
-
-    echo "Tentativa $attempt/10: HTTP ${PUBLIC_CODE:-sem resposta}"
-
-    sleep 2
-
-done
-
-if [[ "$PUBLIC_OK" != "1" ]]; then
-    erro "O domínio público não respondeu HTTP 200."
-fi
-
-echo "HTTPS público: HTTP $PUBLIC_CODE"
-
-if ! check_next_admin_route "Admin público /admin" "$DOMAIN/admin"; then
-    erro "A rota pública /admin não está sendo encaminhada ao Next.js. Revise o proxy de produção."
-fi
-
-if ! check_next_admin_route "Admin público /admin/usuarios" "$DOMAIN/admin/usuarios"; then
-    erro "A rota pública /admin/usuarios não está sendo encaminhada ao Next.js. Revise o proxy de produção."
-fi
-
-echo "Admin custom: OK"
-
-
-# ============================================================
-# Final
-# ============================================================
-
-echo
-echo "=================================================================="
-echo " ATUALIZAÇÃO CONCLUÍDA COM SUCESSO"
-echo "=================================================================="
-echo
-echo "Projeto.......: $APP_NAME"
-echo "Commit anterior: $OLD_COMMIT"
-echo "Commit atual...: $NEW_COMMIT"
-echo
-echo "Django.........: OK"
-echo "Next.js........: OK"
-echo "Redis..........: OK"
-echo "Admin custom...: OK"
-echo "HTTPS..........: OK"
-echo
-echo "Log:"
-echo "$LOG_FILE"
-echo
-echo "$DOMAIN"
-echo
+    control start "${TIMERS[@]}"
+    for unit in "${TIMERS[@]}"; do systemctl is-active --quiet "$unit" || fail "Timer inativo: $unit"; done
+    SUCCESS=1
+    log "Atualização concluída em $NEW_COMMIT. Conferir worker, backups externos e observação por 48 horas."
+}
+main "$@"

@@ -46,6 +46,7 @@ class ChatAPITests(TestCase):
         self.assertEqual(self.client.delete(f"/api/conversations/{other.id}/").status_code, 404)
 
     @override_settings(
+        AI_PROVIDER="openai",
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-test",
         OPENAI_API_URL="https://api.openai.com/v1/responses",

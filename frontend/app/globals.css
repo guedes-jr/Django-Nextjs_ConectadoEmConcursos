@@ -1103,3 +1103,15 @@ html:not(.dark) .landing-page .cta-premium-section {
 .admin-nav-scroll::-webkit-scrollbar-track { background: transparent; }
 .admin-nav-scroll::-webkit-scrollbar-thumb { background: rgba(199, 210, 254, .24); border-radius: 999px; }
 .admin-nav-scroll:hover::-webkit-scrollbar-thumb { background: rgba(199, 210, 254, .45); }
+
+/* Keep controls inside the device cutout while preserving their base padding. */
+.chat-composer {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+}
+.whiteboard-page {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+}

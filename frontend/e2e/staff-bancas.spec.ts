@@ -1,0 +1,92 @@
+import {test, expect, Page} from "@playwright/test";
+async function login(page: Page, route: string, user = "admin") {
+  await page.goto(`/login?next=${encodeURIComponent(route)}`);
+  await page.locator('input[autocomplete="email"]').first().fill(`${user}@example.test`);
+  await page.locator('input[autocomplete="current-password"]').fill("E2e-only!Password-482");
+  await page.getByRole("button", {name: "Entrar", exact: true}).first().click();
+  await expect(page).toHaveURL(url => url.pathname === route);
+}
+
+test("staff standard creates, filters, edits role and protects own access", async ({page}) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await login(page, "/admin/staff");
+  await page.getByRole("button", {name: "Novo staff", exact: true}).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Usuário", {exact: false}).fill("staff-padrao-e2e");
+  await dialog.getByLabel("E-mail", {exact: true}).fill("staff-padrao@example.test");
+  await dialog.getByLabel("Senha", {exact: false}).fill("E2e-only!Password-482");
+  await dialog.getByRole("button", {name: "Criar staff"}).click();
+  await expect(dialog).toBeHidden();
+  await page.getByLabel("Buscar staff", {exact: true}).fill("staff-padrao-e2e");
+  await expect(page.getByRole("status").filter({hasText: "1 registro encontrado"})).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Buscar staff", {exact: true})).toHaveValue("staff-padrao-e2e");
+  await page.getByRole("button", {name: "Editar staff-padrao-e2e", exact: true}).click();
+  await dialog.getByLabel("Papel administrativo").click();
+  await page.getByRole("option", {name: "Editor", exact: true}).click();
+  await dialog.getByRole("button", {name: "Salvar", exact: true}).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("table").getByText("Editor", {exact: true})).toBeVisible();
+  await page.getByLabel("Buscar staff", {exact: true}).fill("inexistente-e2e");
+  await expect(page.getByText("Nenhum staff corresponde aos filtros")).toBeVisible();
+  await page.getByRole("button", {name: "Limpar filtros", exact: true}).first().click();
+  await page.getByRole("button", {name: "Editar admin", exact: true}).click();
+  await expect(dialog.getByRole("switch", {name: "Alternar acesso staff"})).toBeDisabled();
+  await expect(dialog.getByRole("switch", {name: "Alternar conta ativa"})).toBeDisabled();
+  await dialog.getByRole("button", {name: "Cancelar"}).click();
+  await page.screenshot({path: "/tmp/admin-staff-desktop.png", fullPage: true});
+  await page.setViewportSize({width:390, height:844});
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Editar admin", exact: true})).toBeAttached();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({path: "/tmp/admin-staff-mobile.png", fullPage: true});
+  expect(errors).toEqual([]);
+});
+
+test("staff standard denies management to non-superuser", async ({page}) => {
+  await login(page, "/admin/staff", "limited");
+  await expect(page.getByText("Apenas superusuários podem administrar papéis e acessos de staff.", {exact:true})).toBeVisible();
+  await expect(page.getByRole("button", {name: "Novo staff", exact:true})).toHaveCount(0);
+});
+
+test("bancas standard creates aliases, restores filters and validates atomic edits", async ({page}) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await login(page, "/admin/bancas");
+  await page.getByRole("button", {name: "Nova banca", exact:true}).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Nome canônico").fill("Banca de revisão E2E");
+  await dialog.getByLabel("Slug").fill("banca-revisao-e2e");
+  await dialog.getByLabel("Adicionar grafia alternativa").fill("BRE2E");
+  await dialog.getByLabel("Destacar", {exact:true}).check();
+  await dialog.getByRole("button", {name:"Salvar banca"}).click();
+  await expect(dialog).toBeHidden();
+  await page.getByLabel("Buscar bancas", {exact:true}).fill("BRE2E");
+  await expect(page.getByRole("table").getByText("Banca de revisão E2E", {exact:true})).toBeVisible();
+  await expect(page.getByRole("table").getByText("BRE2E", {exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Buscar bancas", {exact:true})).toHaveValue("BRE2E");
+  await page.getByRole("button", {name:"Editar banca Banca de revisão E2E", exact:true}).click();
+  await dialog.getByLabel("Descrição editorial").fill("Alteração que deve ser revertida");
+  await dialog.getByLabel("Adicionar grafia alternativa").fill("Banca de revisão E2E");
+  await dialog.getByRole("button", {name:"Salvar banca"}).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/alias:/)).toBeVisible();
+  await dialog.getByLabel("Adicionar grafia alternativa").fill("Outra sigla E2E");
+  await dialog.getByLabel("Ativa para novos cadastros").uncheck();
+  await dialog.getByRole("button", {name:"Salvar banca"}).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("table").getByText("Inativo", {exact:true})).toBeVisible();
+  await page.getByRole("button", {name:"Filtrar bancas ativas"}).click();
+  await expect(page.getByText("Nenhuma banca corresponde aos filtros")).toBeVisible();
+  await page.getByRole("button", {name:"Limpar filtros", exact:true}).first().click();
+  await expect(page.getByRole("table").getByText("Banca de revisão E2E", {exact:true})).toBeVisible();
+  await page.screenshot({path: "/tmp/admin-bancas-desktop.png", fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.reload();
+  await expect(page.getByRole("table").getByText("Banca de revisão E2E", {exact:true})).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({path: "/tmp/admin-bancas-mobile.png", fullPage:true});
+  expect(errors).toEqual([]);
+});

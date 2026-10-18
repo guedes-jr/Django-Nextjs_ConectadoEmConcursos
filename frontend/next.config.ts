@@ -1,6 +1,14 @@
 import type { NextConfig } from "next";
+import { randomUUID } from "node:crypto";
+
+const releaseId = process.env.CONECTADO_BUILD_ID || randomUUID();
+// Next loads this config in several build workers; share one release identity.
+process.env.CONECTADO_BUILD_ID = releaseId;
 
 const nextConfig: NextConfig = {
+  generateBuildId: async () => releaseId,
+  env: { PWA_BUILD_ID: releaseId },
+  distDir: process.env.E2E_RUN === "1" ? ".next-e2e" : ".next",
   images: {
     remotePatterns: [
       { protocol: "http", hostname: "localhost", port: "8000" },

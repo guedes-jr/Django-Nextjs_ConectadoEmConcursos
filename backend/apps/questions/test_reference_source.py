@@ -12,6 +12,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -91,6 +92,7 @@ class ReferenceSourceSearchTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="curador", password="safe-password", is_staff=True
         )
+        self.user.groups.add(Group.objects.get(name="Editor"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.source = QuestionSource.objects.create(

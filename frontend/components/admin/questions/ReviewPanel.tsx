@@ -8,6 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { answerLetter, type RejectionReasons, type ReviewQuestion } from "@/lib/content";
 
 type Props = {
+  minExplanationChars?:number;
+  readOnly?: boolean;
+  hasUnsavedChanges?:boolean;
+  onDiscard?:()=>void;
+  onSaveDraft?:()=>void;
   question: ReviewQuestion;
   explanation: string;
   onExplanationChange: (value: string) => void;
@@ -27,6 +32,11 @@ type Props = {
 };
 
 export function ReviewPanel({
+  minExplanationChars=120,
+  readOnly=false,
+  hasUnsavedChanges=false,
+  onDiscard,
+  onSaveDraft,
   question,
   explanation,
   onExplanationChange,
@@ -44,10 +54,10 @@ export function ReviewPanel({
   reasonsRef,
   reasonsInvalid = false,
 }: Props) {
-  const remaining = 120 - explanation.length;
+  const remaining = Math.max(0,minExplanationChars-explanation.trim().length);
   const conflicts = question.duplicates.filter((item) => item.answer_conflict);
-  const isPending = question.status === "pending";
-  const canApprove = isPending && explanation.trim().length > 0 && remaining >= 0;
+  const isPending = question.status === "pending"&&!readOnly;
+  const canApprove = isPending && explanation.trim().length >= minExplanationChars;
 
   return (
     <div className="space-y-5">
@@ -159,13 +169,12 @@ export function ReviewPanel({
               aria-invalid={explanationInvalid}
               className={explanationInvalid ? "border-rose-500 focus-visible:ring-rose-500" : undefined}
               value={explanation}
-              maxLength={120}
-              rows={3}
-              placeholder="Explica o gabarito em uma ou duas frases."
+              rows={6}
+              placeholder="Explique o raciocínio e por que o gabarito está correto."
               onChange={(event) => onExplanationChange(event.target.value)}
             />
             <p className={`text-xs ${remaining < 0 ? "text-rose-600" : "text-slate-500 dark:text-slate-400"}`}>
-              {explanation.length}/120
+              {explanation.trim().length} caracteres · mínimo {minExplanationChars}{remaining>0?` · faltam ${remaining}`:""}
             </p>
           </div>
 
@@ -195,8 +204,11 @@ export function ReviewPanel({
             <Button disabled={busy || !canApprove} onClick={onApprove}>
               Aprovar <kbd className="ml-1 text-[10px] opacity-70">A</kbd>
             </Button>
-            <Button variant="ghost" disabled={busy || !hasPrevious} onClick={onSkip}>
-              Pular <kbd className="ml-1 text-[10px] opacity-70">S</kbd>
+            <Button variant="outline" disabled={busy||!hasPrevious} onClick={onGoPrevious}>Anterior K</Button>
+            <Button variant="ghost" disabled={busy||!hasUnsavedChanges} onClick={onDiscard}>Descartar alterações</Button>
+            <Button variant="outline" disabled={busy||!onSaveDraft} onClick={onSaveDraft}>Salvar rascunho S</Button>
+            <Button variant="ghost" disabled={busy || !hasNext} onClick={onSkip}>
+              Pular <kbd className="ml-1 text-[10px] opacity-70">P</kbd>
             </Button>
             <Button variant="ghost" disabled={busy || !hasNext} onClick={onGoNext}>
               Próxima <kbd className="ml-1 text-[10px] opacity-70">J</kbd>
@@ -206,9 +218,9 @@ export function ReviewPanel({
       ) : (
         <div className="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {question.status === "approved"
+            {readOnly ? "Consulta. As decisões exigem perfil de revisor ou administrador." : question.status === "approved"
               ? `Aprovada${question.reviewed_by ? ` por ${question.reviewed_by}` : ""}.`
-              : `Rejeitada (${question.rejection_reason_code || question.rejection_reason || "sem motivo"}).`}
+              : question.status === "rejected" ? `Rejeitada (${question.rejection_reason_code || question.rejection_reason || "sem motivo"}).` : "Rascunho. Continue a edição na gestão de questões antes de enviar para revisão."}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" disabled={busy || !hasPrevious} onClick={onGoPrevious}>

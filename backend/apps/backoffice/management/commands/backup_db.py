@@ -1,3 +1,4 @@
+from apps.backoffice.audit import audited_command
 from django.core.management.base import BaseCommand
 
 from apps.backoffice.services import create_backup, list_backups
@@ -6,6 +7,7 @@ from apps.backoffice.services import create_backup, list_backups
 class Command(BaseCommand):
     help = "Cria um backup compactado (banco + mídia) em backups/."
 
+    @audited_command("backup_db")
     def handle(self, *args, **options):
         name = create_backup()
         backups = list_backups()

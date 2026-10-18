@@ -7,6 +7,7 @@ para quebrar o invariante — a regra é `status=APPROVED`, e todo leitor passa 
 """
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -371,6 +372,7 @@ class NotebookVisibilityTests(TestCase):
 class BackofficePatchVisibilityTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_user("admin", password="x", is_staff=True)
+        self.admin.groups.add(Group.objects.get(name="Revisor"))
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
         self.pending = _pending()

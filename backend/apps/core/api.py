@@ -1,3 +1,7 @@
+import logging
+from smtplib import SMTPException
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.conf import settings
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.tokens import default_token_generator
@@ -60,17 +64,24 @@ def upload_avatar(request):
 @permission_classes([permissions.AllowAny])
 def password_reset_request(request):
     email = str(request.data.get("email", "")).strip()
+    try:
+        validate_email(email)
+    except DjangoValidationError:
+        return Response({"detail": "Se o e-mail existir, enviaremos as instruções."})
     user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
     if user:
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
         url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
-        send_mail(
-            "Redefinição de senha — Conectado em Questões",
-            f"Use este link para criar uma nova senha: {url}",
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-        )
+        try:
+            send_mail(
+                "Redefinição de senha — Conectado em Questões",
+                f"Use este link para criar uma nova senha: {url}",
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+            )
+        except (SMTPException, OSError) as exc:
+            logging.getLogger(__name__).error("Falha de entrega de recuperação de senha (%s).", type(exc).__name__)
     return Response({"detail": "Se o e-mail existir, enviaremos as instruções."})
 
 

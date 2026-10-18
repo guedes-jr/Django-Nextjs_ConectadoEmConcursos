@@ -2,35 +2,87 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_DOTENV_DISABLED: '1'
+  DJANGO_SETTINGS_MODULE: config.settings.ci
+  NEXT_TELEMETRY_DISABLED: '1'
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with: python-version: 3.10
-      - name: Install backend deps
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
         run: |
-          python -m venv venv
-          . venv/bin/activate
-          pip install -r backend/requirements.txt
-      - name: Run backend tests
+          python -m venv backend/.venv
+          backend/.venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Deployment script syntax and side-effect-free plan
         run: |
-          . venv/bin/activate
-          cd backend
-          python manage.py test --noinput
+          bash -n scripts/update.sh
+          make deploy-plan
+      - name: Django checks and migration drift
+        run: make check
+      - name: Backend tests
+        run: make test
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      E2E_RUN: '1'
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8100
+      NEXT_PUBLIC_BACKEND_URL: http://127.0.0.1:8100
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with: node-version: 18
-      - name: Install and test frontend
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
         run: |
-          cd frontend
-          npm ci
-          npm run build --if-present
-          npm run test --if-present
+          npm ci --prefix frontend
+          python -m venv backend/.venv
+          backend/.venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Lint and TypeScript
+        run: |
+          make lint
+          make typecheck
+      - name: Validate production URL guard with synthetic environments
+        run: make test-app APP=apps.core.test_production_frontend_env
+      - name: Production build
+        run: make build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser E2E against disposable backend
+        env:
+          E2E_PRODUCTION: '1'
+        run: make test-e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failures
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

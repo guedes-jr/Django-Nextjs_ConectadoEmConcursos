@@ -1,4 +1,10 @@
 from django.urls import path
-from apps.billing.views import plans, subscription
+from .views import cancel, expire, plans, stripe_webhook, subscription
 
-urlpatterns = [path("plans/", plans), path("subscription/", subscription)]
+urlpatterns = [
+    path("plans/", plans),
+    path("subscription/", subscription),
+    path("subscription/cancel/", cancel),
+    path("subscription/checkout/expire/", expire),
+    path("billing/stripe/webhook/", stripe_webhook),
+]

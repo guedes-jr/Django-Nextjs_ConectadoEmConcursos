@@ -17,8 +17,8 @@ class AuditEventTests(APITestCase):
             event.save()
         self.assertEqual(AuditEvent.objects.count(), 1)
 
-    def test_staff_can_filter_audit_events(self):
-        user = get_user_model().objects.create_user(username="audit-staff", password="secret", is_staff=True)
+    def test_superuser_can_filter_audit_events(self):
+        user = get_user_model().objects.create_user(username="audit-staff", password="secret", is_staff=True, is_superuser=True)
         event = AuditEvent.objects.create(actor=user, action="notification.published", resource_type="admin_notification", resource_id="12")
         self.client.force_authenticate(user)
         response = self.client.get("/api/backoffice/audit/?resource_type=admin_notification")
@@ -34,7 +34,7 @@ class AuditEventTests(APITestCase):
         self.assertIn("financial", response.data)
 
     def test_audit_export_is_limited_and_audited(self):
-        user = get_user_model().objects.create_user(username="export-staff", password="secret", is_staff=True)
+        user = get_user_model().objects.create_user(username="export-staff", password="secret", is_staff=True, is_superuser=True)
         AuditEvent.objects.create(actor=user, action="notification.published", resource_type="admin_notification", resource_id="13")
         self.client.force_authenticate(user)
         response = self.client.get("/api/backoffice/audit/?export=csv")

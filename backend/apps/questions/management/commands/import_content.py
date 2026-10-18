@@ -10,6 +10,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from django.core.exceptions import ValidationError
+from apps.backoffice.audit import audited_command
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.questions.ingest import run_file
@@ -25,6 +26,7 @@ class Command(BaseCommand):
         parser.add_argument("file")
         parser.add_argument("--dry-run", action="store_true")
 
+    @audited_command("import_content")
     def handle(self, *args, **options):
         path = Path(options["file"])
         if not path.is_file() or path.suffix.lower() not in {".json", ".csv", ".xml"}:
@@ -37,7 +39,7 @@ class Command(BaseCommand):
             raise CommandError("; ".join(_messages(exc))) from exc
 
         counts = run.counts or {}
-        suffix = " (simulação; nada foi salvo)" if options["dry_run"] else ""
+        suffix = " (simulação; nenhuma questão foi gravada)" if options["dry_run"] else ""
         self.stdout.write(
             self.style.SUCCESS(
                 f"{counts.get('created', 0)} questão(ões) criada(s), "

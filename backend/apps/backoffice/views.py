@@ -1,38 +1,31 @@
 import csv
+from collections.abc import Mapping
+import logging
 import datetime as dt
 import re
-import os
-import platform
-import shutil
-import time
 import uuid
 from io import StringIO
-from pathlib import Path
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.sessions.models import Session
-from django.db import connection, transaction
+from django.db import transaction, DatabaseError
 from django.http import HttpResponse
-from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Avg, Count, F, Max, Q, Sum
-from django.db.models.functions import TruncDate
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from apps.notifications.models import AdminNotification, Notification, NotificationCategory, NotificationPreference, NotificationRecipient
-from apps.billing.models import PaymentEvent, Plan, Subscription
+from apps.billing.models import BillingCheckout, PaymentEvent, Plan, Subscription
+from .financial_reports import financial_report
 from apps.chat.models import ChatUsage, Conversation, Message
 from apps.concursos.models import Concurso, EditorialCategory, NewsArticle
 from apps.questions import moderation
@@ -48,21 +41,24 @@ from apps.workspace.models import (
 )
 
 from . import services
-from .audit import log as audit_log
+from . import diagnostics as diagnostic_tools
+from .throttles import DiagnosticsThrottle, DiagnosticRoutineThrottle
+from .audit import log as audit_log, redact, snapshot_diff
+from .permissions import (
+    ROLE_GROUPS, Administrator, EditorialAccess, ReviewAccess,
+    SuperuserAccess, diagnostics_allowed, has_role,
+)
 from .models import AuditEvent, UserManagementMeta
-from .serializers import PlanSerializer, SubscriptionAdminSerializer
+from .serializers import PlanSerializer, SubscriptionAdminSerializer, UserCreateSerializer, StaffCreateSerializer, EditorialConcursoSerializer, EditorialExamSerializer, EditorialArticleSerializer
 
 User = get_user_model()
-
-ROLE_GROUPS = {"admin": "Administrador", "editor": "Editor", "reviewer": "Revisor"}
-
 
 def _staff_roles(user):
     if user.is_superuser:
         return ["admin"]
     names = set(user.groups.filter(name__in=ROLE_GROUPS.values()).values_list("name", flat=True))
     roles = [role for role, group_name in ROLE_GROUPS.items() if group_name in names]
-    return roles or (["admin"] if user.is_staff else [])
+    return roles
 
 
 def _set_staff_role(user, role):
@@ -94,31 +90,35 @@ def _parse_report_datetime(value):
 
 def _report_period(request):
     try:
-        days = min(365, max(1, int(request.query_params.get("days", 30))))
-    except (TypeError, ValueError):
-        days = 30
-    now = timezone.now()
-    until = _parse_report_datetime(request.query_params.get("until")) or now
-    since = _parse_report_datetime(request.query_params.get("since")) or (until - dt.timedelta(days=days))
-    if since >= until:
+        days = int(request.query_params.get("days", 30))
+        if not 1 <= days <= 365:
+            return None, None, None
+        now = timezone.now()
+        until_raw = request.query_params.get("until")
+        since_raw = request.query_params.get("since")
+        until = _parse_report_datetime(until_raw) if until_raw else now
+        since = _parse_report_datetime(since_raw) if since_raw else (until - dt.timedelta(days=days)) if until else None
+        if since is None or until is None or since >= until or until > now or until - since > dt.timedelta(days=365):
+            return None, None, None
+        # Also validate the adjacent comparison window against datetime underflow.
+        since - (until - since)
+        return since, until, max(1, (until - since).days)
+    except (TypeError, ValueError, OverflowError):
         return None, None, None
-    if (until - since).days > 365:
-        since = until - dt.timedelta(days=365)
-    return since, until, max(1, (until - since).days)
 
 
 def _audit_payload(item):
     return {
         "id": item.id, "action": item.action, "resource_type": item.resource_type, "resource_id": item.resource_id,
         "actor": {"id": item.actor_id, "username": item.actor.username} if item.actor else None,
-        "before": item.before, "after": item.after, "context": item.context, "reason": item.reason,
+        "before": redact(item.before), "after": redact(item.after), "changes": snapshot_diff(item.before, item.after), "context": redact(item.context), "reason": redact(item.reason),
         "ip_address": item.ip_address, "request_id": str(item.request_id) if item.request_id else None,
         "created_at": item.created_at,
     }
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([SuperuserAccess])
 def audit_events(request):
     queryset = AuditEvent.objects.select_related("actor").all()
     for field in ("action", "resource_type", "resource_id"):
@@ -144,7 +144,7 @@ def audit_events(request):
         writer = csv.writer(output)
         writer.writerow(["id", "data_hora", "acao", "recurso", "identificador", "ator", "motivo", "correlation_id"])
         for item in rows:
-            writer.writerow([item.id, timezone.localtime(item.created_at).isoformat(), item.action, item.resource_type, item.resource_id, item.actor.username if item.actor else "sistema", item.reason, item.request_id or ""])
+            writer.writerow([item.id, timezone.localtime(item.created_at).isoformat(), item.action, item.resource_type, item.resource_id, item.actor.username if item.actor else "sistema", redact(item.reason), item.request_id or ""])
         audit_log(request, action="audit.exported", resource_type="audit_event", context={"filters": {"action": request.query_params.get("action", ""), "resource_type": request.query_params.get("resource_type", ""), "since": request.query_params.get("since", ""), "until": request.query_params.get("until", "")}, "rows": len(rows)})
         response = HttpResponse(output.getvalue(), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = "attachment; filename=auditoria.csv"
@@ -159,7 +159,7 @@ def audit_events(request):
     except ValueError:
         limit = 30
     total = queryset.count()
-    rows = queryset[(page - 1) * limit: page * limit]
+    rows = list(queryset[(page - 1) * limit: page * limit])
     audit_log(request, action="audit.viewed", resource_type="audit_event", context={"filters": {"action": request.query_params.get("action", ""), "resource_type": request.query_params.get("resource_type", ""), "since": request.query_params.get("since", ""), "until": request.query_params.get("until", "")}, "page": page})
     return Response({"total": total, "page": page, "limit": limit, "results": [_audit_payload(item) for item in rows]})
 
@@ -168,7 +168,7 @@ def _staff(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_dashboard(request):
     since = timezone.now() - dt.timedelta(hours=24)
     return Response({
@@ -186,23 +186,15 @@ def editorial_dashboard(request):
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
+@throttle_classes([DiagnosticsThrottle])
 def diagnostics_overview(request):
-    if not request.user.is_superuser or not settings.DIAGNOSTICS_ENABLED:
-        return Response({"detail": "Diagnóstico indisponível."}, status=status.HTTP_404_NOT_FOUND)
-    disk = shutil.disk_usage(settings.BASE_DIR)
-    memory = psutil.virtual_memory() if psutil else None
-    cpu_percent = psutil.cpu_percent(interval=None) if psutil else None
-    started = time.monotonic()
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT 1")
-    latency_ms = round((time.monotonic() - started) * 1000, 2)
-    executor = MigrationExecutor(connection)
-    pending = len(executor.migration_plan(executor.loader.graph.leaf_nodes()))
-    return Response({"application": {"python": platform.python_version(), "environment": os.getenv("DJANGO_ENV", "unknown"), "time": timezone.now()}, "storage": {"total": disk.total, "used": disk.used, "free": disk.free}, "capacity": {"cpu_percent": cpu_percent, "memory_total": memory.total if memory else None, "memory_used": memory.used if memory else None}, "database": {"vendor": connection.vendor, "connected": True, "latency_ms": latency_ms, "pending_migrations": pending}, "services": {"django": "ok", "worker": "not_checked", "frontend": "not_checked", "proxy": "not_checked"}})
+    if not diagnostics_allowed(request.user):
+        return _diagnostics_not_found()
+    return _diagnostic_response(diagnostic_tools.overview_snapshot())
 
 
 def _finance_access(user):
-    return bool(user.is_superuser or user.has_perm("backoffice.view_financial_reports"))
+    return bool(has_role(user, "admin") and (user.is_superuser or user.has_perm("backoffice.view_financial_reports")))
 
 
 def _active_user_count(since, until):
@@ -241,133 +233,97 @@ def _top_values(queryset, *fields, label):
     ]
 
 
-def _diagnostics_allowed(request):
-    return bool(request.user.is_superuser and settings.DIAGNOSTICS_ENABLED)
+def _diagnostic_response(data, **kwargs):
+    response = Response(data, **kwargs)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def _diagnostics_not_found():
-    return Response({"detail": "Diagnóstico indisponível."}, status=status.HTTP_404_NOT_FOUND)
-
-
-def _database_details():
-    started = time.monotonic()
-    version = "indisponível"
-    connections = None
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            if connection.vendor == "sqlite":
-                cursor.execute("SELECT sqlite_version()")
-            elif connection.vendor == "postgresql":
-                cursor.execute("SHOW server_version")
-            else:
-                cursor.execute("SELECT VERSION()")
-            version = str(cursor.fetchone()[0])
-            if connection.vendor == "postgresql":
-                cursor.execute("SELECT count(*) FROM pg_stat_activity")
-                connections = int(cursor.fetchone()[0])
-        connected = True
-    except Exception:
-        connected = False
-    return {"vendor": connection.vendor, "version": version, "connected": connected, "latency_ms": round((time.monotonic() - started) * 1000, 2), "active_connections": connections}
-
-
-def _allowed_log_files():
-    files = []
-    for configured_path in settings.DIAGNOSTICS_LOG_FILES:
-        path = Path(configured_path).expanduser().resolve()
-        files.append({"id": path.name, "path": path, "available": path.is_file()})
-    return files
-
-
-def _redact_log_line(line):
-    return re.sub(r"(?i)(authorization|token|secret|password|api[_-]?key|cookie)([=:]\s*)([^\s,;]+)", r"\1\2[redigido]", line)
+    return _diagnostic_response({"detail": "Diagnóstico indisponível."}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
+@throttle_classes([DiagnosticsThrottle])
 def diagnostics_services(request):
-    if not _diagnostics_allowed(request):
+    if not diagnostics_allowed(request.user):
         return _diagnostics_not_found()
-    load_average = os.getloadavg() if hasattr(os, "getloadavg") else None
-    return Response({
-        "django": {"status": "ok", "detail": "Processo Django respondeu à requisição."},
-        "worker": {"status": "not_checked", "detail": "Configure observabilidade externa para validar worker e agendador."},
-        "frontend": {"status": "not_checked", "detail": "O backend não consulta o frontend para evitar chamadas internas não controladas."},
-        "proxy": {"status": "not_checked", "detail": "Status deve ser exposto pelo proxy/monitoramento."},
-        "host": {"load_average": load_average, "pid": os.getpid()},
-    })
+    return _diagnostic_response(diagnostic_tools.service_snapshot())
 
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
+@throttle_classes([DiagnosticsThrottle])
 def diagnostics_database(request):
-    if not _diagnostics_allowed(request):
+    if not diagnostics_allowed(request.user):
         return _diagnostics_not_found()
-    details = _database_details()
-    executor = MigrationExecutor(connection)
-    details["pending_migrations"] = len(executor.migration_plan(executor.loader.graph.leaf_nodes()))
-    details["size"] = None
-    details["slow_queries"] = {"available": False, "detail": "Configure o monitoramento do banco para consultas lentas."}
-    return Response(details)
+    return _diagnostic_response(diagnostic_tools.database_snapshot())
 
 
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
+@throttle_classes([DiagnosticsThrottle])
 def diagnostics_logs(request):
-    if not _diagnostics_allowed(request):
+    if not diagnostics_allowed(request.user):
         return _diagnostics_not_found()
-    files = _allowed_log_files()
-    service = request.query_params.get("service", "")
-    if not service:
-        return Response({"results": [{"id": item["id"], "available": item["available"]} for item in files], "detail": "Configure DIAGNOSTICS_LOG_FILES para liberar arquivos específicos." if not files else ""})
-    item = next((candidate for candidate in files if candidate["id"] == service), None)
+    serializer = diagnostic_tools.LogQuery(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    query = serializer.validated_data
+    files = diagnostic_tools.allowed_logs()
+    if not query["service"]:
+        audit_log(request, action="diagnostics.logs.listed", resource_type="diagnostic_log")
+        return _diagnostic_response({"results": [{key: item[key] for key in ("id", "name", "available")} for item in files],
+                         "detail": "Leitura das últimas linhas dentro de uma janela limitada, da mais recente para a mais antiga." if files else "Configure arquivos de log na infraestrutura."})
+    item = next((item for item in files if item["id"] == query["service"]), None)
     if item is None or not item["available"]:
-        return Response({"detail": "Log não disponível."}, status=status.HTTP_404_NOT_FOUND)
-    try:
-        limit = min(200, max(1, int(request.query_params.get("lines", 100))))
-    except ValueError:
-        limit = 100
-    search = request.query_params.get("q", "").strip().lower()
-    with item["path"].open("r", encoding="utf-8", errors="replace") as log_file:
-        lines = log_file.readlines()[-2000:]
-    if search:
-        lines = [line for line in lines if search in line.lower()]
-    result = [_redact_log_line(line.rstrip())[:2000] for line in lines[-limit:]]
-    audit_log(request, action="diagnostics.logs.viewed", resource_type="diagnostic_log", resource_id=item["id"], context={"lines": len(result), "search": bool(search)})
-    return Response({"service": item["id"], "lines": result, "truncated": len(lines) > limit})
-
-
-def _diagnostic_script_summary_counts():
-    return {"users": User.objects.count(), "active_subscriptions": Subscription.objects.filter(status=Subscription.Status.ACTIVE).count(), "questions_pending": Question.objects.filter(status=Question.Status.PENDING).count(), "audit_events": AuditEvent.objects.count()}
-
-
-def _diagnostic_script_recent_failures():
-    return [{"id": item.id, "action": item.action, "resource_type": item.resource_type, "created_at": item.created_at} for item in AuditEvent.objects.filter(action__icontains="failed").order_by("-created_at")[:50]]
-
-
-DIAGNOSTIC_SCRIPTS = {
-    "summary-counts": {"title": "Contagens resumidas", "description": "Consulta somente leitura de contagens operacionais.", "run": _diagnostic_script_summary_counts},
-    "recent-failures": {"title": "Falhas recentes", "description": "Lista até 50 eventos de auditoria com ação contendo failed.", "run": _diagnostic_script_recent_failures},
-}
+        return _diagnostic_response({"detail": "Log indisponível."}, status=status.HTTP_404_NOT_FOUND)
+    result = diagnostic_tools.read_log(item, query)
+    exported = query["export"] == "txt"
+    audit_log(request, action="diagnostics.logs.exported" if exported else "diagnostics.logs.viewed", resource_type="diagnostic_log", resource_id=item["id"],
+              context={"page": result["page"], "lines": len(result["lines"]), "bytes_read": result["bytes_read"], "window_limited": result["window_limited"], "export_limited": result["export_limited"],
+                       "severity": query["severity"], "has_search": bool(query["q"]), "has_correlation": bool(query["request_id"]),
+                       "since": query.get("since"), "until": query.get("until")})
+    if exported:
+        response = HttpResponse("\n".join(result["lines"]), content_type="text/plain; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="diagnostic-log.txt"'
+        response["Cache-Control"] = "no-store"
+        response["X-Log-Limited"] = str(result["window_limited"] or result["export_limited"]).lower()
+        return response
+    response = Response(result)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAdminUser])
+@throttle_classes([DiagnosticsThrottle, DiagnosticRoutineThrottle])
 def diagnostics_scripts(request):
-    if not _diagnostics_allowed(request):
+    if not diagnostics_allowed(request.user):
         return _diagnostics_not_found()
     if request.method == "GET":
-        return Response({"results": [{"id": script_id, "title": item["title"], "description": item["description"], "mode": "read_only"} for script_id, item in DIAGNOSTIC_SCRIPTS.items()]})
-    script_id = str(request.data.get("script", ""))
-    script = DIAGNOSTIC_SCRIPTS.get(script_id)
-    if script is None:
-        return Response({"detail": "Script não permitido."}, status=status.HTTP_400_BAD_REQUEST)
-    started = time.monotonic()
-    result = script["run"]()
-    elapsed_ms = round((time.monotonic() - started) * 1000, 2)
-    audit_log(request, action="diagnostics.script.executed", resource_type="diagnostic_script", resource_id=script_id, context={"mode": "read_only", "elapsed_ms": elapsed_ms})
-    return Response({"script": script_id, "mode": "read_only", "elapsed_ms": elapsed_ms, "result": result})
+        return _diagnostic_response({"results": [{"id": key, "title": value["title"], "description": value["description"],
+                                     "mode": "read_only", "script_hash": diagnostic_tools.routine_hash(value)} for key, value in diagnostic_tools.ROUTINES.items()],
+                         "detail": "Rotinas fixas de leitura, com orçamento de consultas e saída limitada."})
+    script_id = request.data.get("script") if isinstance(request.data, Mapping) else None
+    if not isinstance(script_id, str) or script_id not in diagnostic_tools.ROUTINES or set(request.data) != {"script"}:
+        return _diagnostic_response({"detail": "Informe somente o identificador de uma rotina permitida."}, status=status.HTTP_400_BAD_REQUEST)
+    routine = diagnostic_tools.ROUTINES[script_id]
+    script_hash = diagnostic_tools.routine_hash(routine)
+    try:
+        result = diagnostic_tools.run_routine(script_id)
+    except Exception as exc:
+        try:
+            audit_log(request, action="diagnostics.script.failed", resource_type="diagnostic_script", resource_id=script_id,
+                      context={"script_hash": script_hash, "error_type": type(exc).__name__, "mode": "read_only"})
+        except DatabaseError:
+            logging.getLogger(__name__).error("Não foi possível auditar a falha de diagnóstico (%s).", type(exc).__name__)
+        return _diagnostic_response({"detail": "A rotina não concluiu dentro dos limites ou o banco está indisponível."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    audit_log(request, action="diagnostics.script.executed", resource_type="diagnostic_script", resource_id=script_id,
+              after=result["result"], context={"script_hash": result["script_hash"], "mode": "read_only", "elapsed_ms": result["elapsed_ms"], "truncated": result["truncated"]})
+    response = Response(result)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @api_view(["GET"])
@@ -376,6 +332,7 @@ def business_reports(request):
     since, until, days = _report_period(request)
     if since is None:
         return Response({"detail": "O período informado é inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    snapshot_at = timezone.now()
     previous_since = since - (until - since)
     financial_access = _finance_access(request.user)
 
@@ -386,24 +343,29 @@ def business_reports(request):
     active_wau = _active_user_count(until - dt.timedelta(days=7), until)
     active_mau = _active_user_count(until - dt.timedelta(days=30), until)
     signups_with_study = User.objects.filter(date_joined__gte=since, date_joined__lt=until, study_plans__blocks__sessions__completed_at__gte=since, study_plans__blocks__sessions__completed_at__lt=until).distinct().count()
-    signed_up_with_active_subscription = User.objects.filter(date_joined__gte=since, date_joined__lt=until, subscription__status=Subscription.Status.ACTIVE).count()
+    access_now = Subscription.objects.filter(status=Subscription.Status.ACTIVE).filter(
+        Q(current_period_end__gt=snapshot_at) | Q(gateway="local", current_period_end__isnull=True)
+    )
+    signed_up_with_active_subscription = User.objects.filter(date_joined__gte=since, date_joined__lt=until, id__in=access_now.values("user_id")).count()
 
     answers = UserAnswer.objects.filter(created_at__gte=since, created_at__lt=until)
     pending_questions = Question.objects.filter(status=Question.Status.PENDING)
     queue_dates = list(pending_questions.order_by("created_at").values_list("created_at", flat=True)[:10000])
-    queue_average_age_hours = round(sum((until - created).total_seconds() / 3600 for created in queue_dates) / len(queue_dates), 1) if queue_dates else 0
-    payments = PaymentEvent.objects.filter(created_at__gte=since, created_at__lt=until)
+    queue_average_age_hours = round(sum((snapshot_at - created).total_seconds() / 3600 for created in queue_dates) / len(queue_dates), 1) if queue_dates else 0
+    payments = PaymentEvent.objects.filter(processed=True).annotate(event_time=Coalesce("paid_at", "provider_created_at", "created_at")).filter(event_time__gte=since, event_time__lt=until)
     retention = {str(window): _cohort_retention(until, window) for window in (7, 30, 90)}
-    recent_activity_ids = _activity_user_ids(until - dt.timedelta(days=30), until)
-    expiring = Subscription.objects.filter(status=Subscription.Status.ACTIVE, current_period_end__gt=until, current_period_end__lte=until + dt.timedelta(days=7)).count()
-    dormant_paid = Subscription.objects.filter(status=Subscription.Status.ACTIVE).exclude(user_id__in=recent_activity_ids).count()
+    paid_access = access_now.filter(gateway="stripe", currency="brl", price_amount_minor__gt=0, provider_status__in=["active", "past_due"]).exclude(provider_subscription_id="")
+    expiring = paid_access.filter(current_period_end__lte=snapshot_at + dt.timedelta(days=7)).count()
+    dormant_paid = paid_access.exclude(user_id__in=_activity_user_ids(snapshot_at - dt.timedelta(days=30), snapshot_at)).count()
 
     payload = {
-        "period": {"since": since, "until": until, "days": days, "generated_at": timezone.now()},
+        "period": {"since": since, "until": until, "days": days, "timezone": timezone.get_current_timezone_name(), "generated_at": snapshot_at},
         "definitions": {
             "active_user": "Usuário com ao menos uma resposta, sessão de estudo ou uso do chat no período.",
             "activation": "Cadastro que concluiu ao menos uma sessão de estudo no mesmo período.",
-            "financial": "Receita recebida em moeda não é exibida enquanto o provedor não persistir valores normalizados por evento.",
+            "financial": "Receita confirmada dos recibos BRL pela data efetiva do pagamento. MRR/ARR são fotografias atuais de recorrência, independentes do período histórico selecionado.",
+            "snapshot": "Fila, assinaturas e risco são fotografias atuais. Conversão cadastro → assinatura ativa verifica acesso vigente agora, incluindo concessões gratuitas; não é conversão histórica paga.",
+            "payment_events": "Contagens operacionais usam eventos processados, pela data de pagamento, data no provedor ou data de registro como fallback. Incluem legados e outras moedas; os valores financeiros incluem apenas recibos BRL completos.",
         },
         "financial": {"access_granted": financial_access},
         "growth": {
@@ -450,40 +412,41 @@ def business_reports(request):
         },
     }
     if financial_access:
-        active = Subscription.objects.filter(status=Subscription.Status.ACTIVE).select_related("plan")
-        mrr = active.aggregate(total=Sum("plan__monthly_price"))["total"] or 0
-        payload["financial"].update({
-            "mrr": mrr,
-            "arr": mrr * 12,
-            "active_subscriptions": active.count(),
-            "new_paid_subscriptions": Subscription.objects.filter(status=Subscription.Status.ACTIVE, created_at__gte=since, created_at__lt=until).count(),
-            "pending_subscriptions": Subscription.objects.filter(status=Subscription.Status.PENDING).count(),
-            "canceled_subscriptions": Subscription.objects.filter(status=Subscription.Status.CANCELED, updated_at__gte=since, updated_at__lt=until).count(),
-            "plan_distribution": [{"plan": row["plan__name"], "cycle": row["cycle"], "count": row["count"]} for row in active.values("plan__name", "cycle").annotate(count=Count("id")).order_by("plan__name", "cycle")],
-            "received_revenue": None,
-            "received_revenue_status": "indisponível: PaymentEvent não possui valor monetário normalizado.",
-            "average_ticket_mrr": round(mrr / active.count(), 2) if active.count() else 0,
-            "churn_events": payments.filter(type=PaymentEvent.Type.CANCELED).count(),
-            "reactivations": payments.filter(type=PaymentEvent.Type.RENEWED).count(),
-        })
+        payload["financial"] = financial_report(since, until, now=snapshot_at)
 
     audit_log(request, action="report.viewed", resource_type="business_report", context={"since": since, "until": until, "financial_access": financial_access})
     if request.query_params.get("export") == "csv":
         output = StringIO()
         writer = csv.writer(output)
         writer.writerow(["indicador", "valor"])
+        def write_row(*values):
+            writer.writerow([("'" + str(value)) if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
+        for key, value in payload["period"].items():
+            write_row(f"period.{key}", value)
+        for key, value in payload["definitions"].items():
+            write_row(f"definitions.{key}", value)
         for section in ("financial", "growth", "product", "operation"):
             for key, value in payload[section].items():
                 if not isinstance(value, (dict, list)):
-                    writer.writerow([f"{section}.{key}", value])
+                    write_row(f"{section}.{key}", value)
+        if financial_access:
+            for key, value in payload["financial"]["definitions"].items():
+                write_row(f"financial.definitions.{key}", value)
+            for group in ("revenue_by_plan_cycle", "daily_revenue", "plan_distribution"):
+                for index, row in enumerate(payload["financial"][group]):
+                    for key, value in row.items():
+                        write_row(f"financial.{group}.{index}.{key}", value)
         audit_log(request, action="report.exported", resource_type="business_report", context={"since": since, "until": until, "financial_access": financial_access})
         response = HttpResponse(output.getvalue(), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = "attachment; filename=relatorio-negocio.csv"
+        response["Cache-Control"] = "no-store"
         return response
-    return Response(payload)
+    response = Response(payload)
+    response["Cache-Control"] = "no-store"
+    return response
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def overview(request):
     sub_with_comment = Question.objects.exclude(explanation="").order_by().values("id")
     news_unpublished = NewsArticle.objects.filter(is_published=False).count()
@@ -603,31 +566,77 @@ def _user_payload(user, request=None, include_detail=False):
     return payload
 
 
+def _users_with_recent_activity(cutoff):
+    return User.objects.filter(
+        Q(pk__in=UserAnswer.objects.filter(created_at__gte=cutoff).values("user_id")) |
+        Q(pk__in=StudySession.objects.filter(completed_at__gte=cutoff).values("block__plan__user_id")) |
+        Q(pk__in=SimulationRun.objects.filter(created_at__gte=cutoff).values("user_id")) |
+        Q(pk__in=Notification.objects.filter(created_at__gte=cutoff).values("user_id"))
+    ).values("pk")
+
+
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
+def users_overview(request):
+    cutoff = timezone.now() - dt.timedelta(days=30)
+    summary = User.objects.aggregate(total=Count("id"), active=Count("id", filter=Q(is_active=True)),
+                                    blocked=Count("id", filter=Q(is_active=False)),
+                                    new_30_days=Count("id", filter=Q(date_joined__gte=cutoff)))
+    summary["valid_subscriptions"] = Subscription.objects.filter(status=Subscription.Status.ACTIVE).filter(
+        Q(current_period_end__isnull=True) | Q(current_period_end__gt=timezone.now())
+    ).count()
+    return Response(summary)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([Administrator])
 def list_users(request):
+    if request.method == "POST":
+        serializer = UserCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            user = serializer.save()
+            payload = _user_payload(user, request)
+            audit_log(request, action="user.created", resource_type="user", resource_id=user.id,
+                      after={key: payload[key] for key in ("username", "email", "is_staff", "is_active")})
+        return Response(payload, status=status.HTTP_201_CREATED)
     search = request.query_params.get("search", "").strip()
-    limit = min(100, max(1, int(request.query_params.get("limit", 50))))
-    offset = max(0, int(request.query_params.get("offset", 0)))
+    try:
+        limit = min(100, max(1, int(request.query_params.get("page_size", request.query_params.get("limit", 50)))))
+        offset = max(0, int(request.query_params.get("offset", 0)))
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        return Response({"detail": "Paginação inválida."}, status=status.HTTP_400_BAD_REQUEST)
     qs = User.objects.select_related("subscription__plan", "profile", "management_meta").all()
     if search:
         qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search) | Q(first_name__icontains=search) | Q(last_name__icontains=search))
     if request.query_params.get("status") == "active": qs = qs.filter(is_active=True)
     if request.query_params.get("status") == "blocked": qs = qs.filter(is_active=False)
     if plan := request.query_params.get("plan"): qs = qs.filter(subscription__plan__slug=plan)
-    if subscription := request.query_params.get("subscription"): qs = qs.filter(subscription__status=subscription)
+    subscription = request.query_params.get("subscription")
+    if subscription == "valid":
+        qs = qs.filter(subscription__status=Subscription.Status.ACTIVE).filter(Q(subscription__current_period_end__isnull=True) | Q(subscription__current_period_end__gt=timezone.now()))
+    elif subscription == "none": qs = qs.filter(subscription__isnull=True)
+    elif subscription: qs = qs.filter(subscription__status=subscription)
     if registered_from := parse_datetime(request.query_params.get("registered_from", "")): qs = qs.filter(date_joined__gte=registered_from)
     if registered_to := parse_datetime(request.query_params.get("registered_to", "")): qs = qs.filter(date_joined__lte=registered_to)
-    rows = [_user_payload(user, request) for user in qs.order_by("-date_joined")[offset:offset + limit]]
+    cutoff = timezone.now() - dt.timedelta(days=30)
+    if request.query_params.get("registered") == "recent": qs = qs.filter(date_joined__gte=cutoff)
     activity = request.query_params.get("activity")
-    if activity in {"active", "inactive"}:
-        cutoff = timezone.now() - dt.timedelta(days=30)
-        rows = [row for row in rows if bool(row["last_activity_at"] and parse_datetime(row["last_activity_at"]) >= cutoff) == (activity == "active")]
-    return Response({"results": rows, "total": qs.count(), "offset": offset, "limit": limit})
+    if activity == "active": qs = qs.filter(pk__in=_users_with_recent_activity(cutoff))
+    elif activity == "inactive": qs = qs.exclude(pk__in=_users_with_recent_activity(cutoff))
+    orderings = {"-date_joined": ("-date_joined", "-id"), "date_joined": ("date_joined", "id"), "name": ("username", "id"), "-last_login": ("-last_login", "-id")}
+    qs = qs.order_by(*orderings.get(request.query_params.get("ordering"), orderings["-date_joined"]))
+    total = qs.count()
+    if "page" in request.query_params:
+        page = min(page, max(1, (total + limit - 1) // limit))
+        offset = (page - 1) * limit
+    rows = [_user_payload(user, request) for user in qs[offset:offset + limit]]
+    return Response({"results": rows, "total": total, "offset": offset, "limit": limit, "page": page})
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def update_user(request, pk):
     user = User.objects.select_related("subscription__plan", "profile", "management_meta").filter(pk=pk).first()
     if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -662,7 +671,7 @@ def update_user(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def user_history(request, pk):
     user = User.objects.filter(pk=pk).first()
     if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -678,7 +687,7 @@ def user_history(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def user_action(request, pk):
     user = User.objects.filter(pk=pk).first()
     if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -707,7 +716,7 @@ def user_action(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def user_notification(request, pk):
     user = User.objects.filter(pk=pk, is_active=True).first()
     if not user: return Response({"detail": "Usuário ativo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -721,9 +730,10 @@ def user_notification(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
+@transaction.atomic
 def assign_subscription(request, pk):
-    user = User.objects.filter(pk=pk).first()
+    user = User.objects.select_for_update().filter(pk=pk).first()
     if not user: return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
     plan = Plan.objects.filter(slug=request.data.get("plan", "")).first()
     if not plan: return Response({"detail": "Plano inválido."}, status=status.HTTP_400_BAD_REQUEST)
@@ -732,6 +742,8 @@ def assign_subscription(request, pk):
     status_ = request.data.get("status", Subscription.Status.ACTIVE if plan.monthly_price == 0 else Subscription.Status.PENDING)
     if status_ not in Subscription.Status.values: return Response({"status": "Status inválido."}, status=status.HTTP_400_BAD_REQUEST)
     period_end = parse_datetime(request.data.get("current_period_end", "")) if request.data.get("current_period_end") else None
+    if Subscription.objects.filter(user=user, gateway="stripe").exists() or BillingCheckout.objects.filter(user=user, status__in=["creating", "open", "processing"]).exists():
+        return Response({"detail": "Assinatura gerenciada pelo provedor; use o fluxo de cobrança."}, status=409)
     sub, _ = Subscription.objects.update_or_create(user=user, defaults={"plan": plan, "cycle": cycle, "status": status_, "current_period_end": period_end})
     payload = {"id": sub.id, "status": sub.status, "plan": plan.name, "current_period_end": sub.current_period_end}
     audit_log(request, action="subscription.assigned", resource_type="subscription", resource_id=sub.id, after=payload)
@@ -739,46 +751,66 @@ def assign_subscription(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def subscriptions_overview(request):
     now = timezone.now()
-    active = Subscription.objects.filter(status=Subscription.Status.ACTIVE)
-    expiring = active.filter(current_period_end__gte=now, current_period_end__lte=now + dt.timedelta(days=30)).count()
-    def price_expression(cycle):
-        return "monthly_price" if cycle == Subscription.Cycle.MONTHLY else "semiannual_price" if cycle == Subscription.Cycle.SEMIANNUAL else "annual_price"
-    mrr = sum((getattr(item.plan, price_expression(item.cycle)) / (1 if item.cycle == Subscription.Cycle.MONTHLY else 6 if item.cycle == Subscription.Cycle.SEMIANNUAL else 12) for item in active.select_related("plan")), start=0)
-    return Response({"total": Subscription.objects.count(), "active": active.count(), "pending": Subscription.objects.filter(status=Subscription.Status.PENDING).count(), "canceled": Subscription.objects.filter(status=Subscription.Status.CANCELED).count(), "expiring_30_days": expiring, "mrr_estimated": str(mrr.quantize(__import__("decimal").Decimal("0.01")))})
+    active = Subscription.objects.filter(status=Subscription.Status.ACTIVE).filter(Q(current_period_end__isnull=True) | Q(current_period_end__gt=now))
+    expiring = active.filter(current_period_end__lte=now + dt.timedelta(days=30)).count()
+    mrr = Decimal(0)
+    finance_access = _finance_access(request.user)
+    if finance_access:
+        for sub in active.select_related("plan"):
+            if sub.currency.lower() != "brl": continue
+            amount = Decimal(sub.price_amount_minor) / 100 if sub.price_amount_minor is not None else {"mensal": sub.plan.monthly_price, "semestral": sub.plan.semiannual_price, "anual": sub.plan.annual_price}[sub.cycle]
+            mrr += amount / {"mensal": 1, "semestral": 6, "anual": 12}[sub.cycle]
+    return Response({"total": Subscription.objects.count(), "active": active.count(), "pending": Subscription.objects.filter(status=Subscription.Status.PENDING).count(), "canceled": Subscription.objects.filter(status=Subscription.Status.CANCELED).count(), "expiring_30_days": expiring, "mrr_estimated": f"{mrr:.2f}" if finance_access else None})
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def list_subscriptions(request):
+    qs = Subscription.objects.select_related("user", "plan")
     status_filter = request.query_params.get("status", "").strip()
-    search = request.query_params.get("search", "").strip()
-    qs = Subscription.objects.select_related("user", "plan").order_by("-created_at")
-    if status_filter:
-        qs = qs.filter(status=status_filter)
+    now = timezone.now()
+    if status_filter == "valid":
+        qs = qs.filter(status=Subscription.Status.ACTIVE).filter(Q(current_period_end__isnull=True) | Q(current_period_end__gt=now))
+    elif status_filter: qs = qs.filter(status=status_filter)
     if plan_filter := request.query_params.get("plan", "").strip(): qs = qs.filter(plan__slug=plan_filter)
     if cycle_filter := request.query_params.get("cycle", "").strip(): qs = qs.filter(cycle=cycle_filter)
-    if request.query_params.get("expires_within"):
-        try: qs = qs.filter(current_period_end__gte=timezone.now(), current_period_end__lte=timezone.now() + dt.timedelta(days=int(request.query_params["expires_within"])))
-        except ValueError: pass
-    if search:
-        qs = qs.filter(user__username__icontains=search) | qs.filter(
-            user__email__icontains=search
-        )
-    return Response({"results": SubscriptionAdminSerializer(qs[:200], many=True).data})
+    try:
+        if request.query_params.get("expires_within"):
+            days = int(request.query_params["expires_within"])
+            if days < 0 or days > 365: raise ValueError()
+            qs = qs.filter(status=Subscription.Status.ACTIVE, current_period_end__gt=now, current_period_end__lte=now + dt.timedelta(days=days))
+        size = max(1, min(100, int(request.query_params.get("page_size", 12))))
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        return Response({"detail": "Informe filtros de vencimento e paginação válidos."}, status=400)
+    if request.query_params.get("expired") == "true": qs = qs.filter(status=Subscription.Status.ACTIVE, current_period_end__lte=now)
+    if search := request.query_params.get("search", "").strip():
+        qs = qs.filter(Q(user__username__icontains=search) | Q(user__email__icontains=search) | Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search))
+    orderings = {"-created_at": ("-created_at", "-id"), "created_at": ("created_at", "id"), "name": ("user__username", "id"), "expires": (F("current_period_end").asc(nulls_last=True), "id")}
+    qs = qs.order_by(*orderings.get(request.query_params.get("ordering"), orderings["-created_at"]))
+    count = qs.count()
+    page = min(page, max(1, (count + size - 1) // size))
+    results = qs[(page - 1) * size:page * size] if "page" in request.query_params else qs[:200]
+    return Response({"results": SubscriptionAdminSerializer(results, many=True).data, "count": count, "page": page})
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
+@transaction.atomic
 def update_subscription(request, pk):
     try:
-        sub = Subscription.objects.select_for_update().get(pk=pk)
+        sub = Subscription.objects.get(pk=pk)
     except Subscription.DoesNotExist:
         return Response(
             {"detail": "Assinatura não encontrada."}, status=status.HTTP_404_NOT_FOUND
         )
+    User.objects.select_for_update().get(pk=sub.user_id)
+    sub.refresh_from_db()
+    if sub.gateway == "stripe" or BillingCheckout.objects.filter(user_id=sub.user_id, status__in=["creating", "open", "processing"]).exists():
+        return Response({"detail": "Assinatura gerenciada pelo provedor; use o fluxo de cobrança."}, status=409)
     data = request.data
     before = {"plan": sub.plan.slug, "cycle": sub.cycle, "status": sub.status}
     if "plan" in data:
@@ -804,27 +836,46 @@ def update_subscription(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def plans_overview(request):
+    valid_active = Q(subscription__status=Subscription.Status.ACTIVE) & (
+        Q(subscription__current_period_end__isnull=True) | Q(subscription__current_period_end__gt=timezone.now())
+    )
     plans_qs = Plan.objects.annotate(
         subscribers_total=Count("subscription"),
-        subscribers_active=Count("subscription", filter=Q(subscription__status=Subscription.Status.ACTIVE)),
+        subscribers_active=Count("subscription", filter=valid_active),
         subscribers_pending=Count("subscription", filter=Q(subscription__status=Subscription.Status.PENDING)),
         subscribers_canceled=Count("subscription", filter=Q(subscription__status=Subscription.Status.CANCELED)),
     ).order_by("sort_order", "name")
+    finance_access = _finance_access(request.user)
     cycle_divisor = {"mensal": 1, "semestral": 6, "anual": 12}
-    items, total_mrr = [], 0
+    mrr_by_plan = {}
+    if finance_access:
+        subscriptions = Subscription.objects.filter(status=Subscription.Status.ACTIVE).filter(
+            Q(current_period_end__isnull=True) | Q(current_period_end__gt=timezone.now())
+        ).select_related("plan")
+        for sub in subscriptions:
+            if sub.currency.lower() != "brl":
+                continue
+            amount = (Decimal(sub.price_amount_minor) / 100 if sub.price_amount_minor is not None else
+                      {"mensal": sub.plan.monthly_price, "semestral": sub.plan.semiannual_price, "anual": sub.plan.annual_price}[sub.cycle])
+            mrr_by_plan[sub.plan_id] = mrr_by_plan.get(sub.plan_id, Decimal(0)) + amount / cycle_divisor[sub.cycle]
+    items = []
     for item in plans_qs:
-        active = item.subscribers_active
-        unit_price = {"mensal": item.monthly_price, "semestral": item.semiannual_price, "anual": item.annual_price}
-        estimated_mrr = sum(float(unit_price.get(cycle, 0) or 0) / cycle_divisor[cycle] for cycle in Subscription.objects.filter(plan=item, status=Subscription.Status.ACTIVE).values_list("cycle", flat=True))
-        total_mrr += estimated_mrr
-        items.append({"id": item.id, "subscribers_total": item.subscribers_total, "subscribers_active": active, "subscribers_pending": item.subscribers_pending, "subscribers_canceled": item.subscribers_canceled, "mrr_estimated": f"{estimated_mrr:.2f}", "retention_rate": round((active / item.subscribers_total) * 100, 1) if item.subscribers_total else None})
-    return Response({"total": len(items), "published": sum(p.status == Plan.Status.PUBLISHED and p.is_active for p in plans_qs), "draft": sum(p.status == Plan.Status.DRAFT for p in plans_qs), "archived": sum(p.status == Plan.Status.ARCHIVED for p in plans_qs), "mrr_estimated": f"{total_mrr:.2f}", "plans": items})
+        items.append({"id": item.id, "subscribers_total": item.subscribers_total,
+                      "subscribers_active": item.subscribers_active, "subscribers_pending": item.subscribers_pending,
+                      "subscribers_canceled": item.subscribers_canceled,
+                      "mrr_estimated": f"{mrr_by_plan.get(item.id, Decimal(0)):.2f}" if finance_access else None,
+                      "retention_rate": round(item.subscribers_active / item.subscribers_total * 100, 1) if item.subscribers_total else None})
+    return Response({"total": len(items), "published": sum(p.status == Plan.Status.PUBLISHED for p in plans_qs),
+                     "draft": sum(p.status == Plan.Status.DRAFT for p in plans_qs),
+                     "archived": sum(p.status == Plan.Status.ARCHIVED for p in plans_qs),
+                     "mrr_estimated": f"{sum(mrr_by_plan.values(), Decimal(0)):.2f}" if finance_access else None,
+                     "plans": items})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def plans_bulk(request):
     ids = request.data.get("ids", [])
     action = request.data.get("action", "")
@@ -836,13 +887,17 @@ def plans_bulk(request):
     if queryset.count() != len(set(map(int, ids))):
         return Response({"detail": "Um ou mais planos não foram encontrados."}, status=status.HTTP_404_NOT_FOUND)
     values = {"status": {"publish": Plan.Status.PUBLISHED, "draft": Plan.Status.DRAFT, "archive": Plan.Status.ARCHIVED}.get(action)} if action in {"publish", "draft", "archive"} else {"is_active": action == "activate"}
+    if action in {"draft", "archive"}:
+        values["is_active"] = False
+    if action == "activate" and queryset.exclude(status=Plan.Status.PUBLISHED).exists():
+        return Response({"detail": "Publique os planos antes de liberar a venda."}, status=status.HTTP_400_BAD_REQUEST)
     changed = queryset.update(**values)
     audit_log(request, action="plan.bulk_updated", resource_type="plan", context={"ids": ids, "action": action, "changed": changed})
     return Response({"updated": changed})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def plan_duplicate(request, pk):
     plan = Plan.objects.filter(pk=pk).first()
     if not plan:
@@ -859,7 +914,7 @@ def plan_duplicate(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def plans(request):
     if request.method == "POST":
         ser = PlanSerializer(data=request.data)
@@ -869,8 +924,6 @@ def plans(request):
         return Response(ser.data, status=status.HTTP_201_CREATED)
     qs = Plan.objects.order_by("sort_order", "name")
     query = request.query_params.get("q", "").strip()
-    if query:
-        qs = qs.filter(Q(name__icontains=query) | Q(slug__icontains=query))
     plan_status = request.query_params.get("status", "").strip()
     if plan_status:
         qs = qs.filter(status=plan_status)
@@ -880,21 +933,40 @@ def plans(request):
     try:
         price_min = request.query_params.get("price_min")
         price_max = request.query_params.get("price_max")
-        if price_min: qs = qs.filter(monthly_price__gte=price_min)
-        if price_max: qs = qs.filter(monthly_price__lte=price_max)
-    except (TypeError, ValueError):
+        if price_min:
+            value = Decimal(price_min)
+            if not value.is_finite() or value < 0: raise ValueError()
+            qs = qs.filter(monthly_price__gte=value)
+        if price_max:
+            value = Decimal(price_max)
+            if not value.is_finite() or value < 0: raise ValueError()
+            qs = qs.filter(monthly_price__lte=value)
+    except (TypeError, ValueError, InvalidOperation):
         return Response({"detail": "Faixa de preço inválida."}, status=status.HTTP_400_BAD_REQUEST)
+    ordering = request.query_params.get("ordering", "default")
+    orderings = {"default": ("sort_order", "name", "id"), "name": ("name", "id"), "price": ("monthly_price", "id"), "-price": ("-monthly_price", "id")}
+    qs = qs.order_by(*orderings.get(ordering, orderings["default"]))
     results = PlanSerializer(qs, many=True).data
     # JSONField string lookups differ between SQLite and PostgreSQL. Benefits are
     # filtered in Python to keep the administrative search portable.
     if query:
         normalized_query = query.casefold()
         results = [item for item in results if normalized_query in item["name"].casefold() or normalized_query in item["slug"].casefold() or any(normalized_query in str(feature).casefold() for feature in item.get("features", []))]
-    return Response({"results": results})
+    count = len(results)
+    if "page" in request.query_params:
+        try:
+            page = max(1, int(request.query_params["page"]))
+            page_size = max(1, min(100, int(request.query_params.get("page_size", 12))))
+        except (TypeError, ValueError):
+            return Response({"detail": "Paginação inválida."}, status=status.HTTP_400_BAD_REQUEST)
+        page = min(page, max(1, (count + page_size - 1) // page_size))
+        results = results[(page - 1) * page_size:page * page_size]
+        return Response({"results": results, "count": count, "page": page, "page_size": page_size})
+    return Response({"results": results, "count": count})
 
 
 @api_view(["PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def plan_detail(request, pk):
     try:
         plan = Plan.objects.get(pk=pk)
@@ -922,7 +994,7 @@ def plan_detail(request, pk):
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def proofs(request):
     if request.method == "GET":
         status_filter = request.query_params.get("status", "").strip()
@@ -973,7 +1045,7 @@ def update_proof_status(request):
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def questions_admin(request):
     if request.method == "GET":
         only_empty = request.query_params.get("only_uncommented") == "1"
@@ -1072,7 +1144,7 @@ def questions_admin(request):
     if mod_action == "approve":
         explanation = request.data.get("explanation")
         try:
-            moderation.approve(question, request.user, explanation)
+            moderation.approve(question, request.user, explanation, request=request)
         except Exception as exc:
             from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -1090,7 +1162,7 @@ def questions_admin(request):
         reason = (request.data.get("rejection_reason") or "").strip()
         reason_code = (request.data.get("rejection_reason_code") or "").strip()
         try:
-            moderation.reject(question, request.user, reason, reason_code)
+            moderation.reject(question, request.user, reason, reason_code, request=request)
         except Exception as exc:
             from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -1140,7 +1212,7 @@ def questions_admin(request):
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def news_admin(request):
     if request.method == "GET":
         published = request.query_params.get("published", "").strip()
@@ -1179,7 +1251,7 @@ def news_admin(request):
 
 
 @api_view(["GET", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def community_admin(request):
     if request.method == "DELETE":
         pk = request.query_params.get("id") or (
@@ -1213,7 +1285,7 @@ def community_admin(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def concursos_admin(request):
     search = request.query_params.get("search", "").strip()
     qs = Concurso.objects.order_by("-fetched_at")
@@ -1241,28 +1313,29 @@ def concursos_admin(request):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def backups(request):
     if request.method == "POST":
-        name = services.create_backup()
-        audit_log(request, action="backup.created", resource_type="backup", resource_id=name, after={"name": name})
+        try:
+            name = services.create_backup(request=request)
+        except (ValueError, OSError):
+            return Response({"detail": "Backup não concluído. Verifique configuração, utilitários e espaço no servidor."}, status=503)
         return Response({"name": name}, status=status.HTTP_201_CREATED)
-    return Response({"results": services.list_backups()})
+    return Response({"results": services.list_backups(), "restore_via_web": settings.DATABASES["default"]["ENGINE"].endswith(".sqlite3")})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def restore(request, name):
     try:
-        result = services.restore_backup(name)
+        result = services.restore_backup(name, request=request)
     except ValueError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    audit_log(request, action="backup.restored", resource_type="backup", resource_id=name, after={"backup": name, "previous_db_saved_at": result.get("previous_db_saved_at")})
     return Response(result)
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def chat_usage(request):
     days = int(request.query_params.get("days", 14))
     today = timezone.localdate()
@@ -1334,44 +1407,52 @@ def chat_usage(request):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def staff(request):
     denied = _superuser_only(request)
     if denied:
         return denied
     if request.method == "POST":
-        data = request.data
-        username = (data.get("username") or "").strip()
-        email = (data.get("email") or "").strip()
-        password = data.get("password") or ""
-        if not username or not password:
-            return Response(
-                {"detail": "Usuário e senha são obrigatórios."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if User.objects.filter(username=username).exists():
-            return Response(
-                {"detail": "Já existe um usuário com esse nome."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        user = User.objects.create_user(
-            username=username, email=email, password=password, is_staff=True
-        )
-        try:
-            _set_staff_role(user, str(data.get("role", "reviewer")))
-        except (ValueError, Group.DoesNotExist) as exc:
-            user.delete()
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = StaffCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        role = request.data.get("role", "reviewer")
+        if not isinstance(role, str) or role not in ROLE_GROUPS or not Group.objects.filter(name=ROLE_GROUPS[role]).exists():
+            return Response({"detail": "Papel administrativo inválido."}, status=400)
+        with transaction.atomic():
+            user = serializer.save()
+            user.is_staff = True
+            user.save(update_fields=["is_staff"])
+            _set_staff_role(user, role)
         payload = _staff_payload(user)
         audit_log(request, action="staff.created", resource_type="user", resource_id=user.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
 
-    qs = User.objects.filter(is_staff=True).order_by("username")
-    return Response({"results": [_staff_payload(u) for u in qs]})
+    qs = User.objects.filter(is_staff=True)
+    summary = qs.aggregate(total=Count("id"), active=Count("id", filter=Q(is_active=True)),
+                           inactive=Count("id", filter=Q(is_active=False)), superuser=Count("id", filter=Q(is_superuser=True)))
+    for role, group in ROLE_GROUPS.items():
+        summary[role] = qs.filter(is_superuser=False, groups__name=group).count()
+    if search := request.query_params.get("search", "").strip():
+        qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search) | Q(first_name__icontains=search) | Q(last_name__icontains=search))
+    if request.query_params.get("status") in {"active", "inactive"}: qs = qs.filter(is_active=request.query_params["status"] == "active")
+    role = request.query_params.get("role", "")
+    if role == "superuser": qs = qs.filter(is_superuser=True)
+    elif role in ROLE_GROUPS: qs = qs.filter(is_superuser=False, groups__name=ROLE_GROUPS[role])
+    ordering = {"name": ("username", "id"), "-date_joined": ("-date_joined", "-id"), "-last_login": (F("last_login").desc(nulls_last=True), "id")}
+    qs = qs.order_by(*ordering.get(request.query_params.get("ordering"), ordering["name"]))
+    count = qs.count()
+    try:
+        page_size = min(100, max(1, int(request.query_params.get("page_size", 12))))
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        return Response({"detail": "Paginação inválida."}, status=400)
+    page = min(page, max(1, (count + page_size - 1) // page_size))
+    if "page" in request.query_params: qs = qs[(page - 1) * page_size:page * page_size]
+    return Response({"results": [_staff_payload(u) for u in qs], "count": count, "page": page, "overview": summary})
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([Administrator])
 def staff_detail(request, pk):
     denied = _superuser_only(request)
     if denied:
@@ -1383,8 +1464,12 @@ def staff_detail(request, pk):
             {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
         )
     data = request.data
+    for field in ("is_staff", "is_active"):
+        if field in data and not isinstance(data[field], bool):
+            return Response({field: "Informe verdadeiro ou falso."}, status=400)
+
     before = _staff_payload(user)
-    if "is_staff" in data and user.pk == request.user.pk:
+    if user.pk == request.user.pk and (("is_staff" in data and data["is_staff"] is not True) or ("is_active" in data and data["is_active"] is not True)):
         return Response(
             {"detail": "Você não pode alterar o próprio cargo."},
             status=status.HTTP_400_BAD_REQUEST,
@@ -1553,6 +1638,19 @@ def study_reports(request):
     )
 
 
+def _editorial_list_response(request, queryset, payload, overview):
+    count = queryset.count()
+    try:
+        page_size = min(100, max(1, int(request.query_params.get("page_size", 12))))
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        return Response({"detail": "Paginação inválida."}, status=400)
+    page = min(page, max(1, (count + page_size - 1) // page_size))
+    rows = queryset[(page - 1) * page_size:page * page_size] if "page" in request.query_params else queryset[:200]
+    return Response({"results": [payload(item) for item in rows], "count": count, "page": page, "overview": overview,
+                     "can_manage": has_role(request.user, "admin", "editor")})
+
+
 def _editorial_concurso_payload(item):
     return {"id": item.id, "title": item.title, "organization": item.organization, "state": item.state,
             "status": item.status, "deadline": item.deadline, "source_url": item.source_url,
@@ -1561,46 +1659,44 @@ def _editorial_concurso_payload(item):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_concursos(request):
     if request.method == "POST":
-        title = str(request.data.get("title", "")).strip()
-        if not title:
-            return Response({"title": ["Informe o título do concurso."]}, status=status.HTTP_400_BAD_REQUEST)
-        item = Concurso.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL,
-            title=title, organization=str(request.data.get("organization", "")).strip(), state=str(request.data.get("state", "")).strip().upper()[:2],
-            status=request.data.get("status", Concurso.Status.EXPECTED), source_url=str(request.data.get("source_url", "")).strip(),
-            created_by=request.user, updated_by=request.user)
+        serializer = EditorialConcursoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = serializer.save(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL,
+                               created_by=request.user, updated_by=request.user)
         payload = _editorial_concurso_payload(item)
         audit_log(request, action="concurso.created", resource_type="concurso", resource_id=item.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
-    qs = Concurso.objects.prefetch_related("exams").order_by("-fetched_at")
-    if origin := request.query_params.get("origin"):
-        qs = qs.filter(origin=origin)
-    if search := request.query_params.get("search"):
+    qs = Concurso.objects.prefetch_related("exams")
+    if request.query_params.get("options") == "1":
+        return Response({"results": list(qs.order_by("title", "id").values("id", "title"))})
+    overview = qs.aggregate(total=Count("id"), manual=Count("id", filter=Q(origin="manual")),
+                            imported=Count("id", filter=Q(origin="imported")), published=Count("id", filter=Q(editorial_status="published")),
+                            archived=Count("id", filter=Q(editorial_status="archived")))
+    for key in ("origin", "editorial_status", "status"):
+        if value := request.query_params.get(key): qs = qs.filter(**{key: value})
+    if state := request.query_params.get("state", "").strip(): qs = qs.filter(state__iexact=state)
+    if search := request.query_params.get("search", "").strip():
         qs = qs.filter(Q(title__icontains=search) | Q(organization__icontains=search))
-    return Response({"results": [_editorial_concurso_payload(item) for item in qs[:200]]})
+    orderings = {"recent": ("-fetched_at", "-id"), "name": ("title", "id"), "-name": ("-title", "id")}
+    qs = qs.order_by(*orderings.get(request.query_params.get("ordering"), orderings["recent"]))
+    return _editorial_list_response(request, qs, _editorial_concurso_payload, overview)
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_concurso_detail(request, pk):
     item = Concurso.objects.filter(pk=pk).first()
     if not item:
         return Response({"detail": "Concurso não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-    if "editorial_status" in request.data:
-        if request.data["editorial_status"] not in Concurso.EditorialStatus.values:
-            return Response({"editorial_status": ["Estado editorial inválido."]}, status=status.HTTP_400_BAD_REQUEST)
-        item.editorial_status = request.data["editorial_status"]
     if item.origin == Concurso.Origin.IMPORTED and any(key in request.data for key in ("title", "organization", "state", "status", "source_url")):
         return Response({"detail": "Campos de concursos importados são protegidos contra a sincronização."}, status=status.HTTP_409_CONFLICT)
-    if item.origin == Concurso.Origin.MANUAL:
-        for field in ("title", "organization", "state", "status", "source_url"):
-            if field in request.data:
-                setattr(item, field, str(request.data[field]).strip())
     before = _editorial_concurso_payload(item)
-    item.updated_by = request.user
-    item.save()
+    serializer = EditorialConcursoSerializer(item, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    item = serializer.save(updated_by=request.user)
     payload = _editorial_concurso_payload(item)
     audit_log(request, action="concurso.updated", resource_type="concurso", resource_id=item.id, before=before, after=payload)
     return Response(payload)
@@ -1609,43 +1705,50 @@ def editorial_concurso_detail(request, pk):
 def _editorial_exam_payload(item):
     return {"id": item.id, "title": item.title, "banca": item.banca, "institution": item.institution,
             "role": item.role, "year": item.year, "is_published": item.is_published,
+            "level": item.level, "state": item.state, "concurso_title": item.concurso.title if item.concurso_id else None,
             "concurso": item.concurso_id, "questions_count": item.questions.count(), "updated_at": item.updated_at}
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_exams(request):
     if request.method == "POST":
-        required = {key: request.data.get(key) for key in ("title", "banca", "year")}
-        if not all(str(value or "").strip() for value in required.values()):
-            return Response({"detail": "Informe título, banca e ano da prova."}, status=status.HTTP_400_BAD_REQUEST)
-        concurso = Concurso.objects.filter(pk=request.data.get("concurso")).first() if request.data.get("concurso") else None
-        item = Exam.objects.create(title=str(required["title"]).strip(), banca=str(required["banca"]).strip(), year=int(required["year"]),
-            institution=str(request.data.get("institution", "")).strip(), role=str(request.data.get("role", "")).strip(), concurso=concurso,
-            is_published=bool(request.data.get("is_published", False)), created_by=request.user, updated_by=request.user)
-        return Response(_editorial_exam_payload(item), status=status.HTTP_201_CREATED)
-    qs = Exam.objects.select_related("concurso").prefetch_related("questions").order_by("-year", "title")
-    if concurso := request.query_params.get("concurso"):
-        qs = qs.filter(concurso_id=concurso)
-    if search := request.query_params.get("search"):
-        qs = qs.filter(Q(title__icontains=search) | Q(banca__icontains=search))
-    return Response({"results": [_editorial_exam_payload(item) for item in qs[:200]]})
+        serializer = EditorialExamSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = serializer.save(created_by=request.user, updated_by=request.user)
+        payload = _editorial_exam_payload(item)
+        audit_log(request, action="exam.created", resource_type="exam", resource_id=item.id, after=payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
+    qs = Exam.objects.select_related("concurso").prefetch_related("questions")
+    if request.query_params.get("options") == "1":
+        return Response({"results": list(qs.order_by("-year", "title", "id").values("id", "title", "banca", "year"))})
+    overview = qs.aggregate(total=Count("id"), published=Count("id", filter=Q(is_published=True)), draft=Count("id", filter=Q(is_published=False)),
+                            linked=Count("id", filter=Q(concurso__isnull=False)), unlinked=Count("id", filter=Q(concurso__isnull=True)))
+    try:
+        if concurso := request.query_params.get("concurso"): qs = qs.filter(concurso_id=int(concurso))
+        if year := request.query_params.get("year"): qs = qs.filter(year=int(year))
+    except (TypeError, ValueError):
+        return Response({"detail": "Informe ano e concurso válidos."}, status=400)
+    if request.query_params.get("published") in {"1", "0"}: qs = qs.filter(is_published=request.query_params["published"] == "1")
+    if request.query_params.get("linked") in {"1", "0"}: qs = qs.filter(concurso__isnull=request.query_params["linked"] == "0")
+    if banca := request.query_params.get("banca", "").strip(): qs = qs.filter(banca__icontains=banca)
+    if search := request.query_params.get("search", "").strip():
+        qs = qs.filter(Q(title__icontains=search) | Q(banca__icontains=search) | Q(institution__icontains=search) | Q(role__icontains=search))
+    orderings = {"year": ("-year", "title", "id"), "name": ("title", "id"), "recent": ("-updated_at", "-id")}
+    qs = qs.order_by(*orderings.get(request.query_params.get("ordering"), orderings["year"]))
+    return _editorial_list_response(request, qs, _editorial_exam_payload, overview)
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_exam_detail(request, pk):
     item = Exam.objects.filter(pk=pk).first()
     if not item:
         return Response({"detail": "Prova não encontrada."}, status=status.HTTP_404_NOT_FOUND)
-    for field in ("title", "banca", "institution", "role", "level", "state", "is_published"):
-        if field in request.data:
-            setattr(item, field, request.data[field])
-    if "concurso" in request.data:
-        item.concurso = Concurso.objects.filter(pk=request.data["concurso"]).first() if request.data["concurso"] else None
     before = _editorial_exam_payload(item)
-    item.updated_by = request.user
-    item.save()
+    serializer = EditorialExamSerializer(item, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    item = serializer.save(updated_by=request.user)
     payload = _editorial_exam_payload(item)
     audit_log(request, action="exam.updated", resource_type="exam", resource_id=item.id, before=before, after=payload)
     return Response(payload)
@@ -1654,7 +1757,7 @@ def _article_payload(item):
     return {"id": item.id, "title": item.title, "slug": item.slug, "summary": item.summary, "body": item.body, "category": item.category, "image_url": item.image_url, "seo_title": item.seo_title, "seo_description": item.seo_description, "tags": item.tags, "is_featured": item.is_featured, "is_pinned": item.is_pinned, "origin": item.origin, "editorial_status": item.editorial_status, "scheduled_for": item.scheduled_for, "is_published": item.is_published}
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_categories(request):
     if request.method == "GET": return Response({"results": [{"id": item.id, "name": item.name, "slug": item.slug, "is_active": item.is_active} for item in EditorialCategory.objects.all()]})
     from django.utils.text import slugify
@@ -1665,7 +1768,7 @@ def editorial_categories(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news_history(request, pk):
     if not NewsArticle.objects.filter(pk=pk).exists(): return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
     events = AuditEvent.objects.filter(resource_type="article", resource_id=str(pk)).select_related("actor").order_by("-created_at")[:100]
@@ -1673,25 +1776,28 @@ def editorial_news_history(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news_overview(request):
     qs = NewsArticle.objects.all()
     return Response({"total": qs.count(), "draft": qs.filter(editorial_status=NewsArticle.EditorialStatus.DRAFT).count(), "scheduled": qs.filter(editorial_status=NewsArticle.EditorialStatus.SCHEDULED).count(), "published": qs.filter(editorial_status=NewsArticle.EditorialStatus.PUBLISHED).count(), "archived": qs.filter(editorial_status=NewsArticle.EditorialStatus.ARCHIVED).count(), "featured": qs.filter(is_featured=True).count()})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news_bulk(request):
     ids, action = request.data.get("ids", []), request.data.get("action")
-    if not isinstance(ids, list) or not ids or action not in {"published", "archived", "draft"}: return Response({"detail": "Selecione artigos e uma ação válida."}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(ids, list) or not ids or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in ids) or action not in ("published", "archived", "draft"):
+        return Response({"detail": "Selecione artigos e uma ação válida."}, status=400)
     qs = NewsArticle.objects.filter(id__in=ids)
-    qs.update(editorial_status=action, is_published=action == "published", published_at=timezone.now() if action == "published" else None)
+    if qs.count() != len(set(ids)):
+        return Response({"detail": "Um ou mais artigos não foram encontrados."}, status=404)
+    qs.update(editorial_status=action, is_published=action == "published", scheduled_for=None, published_at=timezone.now() if action == "published" else None)
     audit_log(request, action="article.bulk_updated", resource_type="article", context={"ids": ids, "action": action})
     return Response({"updated": qs.count()})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news_duplicate(request, pk):
     item = NewsArticle.objects.filter(pk=pk).first()
     if not item: return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -1703,49 +1809,49 @@ def editorial_news_duplicate(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news(request):
     from django.utils.text import slugify
     if request.method == "POST":
-        title = str(request.data.get("title", "")).strip(); body = str(request.data.get("body", "")).strip()
-        if not title or not body: return Response({"detail": "Informe título e conteúdo do artigo."}, status=status.HTTP_400_BAD_REQUEST)
-        base = slugify(request.data.get("slug") or title)[:250] or "artigo"; slug = base; index = 2
+        data = request.data.copy()
+        title = str(data.get("title", "")).strip()
+        base = slugify(data.get("slug") or title)[:250] or "artigo"; slug = base; index = 2
         while NewsArticle.objects.filter(slug=slug).exists(): slug = f"{base[:245]}-{index}"; index += 1
-        item = NewsArticle.objects.create(source="manual", external_id=f"manual:{uuid.uuid4()}", origin=Concurso.Origin.MANUAL, title=title, body=body, slug=slug, summary=str(request.data.get("summary", "")).strip(), category=str(request.data.get("category", "")).strip(), image_url=str(request.data.get("image_url", "")).strip(), seo_title=str(request.data.get("seo_title", "")).strip(), seo_description=str(request.data.get("seo_description", "")).strip(), tags=request.data.get("tags", []) if isinstance(request.data.get("tags", []), list) else [], is_featured=bool(request.data.get("is_featured", False)), is_pinned=bool(request.data.get("is_pinned", False)), editorial_status=NewsArticle.EditorialStatus.DRAFT, is_published=False, author=request.user, updated_by=request.user)
+        data["slug"] = slug
+        serializer = EditorialArticleSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        state = serializer.validated_data.get("editorial_status", "draft")
+        item = serializer.save(source="manual", external_id=f"manual:{uuid.uuid4()}", origin="manual", author=request.user, updated_by=request.user,
+                               is_published=state == "published", published_at=timezone.now() if state == "published" else None)
         payload = _article_payload(item)
         audit_log(request, action="article.created", resource_type="article", resource_id=item.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
-    qs = NewsArticle.objects.order_by("-created_at")
-    status_filter = request.query_params.get("status", "").strip(); search = request.query_params.get("search", "").strip(); category = request.query_params.get("category", "").strip()
-    if status_filter: qs = qs.filter(editorial_status=status_filter)
-    if category: qs = qs.filter(category__iexact=category)
-    if search: qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search) | Q(category__icontains=search))
-    return Response({"results": [_article_payload(item) for item in qs[:200]]})
+    qs = NewsArticle.objects.all()
+    overview = qs.aggregate(total=Count("id"), **{state: Count("id", filter=Q(editorial_status=state)) for state in NewsArticle.EditorialStatus.values}, featured=Count("id", filter=Q(is_featured=True)))
+    if value := request.query_params.get("status", "").strip(): qs = qs.filter(editorial_status=value)
+    if value := request.query_params.get("category", "").strip(): qs = qs.filter(category__iexact=value)
+    if value := request.query_params.get("origin", "").strip(): qs = qs.filter(origin=value)
+    if request.query_params.get("featured") in {"1", "0"}: qs = qs.filter(is_featured=request.query_params["featured"] == "1")
+    if search := request.query_params.get("search", "").strip(): qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search) | Q(category__icontains=search))
+    ordering = {"recent": ("-created_at", "-id"), "name": ("title", "id"), "updated": ("-fetched_at", "-id")}
+    qs = qs.order_by(*ordering.get(request.query_params.get("ordering"), ordering["recent"]))
+    return _editorial_list_response(request, qs, _article_payload, overview)
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def editorial_news_detail(request, pk):
     item = NewsArticle.objects.filter(pk=pk).first()
     if not item: return Response({"detail": "Artigo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
     protected = {"title", "body", "summary", "category", "image_url", "slug", "seo_title", "seo_description", "tags", "is_featured", "is_pinned"}
     if item.origin == Concurso.Origin.IMPORTED and protected.intersection(request.data): return Response({"detail": "Campos de notícia importada são protegidos contra sincronização."}, status=status.HTTP_409_CONFLICT)
-    if item.origin == Concurso.Origin.MANUAL:
-        for field in protected:
-            if field in request.data:
-                value = request.data[field]
-                setattr(item, field, value if field == "tags" and isinstance(value, list) else (bool(value) if field in {"is_featured", "is_pinned"} else str(value).strip()))
-    if "editorial_status" in request.data:
-        value=request.data["editorial_status"]
-        if value not in NewsArticle.EditorialStatus.values: return Response({"editorial_status": ["Estado inválido."]}, status=status.HTTP_400_BAD_REQUEST)
-        if value == NewsArticle.EditorialStatus.SCHEDULED:
-            scheduled_for = parse_datetime(str(request.data.get("scheduled_for", "")))
-            if not scheduled_for or scheduled_for <= timezone.now(): return Response({"scheduled_for": ["Informe uma data futura para agendar."]}, status=status.HTTP_400_BAD_REQUEST)
-            item.scheduled_for = scheduled_for
-        elif value == NewsArticle.EditorialStatus.PUBLISHED:
-            item.published_at = timezone.now(); item.scheduled_for = None
-        item.editorial_status=value; item.is_published=value == NewsArticle.EditorialStatus.PUBLISHED
     before = _article_payload(item)
-    item.updated_by=request.user; item.save()
+    serializer = EditorialArticleSerializer(item, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    new_status = serializer.validated_data.get("editorial_status", item.editorial_status)
+    extras = {"updated_by": request.user, "is_published": new_status == "published"}
+    if new_status != "scheduled": extras["scheduled_for"] = None
+    if new_status == "published" and item.editorial_status != "published": extras["published_at"] = timezone.now()
+    item = serializer.save(**extras)
     payload = _article_payload(item)
     audit_log(request, action="article.updated", resource_type="article", resource_id=item.id, before=before, after=payload)
     return Response(payload)

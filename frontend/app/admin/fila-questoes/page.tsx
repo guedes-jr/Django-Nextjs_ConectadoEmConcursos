@@ -3,16 +3,22 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { History, Inbox, Search } from "lucide-react";
+import { History, Inbox, Search, ClipboardCheck, Pencil, CheckCircle2, XCircle, Files } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/admin/PageHeader";
+import { CatalogSummary, CatalogMetric } from "@/components/admin/CatalogSummary";
+import { FilterBar, ListPagination, AdminFilterSelect } from "@/components/admin/ListControls";
+import { ConfirmAction } from "@/components/admin/ConfirmAction";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Notice } from "@/components/admin/Notice";
 import { QueueList, type QueueState } from "@/components/admin/questions/QueueList";
 import { ReviewPanel } from "@/components/admin/questions/ReviewPanel";
 import { adminUrl } from "@/lib/admin";
 import { content, apiMessage, type QueueFilters, type RejectionReasons, type SearchRun } from "@/lib/content";
 
-const EXPLANATION_MAX = 120;
+const EXPLANATION_MIN = 120;
+const metrics:CatalogMetric[]=[{key:"total",title:"Total",hint:"Todo o acervo",icon:<Files className="h-4 w-4"/>},{key:"pending",title:"Pendentes",hint:"Aguardando revisão",icon:<ClipboardCheck className="h-4 w-4"/>,filter:["status","pending"],accent:"sky"},{key:"approved",title:"Aprovadas",hint:"Revisão concluída",icon:<CheckCircle2 className="h-4 w-4"/>,filter:["status","approved"],accent:"emerald"},{key:"rejected",title:"Rejeitadas",hint:"Com motivo registrado",icon:<XCircle className="h-4 w-4"/>,filter:["status","rejected"],accent:"rose"},{key:"draft",title:"Rascunhos",hint:"Em preparação",icon:<Pencil className="h-4 w-4"/>,filter:["status","draft"],accent:"amber"}];
 
 type Feedback = { kind: "error" | "success" | "info"; message: string } | null;
 
@@ -36,9 +42,9 @@ function QuestoesReview() {
   const [selectedSource, setSelectedSource] = useState(searchParams.get("fonte") ?? "");
   const [runId, setRunId] = useState<number | null>(Number(searchParams.get("busca")) || null);
   const [run, setRun] = useState<SearchRun | null>(null);
-  const [filters, setFilters] = useState<QueueFilters>({ status: "pending", limit: 50 });
+  const [filters, setFilters] = useState<QueueFilters>({ status: searchParams.get("questao") ? "" : searchParams.get("status") ?? "pending", limit: [12,24,48].includes(Number(searchParams.get("limit")))?Number(searchParams.get("limit")):12, offset: Math.max(0,Number(searchParams.get("offset"))||0), search: searchParams.get("search")||undefined, banca: searchParams.get("banca")||undefined, discipline: searchParams.get("discipline")||undefined, year: searchParams.get("year")||undefined, question_id:Number(searchParams.get("questao"))||undefined, duplicates:searchParams.get("duplicates")||undefined,conflict:searchParams.get("conflict")||undefined });
   const [state, setState] = useState<QueueState>({ results: [], total: 0, loading: true, error: null });
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(Number(searchParams.get("selecionada")||searchParams.get("questao"))||null);
   const [explanation, setExplanation] = useState("");
   const [rejectionReasons, setRejectionReasons] = useState<RejectionReasons>([]);
   const [busy, setBusy] = useState(false);
@@ -51,12 +57,31 @@ function QuestoesReview() {
   const explanationRef = useRef<HTMLTextAreaElement | null>(null);
   const reasonsRef = useRef<HTMLDivElement | null>(null);
 
+  const [minExplanation,setMinExplanation]=useState(EXPLANATION_MIN);
+  const [summary,setSummary]=useState<Record<string,number>>({});
+  const [canReview,setCanReview]=useState(false);
+  const [scanLimited,setScanLimited]=useState(false);
+  const [confirmApproval,setConfirmApproval]=useState(false);
+  const [shortcuts,setShortcuts]=useState(false);
+  const [pendingHref,setPendingHref]=useState<string|null>(null);
+  const allowLeave=useRef(false);
+  const [pendingNavigation,setPendingNavigation]=useState<number|null>(null);
+  const sequence=useRef(0),mutation=useRef(false);
   const selected = useMemo(
     () => state.results.find((item) => item.id === selectedId) ?? null,
     [state.results, selectedId],
   );
 
+  const dirty=Boolean(selected&&explanation!==(selected.review_note||selected.explanation||""));
+  const selectQuestion=useCallback((id:number|null)=>{if(mutation.current)return;if(dirty&&id!==selectedId&&id!==null){setPendingNavigation(id);return;}setSelectedId(id);},[dirty,selectedId]);
+  useEffect(()=>{
+    const guard=(event:BeforeUnloadEvent)=>{if(dirty&&!allowLeave.current){event.preventDefault();event.returnValue="";}};
+    const guardLink=(event:MouseEvent)=>{if(!dirty||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey||event.button!==0)return;const anchor=(event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement|null;if(!anchor||anchor.target==="_blank"||anchor.hasAttribute("download"))return;if(anchor.href===window.location.href)return;event.preventDefault();event.stopPropagation();setPendingHref(anchor.href);};
+    window.addEventListener("beforeunload",guard);document.addEventListener("click",guardLink,true);
+    return()=>{window.removeEventListener("beforeunload",guard);document.removeEventListener("click",guardLink,true);};
+  },[dirty]);
   const loadQueue = useCallback(async () => {
+    const id=++sequence.current;
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const page = await content.queue({
@@ -64,9 +89,13 @@ function QuestoesReview() {
         source: selectedSource || undefined,
         search_run: runId ?? undefined,
       });
+      if(id!==sequence.current)return;
+      setMinExplanation(page.review_policy.min_explanation_chars);setSummary(page.overview);setCanReview(page.can_review);setScanLimited(page.duplicate_scan_limited);
+      if(page.offset!==(filters.offset||0))setFilters(current=>({...current,offset:page.offset}));
       setState({ results: page.results, total: page.total, loading: false, error: null });
       setSelectedId((current) => (current && page.results.some((item) => item.id === current) ? current : page.results[0]?.id ?? null));
     } catch (err) {
+      if(id!==sequence.current)return;
       const message = apiMessage((err as { response?: { data?: unknown } })?.response?.data, "Não foi possível carregar a fila.");
       setState({ results: [], total: 0, loading: false, error: message });
     }
@@ -75,7 +104,7 @@ function QuestoesReview() {
   useEffect(() => {
     void (async () => {
       try {
-        setSources(await content.sources());
+        setSources(await content.sourceCatalog());
         setRejectionReasons(await content.rejectionReasons());
       } catch {
         setFeedback({ kind: "error", message: "Não foi possível carregar as fontes do conteúdo." });
@@ -84,8 +113,21 @@ function QuestoesReview() {
   }, []);
 
   useEffect(() => {
-    void loadQueue();
+    const ref=sequence;++ref.current;
+    const timer=window.setTimeout(()=>void loadQueue(),250);
+    return()=>{window.clearTimeout(timer);++ref.current;};
   }, [loadQueue]);
+
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    ["status","search","banca","discipline","year","duplicates","conflict","limit","offset"].forEach(key=>{const value=filters[key as keyof QueueFilters];if(value!==undefined&&value!=="")params.set(key,String(value));else params.delete(key);});
+    if(filters.status==="")params.set("status","");
+    if(selectedSource)params.set("fonte",selectedSource);else params.delete("fonte");
+    if(runId)params.set("busca",String(runId));else params.delete("busca");
+    if(filters.question_id)params.set("questao",String(filters.question_id));else params.delete("questao");
+    if(selectedId)params.set("selecionada",String(selectedId));else params.delete("selecionada");
+    window.history.replaceState(window.history.state,"",`${window.location.pathname}?${params}${window.location.hash}`);
+  },[filters,selectedSource,runId,selectedId]);
 
   // O detalhe da busca alimenta o cabeçalho ("12 de 340 · 74% concluído").
   useEffect(() => {
@@ -121,7 +163,7 @@ function QuestoesReview() {
   }, [runId]);
 
   useEffect(() => {
-    if (selected) setExplanation(selected.explanation ?? "");
+    if (selected) setExplanation(selected.review_note || selected.explanation || "");
   }, [selected]);
 
   const position = selected ? state.results.findIndex((item) => item.id === selected.id) + 1 : 0;
@@ -133,21 +175,25 @@ function QuestoesReview() {
     (fromId: number) => {
       const index = state.results.findIndex((item) => item.id === fromId);
       const next = state.results[index + 1];
-      setSelectedId(next ? next.id : null);
+      if(next)selectQuestion(next.id);else if((filters.offset||0)+(filters.limit||12)<state.total)setFilters(current=>({...current,offset:(current.offset||0)+(current.limit||12)}));
     },
-    [state.results],
+    [state.results,selectQuestion,filters.offset,filters.limit,state.total],
   );
 
   const decide = useCallback(
-    async (action: "approve" | "reject" | "draft", payload: { reason?: string; reason_code?: string }) => {
-      if (!selected) return;
+    async (action: "approve" | "reject" | "draft", payload: { reason?: string; reason_code?: string }, confirmed=false) => {
+      if (!selected||mutation.current||!canReview||selected.status!=="pending") return;
+      if(action==="approve"&&selected.conflict&&!confirmed){setConfirmApproval(true);return;}
+      setConfirmApproval(false);
+      mutation.current=true;
       setBusy(true);
       setFeedback(null);
       setExplanationInvalid(false);
       setReasonsInvalid(false);
       try {
         if (action === "draft") {
-          await content.draft({ id: selected.id, note: explanation });
+          await content.draft({ id: selected.id, note: explanation, updated_at:selected.updated_at });
+          await loadQueue();
           setFeedback({ kind: "success", message: "Rascunho salvo." });
           return;
         }
@@ -156,16 +202,11 @@ function QuestoesReview() {
           ? await content.approve({ ...body, explanation })
           : await content.reject({ ...body, reason: payload.reason ?? "", reason_code: payload.reason_code ?? "" });
         const updated = data.results[0];
-        // Aprovar não volta na API: a fila local já sabe o resultado.
-        setState((current) => ({
-          ...current,
-          results: current.results.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
-        }));
-        setFeedback({
-          kind: "success",
-          message: action === "approve" ? `Questão #${updated.id} aprovada.` : `Questão #${updated.id} rejeitada.`,
-        });
-        if (action === "approve") advance(updated.id);
+        const index=state.results.findIndex(item=>item.id===updated.id);
+        setSelectedId(state.results[index+1]?.id??state.results[index-1]?.id??null);
+        setFeedback({kind:"success",message:`Questão #${updated.id} ${action==="approve"?"aprovada":"rejeitada"}.`});
+        await loadQueue();
+        if(runId){try{setRun(await content.run(runId));}catch{setRun(null);}}
       } catch (err) {
         const response = (err as { response?: { status?: number; data?: unknown } })?.response;
         const status = response?.status;
@@ -175,7 +216,7 @@ function QuestoesReview() {
           explanationRef.current?.focus();
           setFeedback({
             kind: "error",
-            message: `Comentário inválido: ${explanation.trim().length}/${EXPLANATION_MAX} caracteres. Mínimo de 1.`,
+            message: apiMessage(data,"Revise o comentário antes de aprovar."),
           });
           return;
         }
@@ -190,37 +231,36 @@ function QuestoesReview() {
           return;
         }
         if (status === 409 && data?.code === "already_reviewed") {
-          setState((current) => ({ ...current, results: current.results.filter((item) => item.id !== selected.id) }));
-          setFeedback({ kind: "info", message: "Esta questão já estava revisada. Indo para a próxima." });
-          advance(selected.id);
+          setFeedback({ kind: "info", message: "Esta questão já foi revisada. Seu comentário permanece nesta tela; copie-o antes de descartar as alterações e recarregar." });
           return;
         }
         if (status === 409) {
-          setFeedback({ kind: "error", message: "Esta questão foi atualizada por outro revisor. Recarregando." });
-          await loadQueue();
+          setFeedback({ kind: "error", message: "Esta questão foi atualizada por outro revisor. Seu comentário permanece nesta tela; copie-o antes de descartar as alterações e recarregar." });
           return;
         }
         setFeedback({ kind: "error", message: "Falha ao salvar — tente novamente." });
       } finally {
+        mutation.current=false;
         setBusy(false);
       }
     },
-    [selected, explanation, advance, loadQueue],
+    [selected,explanation,loadQueue,canReview,state.results,runId],
   );
 
+  const warnUnsaved=()=>{setFeedback({kind:"info",message:"Salve o rascunho ou descarte as alterações trocando de questão antes de alterar os filtros."});};
   const goNext = useCallback(() => {
     if (!selected) return;
     const index = state.results.findIndex((item) => item.id === selected.id);
     const next = state.results[index + 1];
-    if (next) setSelectedId(next.id);
-  }, [selected, state.results]);
+    if (next) selectQuestion(next.id);
+  }, [selected,state.results,selectQuestion]);
 
   const goPrevious = useCallback(() => {
     if (!selected) return;
     const index = state.results.findIndex((item) => item.id === selected.id);
     const previous = state.results[index - 1];
-    if (previous) setSelectedId(previous.id);
-  }, [selected, state.results]);
+    if (previous) selectQuestion(previous.id);
+  }, [selected,state.results,selectQuestion]);
 
   const openHistory = useCallback(async () => {
     setHistoryOpen((open) => !open);
@@ -235,8 +275,10 @@ function QuestoesReview() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!shortcuts||busy||event.repeat||pendingNavigation!==null||pendingHref!==null||confirmApproval||event.target instanceof Element&&event.target.closest("[role=dialog]"))return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
+      if ((event.key.toLowerCase()==="a"||event.key.toLowerCase()==="s")&&!canReview)return;
       if (!selected) return;
       const key = event.key.toLowerCase();
       if (key === "a") {
@@ -268,7 +310,7 @@ function QuestoesReview() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, decide, advance, goNext, goPrevious, rejectionReasons]);
+  }, [selected,decide,advance,goNext,goPrevious,rejectionReasons,shortcuts,busy,pendingNavigation,canReview,confirmApproval,pendingHref]);
 
   return (
     <div className="space-y-5">
@@ -277,7 +319,7 @@ function QuestoesReview() {
         description="Revise, aprove ou rejeite questões que já foram importadas para a fila."
         actions={
           <>
-            <Button variant="outline" onClick={() => void openHistory()}>
+            <Button variant="outline" disabled={busy||dirty} onClick={() => void openHistory()}>
               <History className="h-4 w-4" /> Histórico de buscas
             </Button>
             <Button asChild><Link href="/admin/fontes-questoes"><Search className="h-4 w-4" /> Buscar em fontes</Link></Button>
@@ -301,6 +343,7 @@ function QuestoesReview() {
                 </span>
                 <Button
                   size="sm"
+                  disabled={busy||dirty}
                   variant="ghost"
                   className="ml-auto"
                   onClick={() => {
@@ -317,11 +360,22 @@ function QuestoesReview() {
         </div>
       )}
 
-      <div className="flex items-start gap-4">
+      <CatalogSummary label="Resumo geral da revisão" metrics={metrics} overview={summary} query={{status:filters.status??"pending"}} change={(_,value)=>{if(dirty){warnUnsaved();return;}setFilters(current=>({...current,status:value,offset:0,question_id:undefined}));}} clear={()=>{if(dirty){warnUnsaved();return;}setSelectedSource("");setRunId(null);setFilters({status:"",limit:12,offset:0});}}/>
+      <FilterBar active={Boolean(selectedSource||runId||filters.search||filters.banca||filters.discipline||filters.year||filters.duplicates||filters.conflict||filters.question_id||filters.status!=="pending")} onClear={()=>{if(dirty){warnUnsaved();return;}setSelectedSource("");setRunId(null);setFilters({status:"pending",limit:12,offset:0});}}>
+        <div className="min-w-0 space-y-2 xl:flex-1"><Label htmlFor="queue-search">Buscar na fila</Label><Input disabled={dirty||busy} id="queue-search" value={filters.search||""} onChange={event=>setFilters(current=>({...current,search:event.target.value,offset:0}))} placeholder="Enunciado ou comentário"/></div>
+        <AdminFilterSelect disabled={dirty||busy} id="queue-status" label="Status" value={filters.status||""} options={[["all","Todos os status"],["pending","Pendentes"],["approved","Aprovadas"],["rejected","Rejeitadas"],["draft","Rascunhos"]]} onChange={value=>setFilters(current=>({...current,status:value,offset:0,question_id:undefined}))}/>
+        <AdminFilterSelect disabled={dirty||busy} id="queue-source" label="Fonte" value={selectedSource} options={[["all","Todas as fontes"],...sources.map(source=>[source.slug,source.label] as [string,string])]} onChange={value=>{setSelectedSource(value);setRunId(null);setFilters(current=>({...current,offset:0,question_id:undefined}));}}/>
+        {([["banca","Banca"],["discipline","Disciplina"],["year","Ano"]] as const).map(([key,label])=><div key={key} className="space-y-2"><Label htmlFor={`queue-${key}`}>{label}</Label><Input disabled={dirty||busy} id={`queue-${key}`} value={filters[key]||""} type={key==="year"?"number":"text"} onChange={event=>setFilters(current=>({...current,[key]:event.target.value,offset:0}))} className="w-full sm:w-36"/></div>)}
+        <AdminFilterSelect disabled={dirty||busy} id="queue-quality" label="Comparação" value={filters.conflict?"conflict":filters.duplicates?"duplicates":""} options={[["all","Todas as questões"],["duplicates","Com parecidas"],["conflict","Conflito de gabarito"]]} onChange={value=>setFilters(current=>({...current,conflict:value==="conflict"?"1":undefined,duplicates:value==="duplicates"?"1":undefined,offset:0}))}/>
+      </FilterBar>
+      {scanLimited&&<Notice kind="info">O filtro de parecidas ou conflitos considera as primeiras 300 questões da prioridade atual. Refine por fonte, banca ou busca para examinar outro recorte.</Notice>}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>{state.total} questões encontradas · prioridade editorial preservada</span><label className="flex items-center gap-2"><input type="checkbox" checked={shortcuts} onChange={event=>setShortcuts(event.target.checked)}/>Ativar atalhos de revisão</label></div>
+      <div className="flex flex-col items-stretch gap-4 lg:flex-row lg:items-start">
         <QueueList
+          hideFilters
           state={state}
           selectedId={selectedId}
-          onSelect={(question) => setSelectedId(question.id)}
+          onSelect={(question) => selectQuestion(question.id)}
           filters={filters}
           onFiltersChange={setFilters}
           sources={sources}
@@ -331,7 +385,7 @@ function QuestoesReview() {
           onRunIdChange={setRunId}
           run={run}
           onOpenSearch={() => { window.location.href = "/admin/fontes-questoes"; }}
-          onReload={() => void loadQueue()}
+          onReload={() => {if(dirty){warnUnsaved();return;}void loadQueue();}}
           listOpen={listOpen}
           onListOpenChange={setListOpen}
         />
@@ -346,12 +400,17 @@ function QuestoesReview() {
                   </>
                 ) : (
                   <>
-                    {position} de {state.total} nesta fila
+                    {(filters.offset||0)+position} de {state.total} nesta fila
                   </>
                 )}
               </p>
               <ReviewPanel
                 key={selected.id}
+                minExplanationChars={minExplanation}
+                readOnly={!canReview}
+                hasUnsavedChanges={dirty}
+                onDiscard={()=>setPendingNavigation(selected.id)}
+                onSaveDraft={()=>void decide("draft",{})}
                 question={selected}
                 explanation={explanation}
                 onExplanationChange={setExplanation}
@@ -370,7 +429,7 @@ function QuestoesReview() {
                 hasNext={position < state.results.length}
               />
               <p className="text-xs text-slate-400">
-                Atalhos: <kbd>A</kbd> aprovar · <kbd>R</kbd> rejeitar · <kbd>S</kbd> salvar rascunho ·{" "}
+                {dirty&&<span className="font-medium text-amber-700">Comentário não salvo. </span>}Atalhos: <kbd>A</kbd> aprovar · <kbd>R</kbd> rejeitar · <kbd>S</kbd> salvar rascunho ·{" "}
                 <kbd>P</kbd> pular · <kbd>J</kbd>/<kbd>K</kbd> navegar.{" "}
                 <a href={adminUrl("questions/question/")} className="underline">
                   Ver no admin do Django
@@ -380,17 +439,19 @@ function QuestoesReview() {
           ) : (
             <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center dark:border-slate-700">
               <p className="flex items-center justify-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                <Inbox className="h-4 w-4" /> Fila em dia
+                <Inbox className="h-4 w-4" /> {state.loading ? "Carregando revisão..." : state.error ? "Falha ao carregar a revisão" : "Nenhuma questão selecionada"}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                Nenhuma questão pendente com esses filtros. Use Fontes de questões para buscar e enviar novas questões à fila.
+                Nenhuma questão selecionada neste recorte. Confira os filtros ou avance a página.
               </p>
               <Button className="mt-4" asChild><Link href="/admin/fontes-questoes">Buscar em fontes</Link></Button>
             </div>
           )}
         </section>
       </div>
-
+      <ListPagination count={state.total} page={Math.floor((filters.offset||0)/(filters.limit||12))+1} pageSize={filters.limit||12} disabled={state.loading||busy||dirty} onPageChange={page=>setFilters(current=>({...current,offset:(page-1)*(current.limit||12)}))} onPageSizeChange={limit=>setFilters(current=>({...current,limit,offset:0}))}/>
+      <ConfirmAction open={confirmApproval} title="Aprovar com conflito de gabarito?" description="Existem questões parecidas com gabarito diferente. Confira a comparação e o comentário antes de confirmar a aprovação." busy={busy} onClose={()=>setConfirmApproval(false)} onConfirm={()=>void decide("approve",{},true)}/>
+      <ConfirmAction open={pendingNavigation!==null||pendingHref!==null} title="Descartar comentário não salvo?" description="Seu comentário foi alterado. Salve o rascunho antes de trocar de questão se desejar preservá-lo." busy={busy} onClose={()=>{setPendingNavigation(null);setPendingHref(null);}} onConfirm={()=>{if(pendingHref){allowLeave.current=true;window.location.assign(pendingHref);return;}setExplanation(selected?.review_note||selected?.explanation||"");setSelectedId(pendingNavigation);setPendingNavigation(null);}}/>
     </div>
   );
 }

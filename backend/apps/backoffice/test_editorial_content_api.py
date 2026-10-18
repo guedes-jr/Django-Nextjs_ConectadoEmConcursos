@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -7,6 +8,7 @@ from apps.concursos.models import Concurso
 class EditorialContentApiTests(TestCase):
     def setUp(self):
         user = get_user_model().objects.create_user("editor", password="safe", is_staff=True)
+        user.groups.add(Group.objects.get(name="Administrador"))
         self.client = APIClient(); self.client.force_authenticate(user)
 
     def test_manual_concurso_and_linked_exam(self):

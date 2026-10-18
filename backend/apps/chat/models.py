@@ -21,6 +21,7 @@ class Message(models.Model):
     role = models.CharField(max_length=10, choices=Role.choices)
     content = models.TextField()
     provider = models.CharField(max_length=30, blank=True)
+    source_question_ids = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -35,6 +36,19 @@ class ChatUsage(models.Model):
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class StudyMaterial(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_materials")
+    message = models.OneToOneField(Message, on_delete=models.SET_NULL, null=True, blank=True, related_name="saved_material")
+    content = models.TextField()
+    provider = models.CharField(max_length=30, blank=True)
+    source_question_ids = models.JSONField(default=list, blank=True)
+    title = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]

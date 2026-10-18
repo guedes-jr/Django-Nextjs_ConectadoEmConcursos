@@ -40,7 +40,7 @@ function isDismissed() {
     const stored = localStorage.getItem(DISMISS_KEY);
     if (!stored) return false;
     const elapsed = Date.now() - Number(stored);
-    return Number.isFinite(elapsed) && elapsed < DISMISS_DAYS * 24 * 60 * 60 * 1000;
+    return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < DISMISS_DAYS * 24 * 60 * 60 * 1000;
   } catch {
     return false;
   }
@@ -51,6 +51,7 @@ export function InstallPrompt() {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(true);
   const [installed, setInstalled] = useState(true);
+  const [installError, setInstallError] = useState<string | null>(null);
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
@@ -80,7 +81,7 @@ export function InstallPrompt() {
 
   if (pathname === "/") return null;
   if (installed || dismissed) return null;
-  if (!prompt && !ios) return null;
+  if (!prompt && !ios && !installError) return null;
 
   const close = () => {
     setDismissed(true);
@@ -90,9 +91,13 @@ export function InstallPrompt() {
   const install = async () => {
     if (!prompt) return;
     setPrompt(null);
-    await prompt.prompt();
-    const choice = await prompt.userChoice;
-    if (choice.outcome !== "accepted") close();
+    try {
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice.outcome !== "accepted") close();
+    } catch {
+      setInstallError("Não foi possível iniciar a instalação. Use o menu do navegador para instalar o app.");
+    }
   };
 
   return (
@@ -106,7 +111,7 @@ export function InstallPrompt() {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">Instalar o Conectado em Concursos</p>
 
-            {ios ? (
+            {installError ? <p role="status" className="mt-2 text-xs">{installError}</p> : ios ? (
               <div className="mt-1 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
                 <p className="flex items-center gap-1.5">
                   <Share size={13} /> Toque em <strong className="font-medium text-slate-900 dark:text-slate-100">Compartilhar</strong>
@@ -120,8 +125,7 @@ export function InstallPrompt() {
               </div>
             ) : (
               <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                Acesse o app direto da tela inicial, com navegação mais rápida e
-                funcionando mesmo quando a internet estiver lenta.
+                Acesse o app direto da tela inicial. Para entrar e usar os recursos de estudo, é necessária uma conexão.
               </p>
             )}
           </div>

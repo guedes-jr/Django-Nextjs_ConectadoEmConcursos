@@ -18,6 +18,7 @@ import { Notice, LoadingState, EmptyState } from "@/components/admin/Notice";
 
 export default function AdminBackupsPage() {
   const [rows, setRows] = useState<BackupRow[]>([]);
+  const [restoreViaWeb, setRestoreViaWeb] = useState(false);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export default function AdminBackupsPage() {
     try {
       const res = await backoffice.listBackups();
       setRows(res.results);
+      setRestoreViaWeb(res.restore_via_web);
     } catch {
       setError("Não foi possível listar os backups.");
     } finally {
@@ -75,12 +77,12 @@ export default function AdminBackupsPage() {
 
   return (
     <div className="space-y-6">
+      {!loading && !restoreViaWeb && <Notice kind="info">A restauração deste banco é feita pelo comando de manutenção, com aplicação e workers parados.</Notice>}
       <PageHeader
         title="Backups"
         description={
           <>
-            Instantâneos compactados do banco (SQLite) e da mídia, salvos em{" "}
-            <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-800">backend/backups/</code>.
+            Instantâneos compactados do banco configurado e da mídia, salvos no armazenamento privado de backups.
           </>
         }
         actions={
@@ -137,8 +139,8 @@ export default function AdminBackupsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busy === backup.name}
                         onClick={() => void restore(backup)}
+                        disabled={!restoreViaWeb || busy !== null || creating}
                         className="border-amber-600 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-500 dark:text-amber-300 dark:hover:bg-amber-500/10"
                       >
                         {busy === backup.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}

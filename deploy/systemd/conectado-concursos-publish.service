@@ -1,0 +1,16 @@
+[Unit]
+Description=Publicação de avisos e notícias agendados do Conectado
+After=network.target redis-server.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=www-data
+WorkingDirectory=/var/www/conectado-em-concursos/backend
+Environment=DJANGO_ENV=production
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py publish_scheduled_notifications
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py publish_scheduled_news
+TimeoutStartSec=300
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true

@@ -6,6 +6,7 @@ confirmou os direitos; a questão nasce `PENDING` com crédito do autor e sem
 """
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -68,6 +69,7 @@ class SubmissionConversionTests(TestCase):
         self.staff = get_user_model().objects.create_user(
             username="staff", password="x", is_staff=True
         )
+        self.staff.groups.add(Group.objects.get(name="Editor"))
         self.client_api = APIClient()
         self.client_api.force_authenticate(self.staff)
         self.submission = ExamSubmission.objects.create(
@@ -200,6 +202,7 @@ class ProofConvertApiTests(TestCase):
         self.staff = get_user_model().objects.create_user(
             username="staff", password="x", is_staff=True
         )
+        self.staff.groups.add(Group.objects.get(name="Editor"))
         self.outsider = get_user_model().objects.create_user(username="aluno", password="x")
         self.submission = ExamSubmission.objects.create(
             user=self.author, title="Prova de Direito", rights_confirmed=True,

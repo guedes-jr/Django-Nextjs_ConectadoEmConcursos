@@ -1,3 +1,4 @@
+from django.utils import timezone
 from apps.billing.models import Subscription
 
 
@@ -12,7 +13,13 @@ def user_plan_slug(user):
     subscription = Subscription.objects.filter(
         user=user, status=Subscription.Status.ACTIVE
     ).select_related("plan").first()
-    return subscription.plan.slug if subscription else "gratis"
+    if not subscription:
+        return "gratis"
+    if subscription.current_period_end and subscription.current_period_end <= timezone.now():
+        return "gratis"
+    if subscription.gateway == "stripe" and not subscription.current_period_end:
+        return "gratis"
+    return subscription.plan.slug
 
 
 def capabilities_for(user):

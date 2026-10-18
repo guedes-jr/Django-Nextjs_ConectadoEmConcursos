@@ -55,7 +55,7 @@ def _bulk_action(modeladmin, request, queryset, action, label: str, **kwargs) ->
     reason = ""
     for question in queryset.select_related():
         try:
-            action(question, request.user, **kwargs)
+            action(question, request.user, request=request, **kwargs)
         except ValidationError as exc:
             skipped += 1
             reason = "; ".join(exc.messages)

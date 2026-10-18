@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -12,6 +13,7 @@ class BancaCatalogApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             "catalog-admin", password="safe-password", is_staff=True
         )
+        self.user.groups.add(Group.objects.get(name="Administrador"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 

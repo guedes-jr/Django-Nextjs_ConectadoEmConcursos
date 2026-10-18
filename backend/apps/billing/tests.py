@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.billing.models import Plan, Subscription
@@ -30,15 +30,14 @@ class BillingAPITests(TestCase):
         self.assertFalse(response.data["checkout_required"])
         self.assertEqual(response.data["subscription"]["status"], Subscription.Status.ACTIVE)
 
+    @override_settings(STRIPE_SECRET_KEY="", STRIPE_WEBHOOK_SECRET="")
     def test_paid_plan_waits_for_a_real_checkout(self):
         response = self.client.post(
             "/api/subscription/", {"plan": self.paid.slug, "cycle": "anual"}, format="json"
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertTrue(response.data["checkout_required"])
-        self.assertEqual(response.data["subscription"]["status"], Subscription.Status.PENDING)
-        self.assertIn("nenhuma cobrança", response.data["detail"])
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(Subscription.objects.filter(user=self.user).exists())
 
     def test_subscription_is_private(self):
         other = get_user_model().objects.create_user("other-billing-user", password="password")

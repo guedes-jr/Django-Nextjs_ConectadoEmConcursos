@@ -34,6 +34,7 @@ import {
   SimulationRun,
   SimulationTemplate,
   startSimulation,
+  startRelatedSimulation,
   submitSimulationSession,
 } from "@/lib/simulations";
 
@@ -90,6 +91,7 @@ export default function SimulacoesPage() {
   const [recent, setRecent] = useState<SimulationRun[]>([]);
   const [deletingRecentId, setDeletingRecentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [relatedSource, setRelatedSource] = useState<{ conversation: number; message: number } | null>(null);
   const [starting, setStarting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +102,10 @@ export default function SimulacoesPage() {
   const submittingRef = useRef(false);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const conversation = Number(params.get("conversation"));
+    const message = Number(params.get("message"));
+    if (Number.isSafeInteger(conversation) && conversation > 0 && Number.isSafeInteger(message) && message > 0) setRelatedSource({ conversation, message });
     let cancelled = false;
     void (async () => {
       try {
@@ -157,7 +163,7 @@ export default function SimulacoesPage() {
     setStarting(true);
     setError(null);
     try {
-      const data = await startSimulation({
+      const data = relatedSource ? await startRelatedSimulation(relatedSource.conversation, relatedSource.message) : await startSimulation({
         discipline: discipline || undefined,
         exam_ids: selectedExams,
         banca: banca || undefined,
@@ -190,7 +196,7 @@ export default function SimulacoesPage() {
     } finally {
       setStarting(false);
     }
-  }, [discipline, selectedExams, banca, year, count, fullExam, timeLimit]);
+  }, [relatedSource, discipline, selectedExams, banca, year, count, fullExam, timeLimit]);
 
   const submit = useCallback(async () => {
     if (submittingRef.current) return;
@@ -761,6 +767,15 @@ export default function SimulacoesPage() {
       </main>
     );
   }
+
+  if (relatedSource) return <main className="mx-auto max-w-3xl space-y-5 p-6">
+    <h1 className="text-2xl font-bold">Praticar questões relacionadas</h1>
+    <p>Este simulado usa até cinco questões aprovadas recuperadas pelo assistente para sua resposta. A correção segue os gabaritos cadastrados na plataforma.</p>
+    <p className="text-sm text-slate-500">As questões indisponíveis serão removidas. As respostas contam para os limites do seu plano.</p>
+    {error && <p role="alert" className="text-red-600">{error}</p>}
+    <button type="button" disabled={starting} onClick={() => void start()} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white disabled:opacity-50">{starting ? "Montando simulado…" : "Iniciar questões relacionadas"}</button>
+    <div><Link href="/simulations" className="text-blue-600 underline">Montar outro simulado</Link></div>
+  </main>;
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950">

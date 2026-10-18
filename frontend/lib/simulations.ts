@@ -126,3 +126,6 @@ export async function getQuestionDetails(questionId: number) {
   const response = await http.get<Question>(`/api/questions/${questionId}/`);
   return response.data;
 }
+export async function startRelatedSimulation(conversationId: number, messageId: number) {
+  return (await http.post<SimulationSession>(`/api/conversations/${conversationId}/practice/`, { message_id: messageId })).data;
+}

@@ -37,6 +37,7 @@ class AdminNotification(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="created_admin_notifications")
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="updated_admin_notifications")
     published_at = models.DateTimeField(null=True, blank=True)
+    recipients_materialized_at = models.DateTimeField(null=True, blank=True)
     closure_reason = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

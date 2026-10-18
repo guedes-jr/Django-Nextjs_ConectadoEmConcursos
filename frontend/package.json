@@ -8,7 +8,10 @@
     "dev": "concurrently -n FRONT,BACK -c auto \"npm run dev:frontend\" \"npm run dev:backend\"",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "check:production-env": "node scripts/check-production-env.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
@@ -28,6 +31,7 @@
   },
   "devDependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

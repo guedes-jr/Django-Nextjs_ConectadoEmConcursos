@@ -101,6 +101,11 @@ export type ReviewQuestion = {
 };
 
 export type QueuePage = {
+  review_policy:{min_explanation_chars:number};
+  overview: Record<string,number>;
+  can_review: boolean;
+  duplicate_scan_limited: boolean;
+  duplicate_scan_limit: number;
   total: number;
   limit: number;
   offset: number;
@@ -108,6 +113,7 @@ export type QueuePage = {
 };
 
 export type QueueFilters = {
+  question_id?: number;
   status?: string;
   source?: string;
   search_run?: number;
@@ -174,13 +180,13 @@ export const content = {
   reject: (body: { id: number; reason: string; reason_code: string; updated_at?: string }) =>
     http.post<{ results: ReviewQuestion[] }>(`${BASE}/questions/reject/`, body).then((r) => r.data),
 
-  draft: (body: { id: number; note: string }) =>
+  draft: (body: { id: number; note: string; updated_at?: string }) =>
     http.post<{ results: ReviewQuestion[] }>(`${BASE}/questions/draft/`, body).then((r) => r.data),
 
   rejectionReasons: () =>
     http
-      .get<{ results: RejectionReasons }>(`${BASE}/questions/rejection-reasons/`)
-      .then((r) => r.data.results)
+      .get<RejectionReasons | {results:RejectionReasons}>(`${BASE}/questions/rejection-reasons/`)
+      .then((r) => Array.isArray(r.data)?r.data:r.data.results||[])
       .catch(() => [] as RejectionReasons),
 };
 

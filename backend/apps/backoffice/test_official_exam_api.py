@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -10,6 +11,7 @@ from apps.questions.models import OfficialExamDocument, OfficialExamDownload, Of
 class OfficialExamApiTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("official-admin", password="safe-password", is_staff=True)
+        self.user.groups.add(Group.objects.get(name="Administrador"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.portal = OfficialExamPortal.objects.create(

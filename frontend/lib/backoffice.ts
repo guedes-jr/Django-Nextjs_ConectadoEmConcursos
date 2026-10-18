@@ -34,6 +34,8 @@ export type Overview = {
 export type SubscriptionRow = {
   id: number;
   user_id: number;
+  gateway: string;
+  current_period_end: string | null;
   username: string;
   email: string;
   plan_slug: string;
@@ -51,12 +53,16 @@ export type UserRow = {
   is_staff: boolean;
   is_active: boolean;
   date_joined: string;
+  last_login?: string | null;
+  first_name?: string;
+  last_name?: string;
   subscription: {
     id: number;
     plan: string;
     plan_slug: string;
     status: string;
     cycle: string;
+    current_period_end?: string | null;
   } | null;
 };
 
@@ -77,8 +83,8 @@ export type Plan = {
 };
 
 export type PlansOverview = {
-  total: number; published: number; draft: number; archived: number; mrr_estimated: string;
-  plans: Array<{ id: number; subscribers_total: number; subscribers_active: number; subscribers_pending: number; subscribers_canceled: number; mrr_estimated: string; retention_rate: number | null }>;
+  total: number; published: number; draft: number; archived: number; mrr_estimated: string | null;
+  plans: Array<{ id: number; subscribers_total: number; subscribers_active: number; subscribers_pending: number; subscribers_canceled: number; mrr_estimated: string | null; retention_rate: number | null }>;
 };
 
 export type ProofRow = {
@@ -222,11 +228,13 @@ export type PlanPayload = {
 export const backoffice = {
   overview: () => http.get<Overview>("/api/backoffice/overview/").then((r) => r.data),
 
-  listUsers: (opts: { search?: string; limit?: number; status?: string; plan?: string; subscription?: string; activity?: string } = {}) => {
+  listUsers: (opts: { search?: string; limit?: number; status?: string; plan?: string; subscription?: string; activity?: string; registered?: string; page?: number; page_size?: number; ordering?: string } = {}) => {
     const params = new URLSearchParams();
     Object.entries(opts).forEach(([key, value]) => { if (value) params.set(key, String(value)); });
-    return http.get<{ results: UserRow[]; total: number }>(`/api/backoffice/users/?${params}`).then((r) => r.data);
+    return http.get<{ results: UserRow[]; total: number; page: number }>(`/api/backoffice/users/?${params}`).then((r) => r.data);
   },
+  usersOverview: () => http.get<{total: number; active: number; blocked: number; new_30_days: number; valid_subscriptions: number}>("/api/backoffice/users/overview/").then(r => r.data),
+  createUser: (data: {username: string; email: string; first_name: string; last_name: string; password: string}) => http.post<UserRow>("/api/backoffice/users/", data).then(r => r.data),
   getUser: (id: number) => http.get<any>(`/api/backoffice/users/${id}/`).then((r) => r.data),
   updateUser: (id: number, data: Record<string, unknown>) => http.patch<any>(`/api/backoffice/users/${id}/`, data).then((r) => r.data),
   userHistory: (id: number) => http.get<any>(`/api/backoffice/users/${id}/history/`).then((r) => r.data),
@@ -239,14 +247,11 @@ export const backoffice = {
       .post<{ id: number; status: string; plan: string }>(`/api/backoffice/users/${userId}/subscription/`, { plan, cycle })
       .then((r) => r.data),
 
-  subscriptionsOverview: () => http.get<{ total: number; active: number; pending: number; canceled: number; expiring_30_days: number; mrr_estimated: string }>("/api/backoffice/subscriptions/overview/").then((r) => r.data),
-  listSubscriptions: (opts: { status?: string; search?: string; plan?: string; cycle?: string; expires_within?: number } = {}) => {
+  subscriptionsOverview: () => http.get<{ total: number; active: number; pending: number; canceled: number; expiring_30_days: number; mrr_estimated: string | null }>("/api/backoffice/subscriptions/overview/").then((r) => r.data),
+  listSubscriptions: (opts: { status?: string; search?: string; plan?: string; cycle?: string; expires_within?: number; expired?: boolean; page?: number; page_size?: number; ordering?: string } = {}) => {
     const params = new URLSearchParams();
-    if (opts.status) params.set("status", opts.status);
-    if (opts.search) params.set("search", opts.search);
-    return http
-      .get<{ results: SubscriptionRow[] }>(`/api/backoffice/subscriptions/?${params}`)
-      .then((r) => r.data);
+    Object.entries(opts).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
+    return http.get<{ results: SubscriptionRow[]; count: number; page: number }>(`/api/backoffice/subscriptions/?${params}`).then(r => r.data);
   },
   updateSubscription: (id: number, data: { plan_slug?: string; cycle?: string; status?: string }) =>
     http
@@ -257,10 +262,10 @@ export const backoffice = {
       })
       .then((r) => r.data),
 
-  listPlans: (opts: { q?: string; status?: string; active?: boolean; price_min?: number; price_max?: number } = {}) => {
+  listPlans: (opts: { q?: string; status?: string; active?: boolean; price_min?: number; price_max?: number; page?: number; page_size?: number; ordering?: string } = {}) => {
     const params = new URLSearchParams();
     Object.entries(opts).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
-    return http.get<{ results: Plan[] }>(`/api/backoffice/plans/?${params}`).then((r) => r.data);
+    return http.get<{ results: Plan[]; count: number; page?: number; page_size?: number }>(`/api/backoffice/plans/?${params}`).then((r) => r.data);
   },
   plansOverview: () => http.get<PlansOverview>("/api/backoffice/plans/overview/").then((r) => r.data),
   bulkPlans: (ids: number[], action: "publish" | "draft" | "archive" | "activate" | "deactivate") => http.post<{ updated: number }>("/api/backoffice/plans/bulk/", { ids, action }).then((r) => r.data),
@@ -334,7 +339,7 @@ export const backoffice = {
       .then((r) => r.data);
   },
 
-  listBackups: () => http.get<{ results: BackupRow[] }>("/api/backoffice/backups/").then((r) => r.data),
+  listBackups: () => http.get<{ results: BackupRow[]; restore_via_web: boolean }>("/api/backoffice/backups/").then((r) => r.data),
   createBackup: () => http.post<{ name: string }>("/api/backoffice/backups/").then((r) => r.data),
   restoreBackup: (name: string) =>
     http
@@ -347,8 +352,8 @@ export const backoffice = {
   studyReport: (days = 14) =>
     http.get<StudyReport>(`/api/backoffice/reports/study/?days=${days}`).then((r) => r.data),
 
-  listStaff: () =>
-    http.get<{ results: StaffRow[] }>("/api/backoffice/staff/").then((r) => r.data),
+  listStaff: (opts: Record<string, string> = {}) =>
+    http.get<{ results: StaffRow[]; count: number; page: number; overview: Record<string, number> }>(`/api/backoffice/staff/?${new URLSearchParams(opts)}`).then(r => r.data),
   createStaff: (data: { username: string; email?: string; password: string; role?: "admin" | "editor" | "reviewer" }) =>
     http.post<StaffRow>("/api/backoffice/staff/", data).then((r) => r.data),
   updateStaff: (id: number, data: Partial<Pick<StaffRow, "is_staff" | "is_active" | "email" | "first_name" | "last_name" | "roles">> & { role?: "admin" | "editor" | "reviewer" }) =>
@@ -405,19 +410,21 @@ export const cycleLabel: Record<string, string> = {
   anual: "Anual",
 };
 export type EditorialConcurso = { id: number; title: string; organization: string; state: string; status: string; deadline: string | null; source_url: string; origin: "manual" | "imported"; editorial_status: "published" | "archived"; exams_count: number; updated_at: string };
-export type EditorialExam = { id: number; title: string; banca: string; institution: string; role: string; year: number; is_published: boolean; concurso: number | null; questions_count: number; updated_at: string };
+export type EditorialExam = { id: number; title: string; banca: string; institution: string; role: string; year: number; level: string; state: string; is_published: boolean; concurso: number | null; concurso_title: string | null; questions_count: number; updated_at: string };
 export const editorial = {
-  listConcursos: () => http.get<{results: EditorialConcurso[]}>("/api/backoffice/content/editorial/concursos/").then(r => r.data),
+  listConcursos: (opts: Record<string,string> = {}) => http.get<{results: EditorialConcurso[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/concursos/?${new URLSearchParams(opts)}`).then(r => r.data),
+  concursoOptions: () => http.get<{results: {id:number;title:string}[]}>("/api/backoffice/content/editorial/concursos/?options=1").then(r => r.data),
   createConcurso: (data: Partial<EditorialConcurso>) => http.post<EditorialConcurso>("/api/backoffice/content/editorial/concursos/", data).then(r => r.data),
   updateConcurso: (id: number, data: Partial<EditorialConcurso>) => http.patch<EditorialConcurso>(`/api/backoffice/content/editorial/concursos/${id}/`, data).then(r => r.data),
-  listExams: () => http.get<{results: EditorialExam[]}>("/api/backoffice/content/editorial/provas/").then(r => r.data),
+  listExams: (opts: Record<string,string> = {}) => http.get<{results: EditorialExam[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/provas/?${new URLSearchParams(opts)}`).then(r => r.data),
+  examOptions: () => http.get<{results:{id:number;title:string;banca:string;year:number}[]}>("/api/backoffice/content/editorial/provas/?options=1").then(r=>r.data),
   createExam: (data: Partial<EditorialExam>) => http.post<EditorialExam>("/api/backoffice/content/editorial/provas/", data).then(r => r.data),
   updateExam: (id: number, data: Partial<EditorialExam>) => http.patch<EditorialExam>(`/api/backoffice/content/editorial/provas/${id}/`, data).then(r => r.data),
 };
 
 export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; origin?: "manual" | "imported"; created_by?: string | null; imported_by?: string | null; added_by?: string | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
 export const manualQuestions = {
-  list: () => http.get<{results: ManualQuestion[]}>("/api/backoffice/content/questions/manual/").then(r => r.data),
+  list: (opts:Record<string,string>={}) => http.get<{results:ManualQuestion[];count:number;page:number;overview:Record<string,number>;permissions:Record<string,boolean>}>(`/api/backoffice/content/questions/manual/?${new URLSearchParams(opts)}`).then(r=>r.data),
   create: (data: Omit<ManualQuestion, "id" | "status" | "exam" | "rejection_reason" | "updated_at">) => http.post<ManualQuestion>("/api/backoffice/content/questions/manual/", data).then(r => r.data),
   update: (id: number, data: Omit<Partial<ManualQuestion>, "exam"> & { exam?: number | null }) => http.patch<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/`, data).then((r) => r.data),
   publish: (id: number) => http.post<ManualQuestion>(`/api/backoffice/content/questions/manual/${id}/publish/`).then(r => r.data),
@@ -426,14 +433,30 @@ export const manualQuestions = {
 };
 export type EditorialArticle = { id:number; title:string; slug:string; summary:string; body:string; category:string; image_url:string; seo_title:string; seo_description:string; tags:string[]; is_featured:boolean; is_pinned:boolean; origin:"manual"|"imported"; editorial_status:"draft"|"scheduled"|"published"|"archived"; is_published:boolean; scheduled_for?: string | null };
 export const editorialCategories = { list:()=>http.get<{results:Array<{id:number;name:string;slug:string;is_active:boolean}>}>("/api/backoffice/content/editorial/categorias/").then(r=>r.data), create:(name:string)=>http.post<{id:number;name:string;slug:string;is_active:boolean}>("/api/backoffice/content/editorial/categorias/",{name}).then(r=>r.data) };
-export const editorialArticles = { list:(opts:{status?:string;search?:string;category?:string}={})=>{const q=new URLSearchParams();Object.entries(opts).forEach(([k,v])=>{if(v)q.set(k,v)});return http.get<{results:EditorialArticle[]}>(`/api/backoffice/content/editorial/artigos/?${q}`).then(r=>r.data)}, overview:()=>http.get<{total:number;draft:number;scheduled:number;published:number;archived:number;featured:number}>("/api/backoffice/content/editorial/artigos/overview/").then(r=>r.data), history:(id:number)=>http.get<{results:AuditEventRow[]}>(`/api/backoffice/content/editorial/artigos/${id}/history/`).then(r=>r.data), bulk:(ids:number[],action:"draft"|"published"|"archived")=>http.post<{updated:number}>("/api/backoffice/content/editorial/artigos/bulk/",{ids,action}).then(r=>r.data), duplicate:(id:number)=>http.post<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/duplicate/`).then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
+export const editorialArticles = { list:(opts:Record<string,string>={})=>{const q=new URLSearchParams();Object.entries(opts).forEach(([k,v])=>{if(v)q.set(k,v)});return http.get<{results:EditorialArticle[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/artigos/?${q}`).then(r=>r.data)}, overview:()=>http.get<{total:number;draft:number;scheduled:number;published:number;archived:number;featured:number}>("/api/backoffice/content/editorial/artigos/overview/").then(r=>r.data), history:(id:number)=>http.get<{results:AuditEventRow[]}>(`/api/backoffice/content/editorial/artigos/${id}/history/`).then(r=>r.data), bulk:(ids:number[],action:"draft"|"published"|"archived")=>http.post<{updated:number}>("/api/backoffice/content/editorial/artigos/bulk/",{ids,action}).then(r=>r.data), duplicate:(id:number)=>http.post<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/duplicate/`).then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
 export type BancaCatalogRow={id:number;name:string;slug:string;official_url:string;description:string;image_url:string;is_active:boolean;is_featured:boolean;aliases:{id:number;alias:string}[];questions_count:number;exams_count:number};
-export const bancasAdmin={list:()=>http.get<{results:BancaCatalogRow[]}>("/api/backoffice/content/bancas/").then(r=>r.data),create:(data:Partial<BancaCatalogRow>)=>http.post<BancaCatalogRow>("/api/backoffice/content/bancas/",data).then(r=>r.data),update:(id:number,data:Partial<BancaCatalogRow>)=>http.patch<BancaCatalogRow>(`/api/backoffice/content/bancas/${id}/`,data).then(r=>r.data),addAlias:(id:number,alias:string)=>http.post(`/api/backoffice/content/bancas/${id}/aliases/`,{alias}).then(r=>r.data)};
+export const bancasAdmin={list:(opts: Record<string,string> = {})=>http.get<{results:BancaCatalogRow[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/bancas/?${new URLSearchParams(opts)}`).then(r=>r.data),create:(data:Partial<BancaCatalogRow> & {alias?:string})=>http.post<BancaCatalogRow>("/api/backoffice/content/bancas/",data).then(r=>r.data),update:(id:number,data:Partial<BancaCatalogRow> & {alias?:string})=>http.patch<BancaCatalogRow>(`/api/backoffice/content/bancas/${id}/`,data).then(r=>r.data),addAlias:(id:number,alias:string)=>http.post(`/api/backoffice/content/bancas/${id}/aliases/`,{alias}).then(r=>r.data)};
 
 
-export type AdminNotificationRow = { id:number; title:string; summary:string; body:string; priority:string; status:string; scope:string; segment_plan_slug?:string; segment_subscription_status?:string; starts_at:string|null; ends_at:string|null; image_url?:string; video_url?:string; postpone_hours?:number; max_postpones?:number; selected_user_ids:number[]; metrics:{total:number;pending:number;viewed:number;postponed:number}; };
+export type NoticeLink = {label:string; url:string};
+export type AdminNotificationRow = {
+  id:number; title:string; summary:string; body:string; priority:string; status:string; scope:string;
+  segment_plan_slug:string; segment_subscription_status:string; starts_at:string|null; ends_at:string|null;
+  image_url:string; video_url:string; links:NoticeLink[]; postpone_hours:number; max_postpones:number;
+  selected_user_ids:number[]; recipients_materialized_at:string|null;
+  metrics:{total:number;pending:number;viewed:number;postponed:number;dismissed:number};
+};
+export type NoticeRecipient = {
+  id:number; user_id:number; username:string; email:string; state:string; source:string;
+  first_shown_at:string|null; confirmed_at:string|null; next_reminder_at:string|null; postpone_count:number;
+};
+export type NoticePermissions = {can_edit:boolean; can_publish:boolean; can_track:boolean};
+export type NoticePage<T> = {results:T[]; total:number; page:number; limit:number};
+export type NoticeOptions = NoticePage<Pick<UserRow, "id" | "username" | "email">> & {plans:{slug:string;name:string}[]};
 export const adminNotifications = {
-  list: () => http.get<{results:AdminNotificationRow[]}>("/api/backoffice/notifications/").then(r => r.data),
+  options: (search = "", page = 1, plan = "", subscription_status = "") => http.get<NoticeOptions>("/api/backoffice/notifications/options/", {params:{search,page,plan,subscription_status}}).then(r => r.data),
+  list: (params:Record<string,string|number> = {}) => http.get<NoticePage<AdminNotificationRow> & {count:number;overview:Record<string,number>;permissions:NoticePermissions}>("/api/backoffice/notifications/", {params}).then(r => r.data),
+  recipients: (id:number, params:{search?:string;state?:string;page?:number} = {}) => http.get<NoticePage<NoticeRecipient>>(`/api/backoffice/notifications/${id}/recipients/`, {params}).then(r => r.data),
   create: (data: Partial<AdminNotificationRow> & {selected_user_ids:number[]}) => http.post<AdminNotificationRow>("/api/backoffice/notifications/", data).then(r => r.data),
   update: (id:number, data: Partial<AdminNotificationRow> & {selected_user_ids?:number[]}) => http.patch<AdminNotificationRow>(`/api/backoffice/notifications/${id}/`, data).then(r => r.data),
   publish: (id:number) => http.post<AdminNotificationRow>(`/api/backoffice/notifications/${id}/publish/`, {}).then(r => r.data),
@@ -442,18 +465,55 @@ export const adminNotifications = {
 };
 
 
-export type AuditEventRow = {id:number; action:string; resource_type:string; resource_id:string; actor:{id:number;username:string}|null; before:Record<string,unknown>; after:Record<string,unknown>; reason:string; ip_address:string|null; request_id:string|null; created_at:string};
-export const auditAdmin = { list: (params:Record<string,string|number|undefined>={}) => { const query=new URLSearchParams(); Object.entries(params).forEach(([k,v])=>{if(v!==undefined && v!=="")query.set(k,String(v))}); return http.get<{total:number;page:number;limit:number;results:AuditEventRow[]}>(`/api/backoffice/audit/?${query}`).then(r=>r.data); } };
+export type AuditChange = {path:string; kind:"added"|"removed"|"changed"; before:unknown; after:unknown; before_present:boolean; after_present:boolean};
+export type AuditEventRow = {id:number; action:string; resource_type:string; resource_id:string; actor:{id:number;username:string}|null; before:Record<string,unknown>; after:Record<string,unknown>; changes:AuditChange[]; context:Record<string,unknown>; reason:string; ip_address:string|null; request_id:string|null; created_at:string};
+export const auditAdmin = {
+  list: (params:Record<string,string|number|undefined>={}) => http.get<{total:number;page:number;limit:number;results:AuditEventRow[]}>("/api/backoffice/audit/", {params}).then(r=>r.data),
+  exportUrl: (params:Record<string,string|number|undefined>={}) => http.getUri({url:"/api/backoffice/audit/", params:{...params,export:"csv"}}),
+};
 
-export const businessReports = { get:(days:number)=>http.get("/api/backoffice/reports/business/",{params:{days}}).then(r=>r.data) };
+export type ReportParams = { days?: number; since?: string; until?: string };
+export type RevenueRow = { plan_slug: string; plan_name: string; cycle: string; payments_count: number; received_revenue: string };
+export type DailyRevenue = { date: string; payments_count: number; received_revenue: string };
+export type FinancialMetrics = Record<string, unknown> & {
+  access_granted: true; currency: string; snapshot_at: string; coverage: "recorded" | "partial" | "unavailable";
+  excluded_receipts: number; previous_excluded_receipts: number; received_revenue_status: string;
+  groups_limit: number; revenue_groups_truncated: boolean; distribution_truncated: boolean;
+  revenue_by_plan_cycle: RevenueRow[]; daily_revenue: DailyRevenue[];
+  plan_distribution: {plan: string; cycle: string; count: number}[]; definitions: Record<string, string>;
+};
+export type ReportRanking = {label: string; count: number};
+export type BusinessReport = {
+  period: {since: string; until: string; days: number; timezone: string; generated_at: string};
+  definitions: {active_user: string; activation: string; financial: string; snapshot: string};
+  financial: FinancialMetrics | {access_granted: false};
+  growth: Record<string, unknown> & {acquisition: {available: boolean; message: string}};
+  product: Record<string, unknown> & {top_disciplines: ReportRanking[]; top_bancas: ReportRanking[]; top_exams: ReportRanking[]; article_access: {available: boolean; message: string}};
+  operation: Record<string, unknown>;
+};
+export const businessReports = {
+  get: (params: ReportParams) => http.get<BusinessReport>("/api/backoffice/reports/business/", {params}).then(r => r.data),
+  exportUrl: (params: ReportParams) => http.getUri({url: "/api/backoffice/reports/business/", params: {...params, export: "csv"}}),
+};
 
+export type DiagnosticDatabase = {vendor:string;version:string|null;connected:boolean;latency_ms:number;active_connections:number|null;size:number|null;pending_migrations:number|null;detail?:string;slow_queries:{available:boolean;detail:string;calls?:number;slowest_mean_ms?:number;total_exec_ms?:number}};
+export type DiagnosticOverview = {application:{python:string;version:string|null;environment:string;time:string};storage:{total:number;used:number;free:number};capacity:{cpu_percent:number|null;memory_total:number|null;memory_used:number|null;process_memory_peak:number|null};database:DiagnosticDatabase;limits:{query_timeout_ms:number;log_max_bytes:number;result_max_bytes:number}};
+export type DiagnosticService = {status:string;detail:string;checked_at?:string|null;latency_ms?:number;started_at?:string|null;failures_recent?:number};
+export type DiagnosticServices = Record<"django"|"worker"|"scheduler"|"frontend"|"proxy",DiagnosticService> & {host:{load_average:number[]|null;pid:number}};
+export type DiagnosticLogFile = {id:string;name:string;available:boolean};
+export type DiagnosticLogQuery = {service?:string;page?:number;limit?:number;q?:string;severity?:string;request_id?:string;since?:string;until?:string;snapshot?:string};
+export type DiagnosticLogPage = {service:string;name:string;lines:string[];entries:{timestamp:string|null;severity:string;request_id:string;text:string}[];total:number;page:number;limit:number;snapshot:string;bytes_read:number;window_limited:boolean};
+export type DiagnosticRoutine = {id:string;title:string;description:string;mode:string;script_hash:string};
+export type DiagnosticRoutineResult = {script:string;mode:string;script_hash:string;elapsed_ms:number;result:unknown;truncated:boolean};
 export const diagnostics = {
-  overview: () => http.get("/api/backoffice/diagnostics/overview/").then(r => r.data),
-  services: () => http.get("/api/backoffice/diagnostics/services/").then(r => r.data),
-  database: () => http.get("/api/backoffice/diagnostics/database/").then(r => r.data),
-  logs: (params: Record<string, string | number | undefined> = {}) => http.get("/api/backoffice/diagnostics/logs/", { params }).then(r => r.data),
-  scripts: () => http.get("/api/backoffice/diagnostics/scripts/").then(r => r.data),
-  runScript: (script: string) => http.post("/api/backoffice/diagnostics/scripts/", { script }).then(r => r.data),
+  overview: () => http.get<DiagnosticOverview>("/api/backoffice/diagnostics/overview/").then(r=>r.data),
+  services: () => http.get<DiagnosticServices>("/api/backoffice/diagnostics/services/").then(r=>r.data),
+  database: () => http.get<DiagnosticDatabase>("/api/backoffice/diagnostics/database/").then(r=>r.data),
+  logFiles: () => http.get<{results:DiagnosticLogFile[];detail:string}>("/api/backoffice/diagnostics/logs/").then(r=>r.data),
+  logs: (params:DiagnosticLogQuery) => http.get<DiagnosticLogPage>("/api/backoffice/diagnostics/logs/",{params}).then(r=>r.data),
+  downloadLogs: (params:DiagnosticLogQuery) => http.get<Blob>("/api/backoffice/diagnostics/logs/",{params:{...params,export:"txt"},responseType:"blob"}).then(r=>r.data),
+  scripts: () => http.get<{results:DiagnosticRoutine[];detail:string}>("/api/backoffice/diagnostics/scripts/").then(r=>r.data),
+  runScript: (script:string) => http.post<DiagnosticRoutineResult>("/api/backoffice/diagnostics/scripts/",{script}).then(r=>r.data),
 };
 
 export const editorialDashboard={get:()=>http.get("/api/backoffice/editorial-dashboard/").then(r=>r.data)};

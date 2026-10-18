@@ -1,0 +1,20 @@
+[Unit]
+Description=Conectado Django ASGI (HTTP e WebSocket)
+After=network.target redis-server.service
+
+[Service]
+Type=exec
+User=deploy
+Group=www-data
+WorkingDirectory=/var/www/conectado-em-concursos/backend
+Environment=DJANGO_ENV=production
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/daphne -b 127.0.0.1 -p 8001 config.asgi:application
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

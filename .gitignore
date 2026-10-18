@@ -81,3 +81,8 @@ out/
 backend/backups/
 # Documentos privados baixados ou enviados; não versionar
 backend/private/
+
+# Playwright artifacts contain only disposable-test data; never commit
+frontend/playwright-report/
+frontend/test-results/
+frontend/.next-e2e/

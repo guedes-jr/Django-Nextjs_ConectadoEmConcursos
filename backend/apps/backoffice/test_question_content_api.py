@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -44,6 +45,7 @@ class QuestionContentApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="content-admin", password="safe-password", is_staff=True
         )
+        self.user.groups.add(Group.objects.get(name="Administrador"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.source = QuestionSource.objects.create(

@@ -11,6 +11,7 @@ recriados (chave única source + external_id).
 
 import hashlib
 
+from apps.backoffice.audit import audited_command, log as audit_log
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
@@ -52,6 +53,7 @@ class Command(BaseCommand):
         parser.add_argument("--no-news", action="store_true", help="Não sincronizar notícias.")
         parser.add_argument("--dry-run", action="store_true", help="Não gravar, apenas reportar.")
 
+    @audited_command("sync_sources")
     def handle(self, *args, **options):
         enabled = options.get("sources")
         skip_concursos = options["no_concursos"]
@@ -88,6 +90,8 @@ class Command(BaseCommand):
                     + (", falhas: %d" % failed if failed else "")
                 )
 
+        audit_log(action="source_sync.partial" if summary["failed"] else "source_sync.completed", resource_type="source_sync", after=summary,
+                  context={"dry_run": dry_run, "entrypoint": "sync_sources"})
         verb = "Simularia" if dry_run else "Total"
         self.stdout.write(
             f"{verb}: {summary['concursos']} concursos, {summary['news']} notícias, "
@@ -121,11 +125,15 @@ class Command(BaseCommand):
                 continue
             try:
                 with transaction.atomic():
-                    _, was_created = Concurso.objects.update_or_create(
+                    existing = Concurso.objects.filter(source=item.source or adapter.name, external_id=item.external_id).first()
+                    before = {"status": existing.status, "title": existing.title} if existing else {}
+                    record, was_created = Concurso.objects.update_or_create(
                         source=item.source or adapter.name,
                         external_id=item.external_id,
                         defaults=defaults,
                     )
+                    audit_log(action="concurso.import_created" if was_created else "concurso.import_updated", resource_type="concurso", resource_id=record.pk,
+                              before=before, after={"status": record.status, "title": record.title}, context={"source": adapter.name})
                 created += 1 if was_created else 0
                 updated += 0 if was_created else 1
             except Exception:
@@ -161,11 +169,14 @@ class Command(BaseCommand):
                 continue
             try:
                 with transaction.atomic():
-                    _, was_created = NewsArticle.objects.update_or_create(
+                    before = {"is_published": existing.is_published, "title": existing.title} if existing else {}
+                    record, was_created = NewsArticle.objects.update_or_create(
                         source=item.source or adapter.name,
                         external_id=item.external_id,
                         defaults=defaults,
                     )
+                    audit_log(action="article.import_created" if was_created else "article.import_updated", resource_type="article", resource_id=record.pk,
+                              before=before, after={"is_published": record.is_published, "title": record.title}, context={"source": adapter.name})
                 created += 1 if was_created else 0
                 updated += 0 if was_created else 1
             except Exception:

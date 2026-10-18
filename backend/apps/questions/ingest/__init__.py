@@ -16,6 +16,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.questions.models import QuestionSource, SearchRun
+from apps.backoffice.audit import log as audit_log
 
 from .duplicates import DuplicateChecker
 from apps.questions.naming import normalize_banca
@@ -119,20 +120,24 @@ def run(
     started = time.monotonic()
     counts = PipelineCounts()
     checker = DuplicateChecker()
+    failure = None
     try:
         run_items(source, result.items, checker=checker, dry_run=dry_run, counts=counts, search_run=run_record, force_duplicates=force_duplicates)
+    except Exception as exc:
+        failure = type(exc).__name__
+        raise
     finally:
-        _finish(run_record, counts, result, started, dry_run=dry_run)
+        _finish(run_record, counts, result, started, dry_run=dry_run, failure=failure)
     return run_record
 
 
-def _finish(run_record: SearchRun, counts: PipelineCounts, result, started: float, dry_run: bool) -> None:
+def _finish(run_record: SearchRun, counts: PipelineCounts, result, started: float, dry_run: bool, failure=None) -> None:
     """Fecha o `SearchRun`: parcial quando algum item falhou, concluída quando não.
 
     `result` é o `FetchResult` do adapter, quando existe; `run_items_record` não tem
     adapter e por isso passa `None` — o `next_page` já veio gravado na criação.
     """
-    if counts.errors and counts.seen == counts.errors:
+    if failure or (counts.errors and counts.seen == counts.errors):
         status = SearchRun.Status.FAILED
     elif counts.errors:
         status = SearchRun.Status.PARTIAL
@@ -153,6 +158,10 @@ def _finish(run_record: SearchRun, counts: PipelineCounts, result, started: floa
             "next_page",
         ]
     )
+    outcome = {SearchRun.Status.DONE: "completed", SearchRun.Status.PARTIAL: "partial", SearchRun.Status.FAILED: "failed"}[status]
+    audit_log(actor=run_record.started_by, action=f"question_import.{outcome}", resource_type="search_run", resource_id=run_record.pk,
+              after={"status": status, "counts": run_record.counts},
+              context={"entrypoint": "questions.ingest", "source": run_record.source.slug, "dry_run": dry_run, **({"error_type": failure} if failure else {})})
     if run_record.status == SearchRun.Status.FAILED:
         logger.error("Importação %s falhou em todos os itens.", run_record.pk)
 
@@ -190,6 +199,7 @@ def run_items_record(
     )
     started = time.monotonic()
     counts = PipelineCounts()
+    failure = None
     try:
         run_items(
             source,
@@ -199,8 +209,11 @@ def run_items_record(
             search_run=run_record,
             force_duplicates=force_duplicates,
         )
+    except Exception as exc:
+        failure = type(exc).__name__
+        raise
     finally:
-        _finish(run_record, counts, None, started, dry_run=dry_run)
+        _finish(run_record, counts, None, started, dry_run=dry_run, failure=failure)
     return run_record
 
 

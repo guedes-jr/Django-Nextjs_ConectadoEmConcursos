@@ -50,9 +50,10 @@ type Props = {
   onSelect: () => void;
   selected?: boolean;
   loading?: boolean;
+  disabled?: boolean;
 };
 
-export default function PlanCard({ plan, cycle, onSelect, selected, loading }: Props) {
+export default function PlanCard({ plan, cycle, onSelect, selected, loading, disabled }: Props) {
   const price = plan.price[cycle];
   const accent: Accent = plan.accent;
 
@@ -111,7 +112,7 @@ export default function PlanCard({ plan, cycle, onSelect, selected, loading }: P
       <div className="mt-8">
         <button
           type="button"
-          disabled={selected || loading}
+          disabled={selected || loading || disabled}
           onClick={onSelect}
           className={[
             "w-full rounded-xl px-4 py-2.5 text-sm font-bold transition",

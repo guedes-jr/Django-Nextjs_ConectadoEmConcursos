@@ -100,6 +100,7 @@ def _admin_notice_payload(recipient):
         "id": item.id, "recipient_id": recipient.id, "title": item.title, "summary": item.summary, "body": item.body,
         "priority": item.priority, "image_url": item.image_url, "video_url": item.video_url, "links": item.links,
         "postpone_hours": item.postpone_hours, "max_postpones": item.max_postpones,
+        "postpone_count": recipient.postpone_count,
     }
 
 

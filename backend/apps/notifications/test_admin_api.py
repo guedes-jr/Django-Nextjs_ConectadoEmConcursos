@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from rest_framework.test import APITestCase
 
 from .delivery import materialize_recipients
@@ -9,6 +10,7 @@ class AdminNotificationApiTests(APITestCase):
     def setUp(self):
         self.staff = get_user_model().objects.create_user(username="admin-notify", password="secret", is_staff=True)
         self.user = get_user_model().objects.create_user(username="recipient-notify", password="secret")
+        self.staff.groups.add(Group.objects.get(name="Administrador"))
         self.client.force_authenticate(self.staff)
 
     def test_staff_can_create_and_publish_selected_notification(self):

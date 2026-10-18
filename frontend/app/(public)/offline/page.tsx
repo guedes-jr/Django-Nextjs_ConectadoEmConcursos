@@ -46,7 +46,7 @@ export default function OfflinePage() {
         <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => navigator.onLine ? window.location.assign("/login") : window.location.reload()}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white shadow transition-colors hover:bg-blue-700 active:scale-[0.98]"
           >
             <RefreshCw size={16} />

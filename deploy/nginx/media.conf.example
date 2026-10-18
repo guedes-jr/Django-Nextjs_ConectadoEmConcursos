@@ -1,0 +1,14 @@
+# Incluir no server público e adaptar o caminho ao MEDIA_ROOT persistente.
+# Não substitui a configuração completa de TLS/proxy do ambiente.
+location ^~ /media/ {
+    alias /srv/conectado/media/;
+    autoindex off;
+    disable_symlinks on;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+    limit_except GET HEAD { deny all; }
+}
+
+# Nenhum diretório privado deve possuir alias/root público.
+location ^~ /backups/ { deny all; }
+location ^~ /private/ { deny all; }

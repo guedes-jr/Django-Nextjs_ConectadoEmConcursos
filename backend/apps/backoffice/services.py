@@ -1,15 +1,13 @@
 import datetime as dt
-import shutil
-import sqlite3
-import tarfile
-import tempfile
+from uuid import uuid4
 from pathlib import Path
 
 from django.conf import settings
+from .audit import operation, log as audit_log
 
 
 def _stamp():
-    return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
 
 
 def list_backups(backup_dir=None):
@@ -19,6 +17,8 @@ def list_backups(backup_dir=None):
     items = []
     for path in sorted(backup_dir.glob("backup-*.tar.gz"), reverse=True):
         try:
+            if path.is_symlink() or not path.is_file():
+                continue
             stat = path.stat()
             items.append(
                 {
@@ -32,64 +32,21 @@ def list_backups(backup_dir=None):
     return items
 
 
-def create_backup(db_path=None, media_root=None, backup_dir=None):
-    backup_dir = Path(backup_dir) if backup_dir else Path(settings.BACKUP_DIR)
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    db_path = Path(db_path) if db_path else Path(settings.DATABASES["default"]["NAME"])
-    media_root = Path(media_root) if media_root else Path(settings.MEDIA_ROOT)
-    archive_path = backup_dir / f"backup-{_stamp()}.tar.gz"
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        db_copy = tmp_path / "db.sqlite3"
-        with sqlite3.connect(db_path) as source, sqlite3.connect(db_copy) as target:
-            source.backup(target)
-
-        files = [("db.sqlite3", db_copy)]
-        if media_root.exists() and any(media_root.rglob("*")):
-            files.append(("media", media_root))
-
-        with tarfile.open(archive_path, "w:gz") as tar:
-            for arcname, filepath in files:
-                tar.add(filepath, arcname=arcname)
-
-    prune_backups(backup_dir)
-    return archive_path.name
+def _create_backup(db_path=None, media_root=None, backup_dir=None):
+    from . import backup_storage
+    directory = Path(backup_dir or settings.BACKUP_DIR)
+    name = f"backup-{_stamp()}-{uuid4().hex[:8]}.tar.gz"
+    with backup_storage.operation_lock(directory):
+        backup_storage.create_archive(directory, name, db_path=db_path, media_root=media_root)
+        prune_backups(directory)
+    return name
 
 
-def restore_backup(name, db_path=None, media_root=None, backup_dir=None):
-    backup_dir = Path(backup_dir) if backup_dir else Path(settings.BACKUP_DIR)
-    db_path = Path(db_path) if db_path else Path(settings.DATABASES["default"]["NAME"])
-    media_root = Path(media_root) if media_root else Path(settings.MEDIA_ROOT)
-    archive_path = backup_dir / name
-    if not name or not archive_path.is_file() or not archive_path.name.startswith("backup-"):
-        raise ValueError("Backup não encontrado.")
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        with tarfile.open(archive_path, "r:gz") as tar:
-            tar.extractall(tmp_path, filter=tarfile.data_filter)
-
-        db_copy = tmp_path / "db.sqlite3"
-        if not db_copy.is_file() or db_copy.stat().st_size == 0:
-            raise ValueError("Backup inválido: arquivo de banco ausente ou vazio.")
-
-        media_copy = tmp_path / "media"
-        db_backup_path = db_path.with_suffix(".sqlite3.bak")
-        shutil.copy2(db_path, db_backup_path)
-
-        with sqlite3.connect(db_copy) as source, sqlite3.connect(db_path) as target:
-            source.backup(target)
-
-        if media_copy.exists():
-            if media_root.exists():
-                shutil.rmtree(media_root)
-            shutil.copytree(media_copy, media_root)
-
-    return {
-        "restored": name,
-        "previous_db_saved_at": db_backup_path.name,
-    }
+def _restore_backup(name, db_path=None, media_root=None, backup_dir=None, *, maintenance=False):
+    from . import backup_storage
+    directory = Path(backup_dir or settings.BACKUP_DIR)
+    with backup_storage.operation_lock(directory):
+        return backup_storage.restore_archive(directory, name, db_path=db_path, media_root=media_root, maintenance=maintenance)
 
 
 def prune_backups(backup_dir=None):
@@ -101,3 +58,21 @@ def prune_backups(backup_dir=None):
             path.unlink()
         except OSError:
             pass
+
+
+def create_backup(db_path=None, media_root=None, backup_dir=None, *, request=None):
+    with operation("backup.create", resource_type="backup", request=request) as summary:
+        name = _create_backup(db_path, media_root, backup_dir)
+        summary["name"] = name
+        audit_log(request, action="backup.created", resource_type="backup", resource_id=name, after=summary)
+        return name
+
+
+def restore_backup(name, db_path=None, media_root=None, backup_dir=None, *, request=None, maintenance=False):
+    # Do not persist arbitrary input paths in the audit trail.
+    safe_name = Path(name).name if name else ""
+    with operation("backup.restore", resource_type="backup", resource_id=safe_name, request=request) as summary:
+        result = _restore_backup(name, db_path, media_root, backup_dir, maintenance=maintenance and request is None)
+        summary.update(result)
+        audit_log(request, action="backup.restored", resource_type="backup", resource_id=safe_name, after=result)
+        return result

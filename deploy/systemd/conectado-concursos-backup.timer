@@ -1,0 +1,11 @@
+[Unit]
+Description=Backup diário do Conectado (cópia externa deve ser provisionada)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=conectado-concursos-backup.service
+
+[Install]
+WantedBy=timers.target

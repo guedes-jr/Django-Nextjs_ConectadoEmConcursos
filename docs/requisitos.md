@@ -17,12 +17,12 @@
 ### Chat e planos
 - [x] Conversas persistentes e isoladas por usuário
 - [x] Contexto real de provas, questões e desempenho
-- [x] Assistência local e integração opcional com OpenAI
+- [x] Assistência local e OpenRouter com busca de questões aprovadas (OpenAI legado opcional)
 - [x] Limites diários, auditoria de provedor/modelo/tokens e permissões por plano
 - [x] Catálogo e seleção de planos
 - [ ] Checkout, webhooks, renovação e cancelamento financeiro reais
 - [x] Ferramenta avançada de contexto de provas/questões restrita ao plano Avançado
-- [ ] Simulados completos com IA e biblioteca de materiais (expansões futuras)
+- [x] Simulados com questões recuperadas pelo assistente e biblioteca privada de materiais (ver `operacao-ia.md`)
 
 ### PWA (ver `docs/plano-pwa.md`)
 - [x] Manifesto, ícones (any/maskable) e metadados de instalação (`viewport`, `appleWebApp`)
@@ -30,10 +30,11 @@
 - [x] Prompt de instalação (Chromium/Edge/Android/desktop) e instruções manuais no iOS
 - [x] Safe-area e ajustes de UX mobile
 - [x] Headers de cache do service worker e do manifesto
-- [ ] Regras de cache do `/sw.js` no nginx do servidor de produção
+- [x] Regras de cache do `/sw.js` validadas no nginx de produção (18/10/2026)
 - [ ] Validação em devices reais (iOS Safari e Android Chrome)
 
 ### Produção
+- [x] Implantação inicial com SQLite/mídia persistentes, backup/restauração isolada, worker e timers (ver `implantacao-2026-10-18.md`)
 - [ ] Provedor SMTP/API transacional
 - [ ] PostgreSQL, armazenamento de mídia e backups
 - [ ] CI/CD, monitoramento de erros e testes E2E do frontend

@@ -1,0 +1,10 @@
+[Unit]
+Description=Publica conteúdo agendado a cada minuto
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=conectado-concursos-publish.service
+
+[Install]
+WantedBy=timers.target

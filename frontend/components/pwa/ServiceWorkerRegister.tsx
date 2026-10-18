@@ -11,8 +11,13 @@ export function ServiceWorkerRegister() {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
     let reloading = false;
+    let controlled = Boolean(navigator.serviceWorker.controller);
+    let disposed = false;
+    let interval: number | undefined;
+    const cleanups: (() => void)[] = [];
 
     const onControllerChange = () => {
+      if (!controlled) { controlled = true; return; }
       if (reloading) return;
       reloading = true;
       window.location.reload();
@@ -24,23 +29,30 @@ export function ServiceWorkerRegister() {
       try {
         const registration = await navigator.serviceWorker.register("/sw.js", {
           scope: "/",
+          updateViaCache: "none",
         });
 
+        if (disposed) return;
         if (registration.waiting && navigator.serviceWorker.controller) {
           setWaiting(registration.waiting);
         }
 
-        registration.addEventListener("updatefound", () => {
+        const onUpdateFound = () => {
           const installing = registration.installing;
           if (!installing) return;
-          installing.addEventListener("statechange", () => {
-            if (installing.state === "installed" && navigator.serviceWorker.controller) {
+          const onStateChange = () => {
+            if (!disposed && installing.state === "installed" && navigator.serviceWorker.controller) {
               setWaiting(registration.waiting ?? installing);
             }
-          });
-        });
+          };
+          installing.addEventListener("statechange", onStateChange);
+          cleanups.push(() => installing.removeEventListener("statechange", onStateChange));
+        };
+        registration.addEventListener("updatefound", onUpdateFound);
+        cleanups.push(() => registration.removeEventListener("updatefound", onUpdateFound));
+        if (registration.installing) onUpdateFound();
 
-        window.setInterval(() => {
+        interval = window.setInterval(() => {
           registration.update().catch(() => {});
         }, 60 * 60 * 1000);
       } catch {
@@ -51,6 +63,9 @@ export function ServiceWorkerRegister() {
     register();
 
     return () => {
+      disposed = true;
+      if (interval !== undefined) window.clearInterval(interval);
+      cleanups.forEach(cleanup => cleanup());
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
     };
   }, []);
@@ -69,7 +84,7 @@ export function ServiceWorkerRegister() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">Nova versão disponível</p>
           <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
-            Atualize para entrar em contato com os últimos recursos do app.
+            Salve o que estiver fazendo antes de atualizar. Outras abas abertas também serão recarregadas.
           </p>
         </div>
         <button

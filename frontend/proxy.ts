@@ -7,7 +7,9 @@ export function proxy(request: NextRequest) {
     request.cookies.has("sessionid") || request.cookies.has("access");
 
   if (!hasAuthenticationCookie) {
-    const url = request.nextUrl.clone();
+    const url = process.env.APP_PUBLIC_URL
+      ? new URL("/login", process.env.APP_PUBLIC_URL)
+      : request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";
     url.searchParams.set(
@@ -36,6 +38,7 @@ export const config = {
     "/flashcards/:path*",
     "/notes/:path*",
     "/summaries/:path*",
+    "/materials/:path*",
     "/people/:path*",
     "/forum/:path*",
     "/feed/:path*",

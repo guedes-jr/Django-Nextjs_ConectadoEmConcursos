@@ -1,0 +1,7 @@
+import type { ReactNode } from "react";
+import { StatCard } from "@/components/admin/StatCard";
+
+export type CatalogMetric = {key: string; title: string; hint: string; icon: ReactNode; accent?: "indigo" | "emerald" | "amber" | "rose" | "sky" | "violet"; filter?: [string, string]};
+export function CatalogSummary({label, overview, metrics, query, change, clear}: {label: string; overview?: Record<string, number>; metrics: CatalogMetric[]; query: Record<string,string>; change: (key:string,value:string)=>void; clear:()=>void}) {
+  return <section aria-label={label} className="space-y-2"><p className="text-xs text-slate-500">Visão geral de todos os registros · independente dos filtros da lista</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{metrics.map(metric => <button key={metric.key} type="button" aria-label={metric.filter ? `Filtrar ${metric.title.toLowerCase()}` : "Mostrar todos os registros"} aria-pressed={metric.filter ? query[metric.filter[0]] === metric.filter[1] : undefined} className="rounded-xl text-left focus-visible:outline-2 focus-visible:outline-indigo-500 aria-pressed:ring-2 aria-pressed:ring-indigo-500 [&>div]:h-full" onClick={() => metric.filter ? change(metric.filter[0], query[metric.filter[0]] === metric.filter[1] ? "" : metric.filter[1]) : clear()}><StatCard title={metric.title} value={overview?.[metric.key] ?? "—"} hint={metric.hint} icon={metric.icon} accent={metric.accent} /></button>)}</div></section>;
+}

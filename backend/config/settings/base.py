@@ -48,6 +48,12 @@ INSTALLED_APPS = [
     "apps.notifications",
 ]
 
+# OpenRouter is the default AI provider; paid routing requires explicit opt-in.
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+OPENROUTER_ALLOW_PAID = os.getenv("OPENROUTER_ALLOW_PAID", "false").lower() == "true"
+OPENROUTER_TIMEOUT = int(os.getenv("OPENROUTER_TIMEOUT", "45"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/responses")
@@ -59,10 +65,15 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "false").lower() == "true"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "false").lower() == "true"
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
+EMAIL_SSL_CERTFILE = os.getenv("EMAIL_SSL_CERTFILE") or None
+EMAIL_SSL_KEYFILE = os.getenv("EMAIL_SSL_KEYFILE") or None
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "apps.core.observability.RequestObservabilityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -118,12 +129,25 @@ Q_CLUSTER = {
     "redis": {"host": os.getenv("Q_REDIS_HOST", "127.0.0.1"), "port": int(os.getenv("Q_REDIS_PORT", "6379")), "db": int(os.getenv("Q_REDIS_DB", "1"))},
 }
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+if os.getenv("DB_ENGINE") == "django.db.backends.postgresql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("DB_NAME", "conectado_concursos"),
+            "USER": os.getenv("DB_USER", "conectado_dev"),
+            "PASSWORD": os.getenv("DB_PASSWORD", ""),
+            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+            "PORT": os.getenv("DB_PORT", "5432"),
+            "OPTIONS": {"sslmode": os.environ["DB_SSLMODE"]} if os.getenv("DB_SSLMODE") else {},
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": Path(os.getenv("DB_SQLITE_PATH", BASE_DIR / "db.sqlite3")),
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -138,12 +162,17 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", BASE_DIR / "media"))
 OFFICIAL_EXAMS_ROOT = Path(os.getenv("OFFICIAL_EXAMS_ROOT", BASE_DIR / "private" / "official-exams"))
 
-BACKUP_DIR = BASE_DIR / "backups"
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", BASE_DIR / "backups"))
 BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "20"))
+PG_DUMP_BIN = os.getenv("PG_DUMP_BIN", "pg_dump")
+PG_RESTORE_BIN = os.getenv("PG_RESTORE_BIN", "pg_restore")
+BACKUP_COMMAND_TIMEOUT = int(os.getenv("BACKUP_COMMAND_TIMEOUT", "600"))
+BACKUP_MAX_FILES = int(os.getenv("BACKUP_MAX_FILES", "100000"))
+BACKUP_MAX_UNPACKED_BYTES = int(os.getenv("BACKUP_MAX_UNPACKED_BYTES", "10737418240"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -248,3 +277,28 @@ REPORT_EXPORT_MAX_ROWS = int(os.getenv("REPORT_EXPORT_MAX_ROWS", "1000"))
 DIAGNOSTICS_ENABLED = os.getenv("DIAGNOSTICS_ENABLED", "0") == "1"
 # Lista explícita de arquivos que podem aparecer no diagnóstico; não aceita caminhos enviados pelo navegador.
 DIAGNOSTICS_LOG_FILES = tuple(path.strip() for path in os.getenv("DIAGNOSTICS_LOG_FILES", "").split(",") if path.strip())
+
+# Diagnostic collectors use fixed budgets and a server-configured health snapshot.
+DIAGNOSTICS_LOG_MAX_BYTES = int(os.getenv("DIAGNOSTICS_LOG_MAX_BYTES", "1048576"))
+DIAGNOSTICS_LOG_MAX_LINES = int(os.getenv("DIAGNOSTICS_LOG_MAX_LINES", "5000"))
+DIAGNOSTICS_LOG_EXPORT_LINES = int(os.getenv("DIAGNOSTICS_LOG_EXPORT_LINES", "500"))
+DIAGNOSTICS_LOG_EXPORT_MAX_BYTES = int(os.getenv("DIAGNOSTICS_LOG_EXPORT_MAX_BYTES", "262144"))
+DIAGNOSTICS_QUERY_TIMEOUT_MS = int(os.getenv("DIAGNOSTICS_QUERY_TIMEOUT_MS", "3000"))
+DIAGNOSTICS_RESULT_MAX_BYTES = int(os.getenv("DIAGNOSTICS_RESULT_MAX_BYTES", "32768"))
+DIAGNOSTICS_REQUESTS_PER_MINUTE = int(os.getenv("DIAGNOSTICS_REQUESTS_PER_MINUTE", "60"))
+DIAGNOSTICS_ROUTINES_PER_MINUTE = int(os.getenv("DIAGNOSTICS_ROUTINES_PER_MINUTE", "6"))
+DIAGNOSTICS_HEALTH_FILE = os.getenv("DIAGNOSTICS_HEALTH_FILE", "")
+DIAGNOSTICS_HEALTH_MAX_AGE_SECONDS = int(os.getenv("DIAGNOSTICS_HEALTH_MAX_AGE_SECONDS", "300"))
+DIAGNOSTICS_SLOW_QUERY_STATS = os.getenv("DIAGNOSTICS_SLOW_QUERY_STATS", "0") == "1"
+DIAGNOSTICS_APP_VERSION = os.getenv("APP_VERSION", "")
+
+# Stripe Checkout: disabled until keys and recurring Price IDs are configured.
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_LIVE_MODE = os.getenv("STRIPE_LIVE_MODE", "0") == "1"
+STRIPE_PRICE_IDS = json.loads(os.getenv("STRIPE_PRICE_IDS", "{}"))
+
+# Safe structured failure metadata for the host log collector.
+LOGGING = {"version": 1, "disable_existing_loggers": False, "handlers": {"error_console": {"class": "logging.StreamHandler"}},
+           "loggers": {"conectado.errors": {"handlers": ["error_console"], "level": "ERROR", "propagate": False}}}
+CORS_EXPOSE_HEADERS = ["X-Request-ID"]

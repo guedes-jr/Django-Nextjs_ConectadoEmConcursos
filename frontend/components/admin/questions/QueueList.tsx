@@ -19,6 +19,7 @@ export type QueueState = {
 };
 
 type Props = {
+  hideFilters?: boolean;
   state: QueueState;
   selectedId: number | null;
   onSelect: (question: ReviewQuestion) => void;
@@ -44,6 +45,7 @@ const STATUS_OPTIONS = [
 ];
 
 export function QueueList({
+  hideFilters=false,
   state,
   selectedId,
   onSelect,
@@ -71,6 +73,7 @@ export function QueueList({
 
   // O histórico de buscas é por fonte: trocar de fonte descarta a execução escolhida.
   useEffect(() => {
+    if(hideFilters)return;
     let active = true;
     void (async () => {
       try {
@@ -83,7 +86,7 @@ export function QueueList({
     return () => {
       active = false;
     };
-  }, [selectedSource]);
+  }, [selectedSource,hideFilters]);
 
   const apply = (patch: Partial<QueueFilters>) => {
     onFiltersChange({ ...filters, ...patch, offset: 0 });
@@ -102,7 +105,7 @@ export function QueueList({
   }
 
   return (
-    <div className="space-y-3 lg:w-96 lg:shrink-0">
+    <div className="w-full min-w-0 space-y-3 lg:w-80 lg:shrink-0">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" aria-label="Recolher lista" onClick={() => onListOpenChange(false)}>
           <PanelLeftClose className="h-4 w-4" />
@@ -118,6 +121,7 @@ export function QueueList({
         </Button>
       </div>
 
+      {!hideFilters&&<>
       <div className="flex gap-2">
         <Input
           value={search}
@@ -268,6 +272,7 @@ export function QueueList({
         </div>
       )}
 
+      </>}
       <div className="space-y-2">
         {state.loading && (
           <p className="flex items-center gap-2 px-1 py-4 text-sm text-slate-500">
@@ -276,11 +281,11 @@ export function QueueList({
         )}
         {!state.loading && state.results.length === 0 && (
           <EmptyState
-            title="Fila em dia"
-            description="Nenhuma questão com esses filtros. Inicie uma nova busca para continuar."
+            title="Nenhuma questão neste recorte"
+            description="Ajuste os filtros ou selecione outra fonte."
           />
         )}
-        {state.results.map((question) => (
+        {!state.loading&&state.results.map((question) => (
           <button
             key={question.id}
             type="button"
@@ -302,7 +307,7 @@ export function QueueList({
               )}
             </div>
             <p className="line-clamp-2 text-sm text-slate-700 dark:text-slate-200">
-              {question.statement.replace(/\[\[image:[^\]]+\]\]/g, " [imagem] ")}
+              {question.statement.replace(/<[^>]+>/g," ").replace(/\[\[image:[^\]]+\]\]/g, " [imagem] ")}
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {question.source?.label ?? "—"} · {question.banca || "—"} · {question.discipline} · {question.year}

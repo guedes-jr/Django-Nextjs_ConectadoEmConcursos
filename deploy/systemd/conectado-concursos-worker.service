@@ -1,0 +1,22 @@
+[Unit]
+Description=Conectado Django Q worker e scheduler
+After=network.target redis-server.service
+
+[Service]
+Type=exec
+User=deploy
+Group=www-data
+WorkingDirectory=/var/www/conectado-em-concursos/backend
+Environment=DJANGO_ENV=production
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py qcluster
+Restart=on-failure
+RestartSec=5
+# Permite terminar uma tarefa dentro de Q_TIMEOUT antes de encerrar os filhos.
+TimeoutStopSec=150
+KillMode=mixed
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

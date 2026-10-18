@@ -18,13 +18,14 @@ import { Notice } from "@/components/admin/Notice";
 import { content, apiMessage, type ContentSource, type FilterSpec, type SearchRun } from "@/lib/content";
 
 type Props = {
+  initialSource?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFinished: (run: SearchRun) => void;
 };
 
 /** Passo 1: fonte. Passo 2: filtros declarados por ela. */
-export function SearchDialog({ open, onOpenChange, onFinished }: Props) {
+export function SearchDialog({ open, onOpenChange, onFinished, initialSource }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [sources, setSources] = useState<ContentSource[]>([]);
   const [source, setSource] = useState<ContentSource | null>(null);
@@ -34,19 +35,6 @@ export function SearchDialog({ open, onOpenChange, onFinished }: Props) {
   const [dryRun, setDryRun] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setStep(1);
-    setError(null);
-    void (async () => {
-      try {
-        setSources(await content.sources());
-      } catch {
-        setError("Não foi possível carregar as fontes.");
-      }
-    })();
-  }, [open]);
 
   // Trocar de fonte descarta o formulário: `banca` na fonte A e `banca` na fonte
   // B podem significar coisas diferentes, e reaproveitar o valor seria silencioso.
@@ -65,6 +53,28 @@ export function SearchDialog({ open, onOpenChange, onFinished }: Props) {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setStep(1);
+    setSource(null);
+    setDryRun(false);
+    setLimit("200");
+    setError(null);
+    void (async () => {
+      try {
+        const available = await content.sources();
+        if (cancelled) return;
+        setSources(available);
+        const initial = available.find(item => item.slug === initialSource);
+        if (initial) await chooseSource(initial);
+      } catch {
+        setError("Não foi possível carregar as fontes.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, initialSource, chooseSource]);
 
   const missingRequired = useMemo(
     () => specs.filter((spec) => spec.required && !String(values[spec.key] ?? "").trim()),

@@ -185,7 +185,7 @@ export default function WhiteboardPage() {
   };
 
   return (
-    <main className="min-h-[calc(100vh-56px)] bg-slate-50 p-4 dark:bg-slate-950">
+    <main className="whiteboard-page min-h-[calc(100dvh-56px)] bg-slate-50 p-4 dark:bg-slate-950">
       <div className="mx-auto grid max-w-[1500px] gap-4 lg:grid-cols-[280px_1fr]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between gap-3">
@@ -222,7 +222,7 @@ export default function WhiteboardPage() {
             </div>
           </div>
 
-          <div className="h-[78vh] w-full">
+          <div className="h-[78dvh] w-full">
             <Excalidraw
               langCode="pt-BR"
               initialData={initialData}

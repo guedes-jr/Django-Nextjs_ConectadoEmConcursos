@@ -9,14 +9,15 @@ from django.core.exceptions import ValidationError
 from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from apps.backoffice.audit import log as audit_log
+from apps.backoffice.audit import log as audit_log, audit_request
+from apps.backoffice.permissions import EditorialAccess, ReviewAccess, has_role
 from apps.questions import moderation
 from apps.questions.ingest import run as run_search
 from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
@@ -184,14 +185,27 @@ def _validation_response(exc):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def sources(request):
     queryset = QuestionSource.objects.filter(is_active=True).order_by("name")
     return Response({"results": [_source_payload(source) for source in queryset]})
 
 
+def _catalog_response(request, rows, overview):
+    total = len(rows)
+    try:
+        size = min(100, max(1, int(request.query_params.get("page_size", 12))))
+        page = min(max(1, int(request.query_params.get("page", 1))), max(1, (total + size - 1) // size))
+    except (ValueError, TypeError):
+        return Response({"detail": "Paginação inválida."}, status=400)
+    return Response({"results": rows[(page - 1) * size:page * size], "count": total, "page": page,
+                     "overview": overview, "can_manage": has_role(request.user, "admin", "editor"),
+                     "can_configure": request.user.has_perm("questions.add_questionsource"),
+                     "permissions": {"can_create_source": request.user.has_perm("questions.add_questionsource"), "can_change_source": request.user.has_perm("questions.change_questionsource")}})
+
+
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def source_catalog(request):
     """Catálogo completo, separado da lista operacional usada pela busca."""
     queryset = QuestionSource.objects.annotate(
@@ -199,11 +213,24 @@ def source_catalog(request):
         pending_total=Count("questions", filter=Q(questions__status=Question.Status.PENDING), distinct=True),
         runs_total=Count("runs", distinct=True),
     ).order_by("name")
-    return Response({"results": [_source_catalog_payload(source) for source in queryset]})
+    rows = [_source_catalog_payload(source) for source in queryset]
+    if "page" not in request.query_params:
+        return Response({"results": rows})
+    overview = {"total": len(rows), **{key: sum(row["availability"] == key for row in rows) for key in ("ready", "missing_license", "inactive")},
+                "pending": sum(row["pending_total"] > 0 for row in rows)}
+    if search := request.query_params.get("search", "").strip().lower():
+        rows = [row for row in rows if search in f"{row['label']} {row['slug']} {row['license_name']}".lower()]
+    if availability := request.query_params.get("availability"):
+        rows = [row for row in rows if row["availability"] == availability]
+    if request.query_params.get("pending") == "1":
+        rows = [row for row in rows if row["pending_total"] > 0]
+    order = request.query_params.get("ordering", "name")
+    rows.sort(key=lambda row: (row["pending_total"] if order == "pending" else row["id"] if order == "recent" else row["label"].lower(), row["id"]), reverse=order in {"pending", "recent", "-name"})
+    return _catalog_response(request, rows, overview)
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def source_filters(request, slug):
     source = _source_or_404(slug)
     if not source:
@@ -231,7 +258,8 @@ def source_filters(request, slug):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
+@audit_request
 def question_search(request):
     if request.method == "POST":
         source_slug = request.data.get("source")
@@ -250,7 +278,7 @@ def question_search(request):
         except AdapterNotConfigured as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         payload = _run_payload(run)
-        audit_log(request, action="question_search.started", resource_type="search_run", resource_id=run.id, after={"source": source.slug, "dry_run": run.dry_run, "limit": run.limit})
+        audit_log(request, action="question_search.started", resource_type="search_run", resource_id=run.id, after={"source": source.slug, "dry_run": bool(request.data.get("dry_run", False)), "limit": run.limit})
         return Response(payload, status=status.HTTP_201_CREATED)
 
     queryset = SearchRun.objects.select_related("source", "started_by", "parent").order_by("-started_at")
@@ -264,7 +292,7 @@ def question_search(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def question_search_detail(request, pk):
     run = SearchRun.objects.select_related("source", "started_by", "parent").filter(pk=pk).first()
     if not run:
@@ -299,12 +327,13 @@ def _resume_run(request, pk, page):
     except AdapterNotConfigured as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
     payload = _run_payload(run)
-    audit_log(request, action="question_search.resumed", resource_type="search_run", resource_id=run.id, after={"parent": parent.id, "page": page, "dry_run": run.dry_run})
+    audit_log(request, action="question_search.resumed", resource_type="search_run", resource_id=run.id, after={"parent": parent.id, "page": page, "dry_run": bool(request.data.get("dry_run", False))})
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
+@audit_request
 def question_search_continue(request, pk):
     run = SearchRun.objects.filter(pk=pk).only("next_page").first()
     if not run:
@@ -315,7 +344,8 @@ def question_search_continue(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
+@audit_request
 def question_search_rerun(request, pk):
     return _resume_run(request, pk, 1)
 
@@ -346,13 +376,20 @@ def _filter_by_duplicates(queryset, params, order=QUEUE_PRIORITY_ORDER):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def questions_queue(request):
     # Mesma prioridade do admin (`apps/questions/queue.py`): se as duas telas
     # divergirem, o revisor corrige uma questão e a API entrega outra.
     queryset = annotate_queue_priority(
         Question.objects.select_related("source", "exam", "reviewed_by", "search_run")
     )
+    overview = Question.objects.aggregate(total=Count("id"), **{value: Count("id", filter=Q(status=value)) for value in Question.Status.values})
+    try:
+        if question_id := request.query_params.get("question_id"): queryset = queryset.filter(pk=int(question_id))
+        if request.query_params.get("year"): int(request.query_params["year"])
+        if request.query_params.get("search_run"): int(request.query_params["search_run"])
+    except (ValueError, TypeError):
+        return Response({"detail": "Informe ID, ano e busca válidos."}, status=400)
     status_filter = request.query_params.get("status", Question.Status.PENDING)
     if status_filter:
         queryset = queryset.filter(status=status_filter)
@@ -372,21 +409,23 @@ def questions_queue(request):
         queryset = queryset.filter(year=year)
     if search := request.query_params.get("search"):
         queryset = queryset.filter(Q(statement__icontains=search) | Q(explanation__icontains=search))
+    scan_limited = bool((request.query_params.get("duplicates") or request.query_params.get("conflict")) and queryset.count() > DUPLICATE_SCAN_LIMIT)
     if request.query_params.get("duplicates") or request.query_params.get("conflict"):
         queryset = _filter_by_duplicates(queryset, request.query_params, order)
     limit, offset = _number(request.query_params.get("limit")), _offset(request.query_params.get("offset"))
     queryset = queryset.order_by(*order)
     total = queryset.count()
+    if offset >= total: offset = max(0, ((total - 1) // limit) * limit)
     checker = _checker()
     results = [
         _question_payload(question, _duplicates(checker, question))
         for question in queryset[offset : offset + limit]
     ]
-    return Response({"total": total, "limit": limit, "offset": offset, "results": results})
+    return Response({"total": total, "limit": limit, "offset": offset, "results": results, "overview": overview, "can_review": has_role(request.user, "admin", "reviewer"), "review_policy": {"min_explanation_chars": moderation.MIN_EXPLANATION_CHARS}, "duplicate_scan_limited": scan_limited, "duplicate_scan_limit": DUPLICATE_SCAN_LIMIT})
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def questions_queue_next(request):
     queryset = Question.objects.select_related("source", "exam", "reviewed_by", "search_run").filter(status=Question.Status.PENDING).order_by("id")
     if search_run := request.query_params.get("search_run"):
@@ -461,19 +500,18 @@ def _moderate(request, action):
             )
         try:
             if action == "approve":
-                moderation.approve(question, request.user, request.data.get("explanation"))
+                moderation.approve(question, request.user, request.data.get("explanation"), request=request)
             else:
-                moderation.reject(question, request.user, request.data.get("reason"), request.data.get("reason_code"))
+                moderation.reject(question, request.user, request.data.get("reason"), request.data.get("reason_code"), request=request)
         except ValidationError as exc:
             return _validation_response(exc)
         payload = _question_payload(question, [])
-        audit_log(request, action=f"question.{action}d", resource_type="question", resource_id=question.id, before={"status": Question.Status.PENDING}, after={"status": question.status, "review_note": question.review_note}, reason=str(request.data.get("reason") or request.data.get("reason_code") or ""))
         changed.append(payload)
     return Response({"results": changed})
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def questions_draft(request):
     """Rascunho do revisor: anota o texto sem aprovar nem reprovar.
 
@@ -487,6 +525,8 @@ def questions_draft(request):
     if len(questions) != len(set(ids)):
         return Response({"id": ["Uma ou mais questões não foram encontradas."]}, status=status.HTTP_404_NOT_FOUND)
     note = str(request.data.get("note", ""))
+    if any(_stale(request, question) or question.status != Question.Status.PENDING for question in questions):
+        return Response({"detail": "A questão foi alterada ou já foi revisada. Recarregue antes de salvar.", "code": "stale"}, status=409)
     for question in questions:
         question.review_note = note
         question.save(update_fields=["review_note", "updated_at"])
@@ -494,7 +534,7 @@ def questions_draft(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def rejection_reasons(request):
     """Motivos estruturados de rejeição: o formulário do admin monta a lista daqui."""
     return Response(
@@ -506,19 +546,20 @@ def rejection_reasons(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def questions_approve(request):
     return _moderate(request, "approve")
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def questions_reject(request):
     return _moderate(request, "reject")
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
+@audit_request
 def question_search_import_skipped(request, pk):
     parent = SearchRun.objects.select_related("source").filter(pk=pk).first()
     if not parent:
@@ -544,8 +585,9 @@ def question_search_import_skipped(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
+@audit_request
 def proofs_convert(request):
     """Converte a prova enviada pelo aluno em questões, pelo mesmo pipeline das fontes.
 
@@ -604,19 +646,19 @@ def _workflow_status(document):
 
 
 def _document_payload(document):
-    latest = document.downloads.order_by("-created_at").first()
+    latest = max(document.downloads.all(), key=lambda item: (item.created_at, item.id), default=None)
     return {"id": document.id, "portal": document.portal.slug, "portal_name": document.portal.name, "title": document.title, "year": document.year, "organization": document.organization, "role": document.role, "kind": document.kind, "status": document.status, "source_url": document.source_url, "paired_with": document.paired_with_id, "workflow_status": _workflow_status(document), "created_at": document.created_at, "download": {"status": latest.status, "bytes": latest.bytes_count, "sha256": latest.sha256, "error": latest.error_message, "finished_at": latest.finished_at, "final_url": latest.final_url} if latest else None}
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_portals(request):
     portals = OfficialExamPortal.objects.annotate(documents_count=Count("documents")).order_by("name")
     return Response({"results": [_portal_payload(portal) for portal in portals]})
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_metrics(request):
     downloads = OfficialExamDownload.objects.all()
     completed = list(downloads.filter(finished_at__isnull=False).only("created_at", "finished_at").order_by("-finished_at")[:500])
@@ -630,8 +672,29 @@ def official_exam_metrics(request):
         "average_duration_seconds": round(sum(durations) / len(durations), 1) if durations else None,
     })
 
+def _official_document_filters(documents, params):
+    for key, field in (("portal", "portal__slug"), ("kind", "kind"), ("status", "status")):
+        if params.get(key):
+            documents = documents.filter(**{field: params[key]})
+    if params.get("year"):
+        try:
+            documents = documents.filter(year=int(params["year"]))
+        except ValueError:
+            raise ValidationError({"year": "Informe um ano válido."})
+    for key in ("organization", "role"):
+        if params.get(key):
+            documents = documents.filter(**{f"{key}__icontains": params[key]})
+    if search := params.get("search", "").strip():
+        documents = documents.filter(Q(title__icontains=search) | Q(organization__icontains=search) | Q(role__icontains=search))
+    if params.get("category") == "keys":
+        documents = documents.exclude(kind=OfficialExamDocument.Kind.EXAM)
+    if params.get("pending") == "1":
+        documents = documents.filter(kind=OfficialExamDocument.Kind.EXAM, paired_with__isnull=True)
+    return documents
+
+
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_documents(request):
     if request.method == "POST":
         portal = OfficialExamPortal.objects.filter(slug=request.data.get("portal"), is_active=True).first()
@@ -651,44 +714,46 @@ def official_exam_documents(request):
         except (ValidationError, ValueError) as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_document_payload(document), status=status.HTTP_201_CREATED)
-    documents = OfficialExamDocument.objects.select_related("portal", "paired_with").order_by("-created_at")
-    if portal := request.query_params.get("portal"):
-        documents = documents.filter(portal__slug=portal)
-    if kind := request.query_params.get("kind"):
-        documents = documents.filter(kind=kind)
-    if document_status := request.query_params.get("status"):
-        documents = documents.filter(status=document_status)
-    if year := request.query_params.get("year"):
-        try:
-            documents = documents.filter(year=int(year))
-        except ValueError:
-            return Response({"year": ["Informe um ano válido."]}, status=status.HTTP_400_BAD_REQUEST)
-    if organization := request.query_params.get("organization"):
-        documents = documents.filter(organization__icontains=organization)
-    if role := request.query_params.get("role"):
-        documents = documents.filter(role__icontains=role)
-    return Response({"results": [_document_payload(document) for document in documents[:200]]})
+    documents = OfficialExamDocument.objects.select_related("portal", "paired_with").prefetch_related("downloads").order_by("-created_at")
+    overview = documents.aggregate(total=Count("id"), proofs=Count("id", filter=Q(kind="exam")),
+                                   keys=Count("id", filter=~Q(kind="exam")),
+                                   downloaded=Count("id", filter=Q(status="downloaded")),
+                                   pending=Count("id", filter=Q(kind="exam", paired_with__isnull=True)))
+    try:
+        documents = _official_document_filters(documents, request.query_params)
+    except ValidationError as exc:
+        return _validation_response(exc)
+    ordering = {"recent": "-id", "title": "title", "year": "-year"}
+    documents = documents.order_by(ordering.get(request.query_params.get("ordering"), "-id"), "id")
+    if "page" not in request.query_params:
+        return Response({"results": [_document_payload(document) for document in documents[:200]]})
+    # Pairing uses its own paginated search so candidates are never restricted to the current list page.
+    if compatible := request.query_params.get("compatible_with"):
+        current = OfficialExamDocument.objects.filter(pk=compatible).first() if compatible.isdigit() else None
+        if not current:
+            return Response({"detail": "Documento inválido."}, status=400)
+        documents = documents.filter(portal=current.portal).exclude(pk=current.pk).filter(Q(paired_with__isnull=True) | Q(paired_with=current))
+        documents = documents.exclude(kind="exam") if current.kind == "exam" else documents.filter(kind="exam")
+    total = documents.count()
+    try:
+        size = min(100, max(1, int(request.query_params.get("page_size", 12))))
+        page = min(max(1, int(request.query_params.get("page", 1))), max(1, (total + size - 1) // size))
+    except ValueError:
+        return Response({"detail": "Paginação inválida."}, status=400)
+    return Response({"results": [_document_payload(document) for document in documents[(page - 1) * size:page * size]],
+                     "count": total, "page": page, "overview": overview, "can_manage": has_role(request.user, "admin", "editor")})
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_export(request):
     documents = OfficialExamDocument.objects.select_related("portal", "paired_with").prefetch_related("downloads").order_by("portal__name", "-year", "title")
-    if portal := request.query_params.get("portal"):
-        documents = documents.filter(portal__slug=portal)
-    if kind := request.query_params.get("kind"):
-        documents = documents.filter(kind=kind)
-    if document_status := request.query_params.get("status"):
-        documents = documents.filter(status=document_status)
-    if year := request.query_params.get("year"):
-        try:
-            documents = documents.filter(year=int(year))
-        except ValueError:
-            return Response({"year": ["Informe um ano válido."]}, status=status.HTTP_400_BAD_REQUEST)
-    if organization := request.query_params.get("organization"):
-        documents = documents.filter(organization__icontains=organization)
-    if role := request.query_params.get("role"):
-        documents = documents.filter(role__icontains=role)
+    try:
+        documents = _official_document_filters(documents, request.query_params)
+    except ValidationError as exc:
+        return _validation_response(exc)
+    if documents.count() > 500:
+        return Response({"detail": "A exportação excede 500 documentos. Refine os filtros."}, status=400)
     documents = documents[:500]
     payload = []
     for document in documents:
@@ -725,7 +790,7 @@ def official_exam_export(request):
     return response
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_discover(request, slug):
     portal = OfficialExamPortal.objects.filter(slug=slug, is_active=True).first()
     if not portal:
@@ -738,7 +803,7 @@ def official_exam_discover(request, slug):
     return Response({"detail": f"Consulta concluída: {result['created']} referência(s) nova(s), {result['skipped']} já existente(s)." if request.data.get("persist") else f"Prévia pronta: {len(result['candidates'])} documento(s) encontrado(s).", **result})
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_download(request, pk):
     document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
     if not document:
@@ -763,7 +828,7 @@ def official_exam_download(request, pk):
     return Response(payload, status=status.HTTP_202_ACCEPTED)
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_file(request, pk):
     record = OfficialExamDownload.objects.filter(document_id=pk, status=OfficialExamDownload.Status.DONE).exclude(file="").order_by("-created_at").first()
     if not record:
@@ -773,7 +838,7 @@ def official_exam_file(request, pk):
     return FileResponse(record.file.open("rb"), as_attachment=True, filename=f"documento-{pk}.pdf", content_type="application/pdf")
 
 @api_view(["GET", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_document_detail(request, pk):
     document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
     if not document:
@@ -789,7 +854,7 @@ def official_exam_document_detail(request, pk):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def official_exam_pair(request, pk):
     document = OfficialExamDocument.objects.select_related("portal").filter(pk=pk).first()
     pair = OfficialExamDocument.objects.select_related("portal").filter(pk=request.data.get("paired_with")).first()
@@ -842,6 +907,8 @@ def _banca_payload(banca, include_aliases=True):
 
 
 def _banca_write(banca, data, user):
+    if "alias" in data and not isinstance(data["alias"], str):
+        raise ValidationError({"alias": "Informe uma grafia alternativa válida."})
     writable = ("name", "slug", "official_url", "description", "image_url", "is_active", "is_featured")
     for field in writable:
         if field not in data:
@@ -859,7 +926,7 @@ def _banca_write(banca, data, user):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def bancas(request):
     if request.method == "POST":
         name = request.data.get("name")
@@ -867,26 +934,44 @@ def bancas(request):
             return Response({"name": ["Informe o nome canônico da banca."]}, status=status.HTTP_400_BAD_REQUEST)
         banca = BancaCatalog(created_by=request.user, updated_by=request.user)
         try:
-            _banca_write(banca, request.data, request.user)
+            with transaction.atomic():
+                _banca_write(banca, request.data, request.user)
+                if request.data.get("alias"):
+                    BancaAlias.objects.create(banca=banca, alias=request.data["alias"])
         except ValidationError as exc:
             return _validation_response(exc)
         payload = _banca_payload(banca)
         audit_log(request, action="banca.created", resource_type="banca", resource_id=banca.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
 
-    queryset = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by").order_by("name")
+    queryset = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by")
+    overview = queryset.aggregate(total=Count("id"), active=Count("id", filter=Q(is_active=True)),
+                                  inactive=Count("id", filter=Q(is_active=False)), featured=Count("id", filter=Q(is_featured=True)))
     if request.query_params.get("active") in {"0", "1"}:
         queryset = queryset.filter(is_active=request.query_params["active"] == "1")
+    if request.query_params.get("featured") in {"0", "1"}:
+        queryset = queryset.filter(is_featured=request.query_params["featured"] == "1")
     if search := request.query_params.get("search", "").strip():
-        queryset = queryset.filter(Q(name__icontains=search) | Q(aliases__alias__icontains=search)).distinct()
-    limit, offset = _number(request.query_params.get("limit")), _offset(request.query_params.get("offset"))
+        queryset = queryset.filter(Q(name__icontains=search) | Q(slug__icontains=search) | Q(aliases__alias__icontains=search)).distinct()
+    ordering = {"name": ("name", "id"), "-name": ("-name", "id"), "recent": ("-id",)}
+    queryset = queryset.order_by(*ordering.get(request.query_params.get("ordering"), ordering["name"]))
     total = queryset.count()
-    page = queryset[offset:offset + limit]
-    return Response({"total": total, "limit": limit, "offset": offset, "results": [_banca_payload(item) for item in page]})
+    limit, offset = _number(request.query_params.get("limit")), _offset(request.query_params.get("offset"))
+    page = 1
+    if "page" in request.query_params:
+        try:
+            limit = min(100, max(1, int(request.query_params.get("page_size", 12))))
+            page = max(1, int(request.query_params["page"]))
+        except (ValueError, TypeError):
+            return Response({"detail": "Paginação inválida."}, status=400)
+        page = min(page, max(1, (total + limit - 1) // limit))
+        offset = (page - 1) * limit
+    rows = queryset[offset:offset + limit]
+    return Response({"total": total, "count": total, "page": page, "overview": overview, "can_manage": has_role(request.user, "admin", "editor"), "limit": limit, "offset": offset, "results": [_banca_payload(item) for item in rows]})
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def banca_detail(request, pk):
     banca = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by").filter(pk=pk).first()
     if not banca:
@@ -895,16 +980,20 @@ def banca_detail(request, pk):
         return Response(_banca_payload(banca))
     before = _banca_payload(banca)
     try:
-        _banca_write(banca, request.data, request.user)
+        with transaction.atomic():
+            _banca_write(banca, request.data, request.user)
+            if request.data.get("alias"):
+                BancaAlias.objects.create(banca=banca, alias=request.data["alias"])
     except ValidationError as exc:
         return _validation_response(exc)
+    banca._prefetched_objects_cache.pop("aliases", None)
     payload = _banca_payload(banca)
     audit_log(request, action="banca.updated", resource_type="banca", resource_id=banca.id, before=before, after=payload)
     return Response(payload)
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def banca_aliases(request, pk):
     banca = BancaCatalog.objects.prefetch_related("aliases").filter(pk=pk).first()
     if not banca:
@@ -930,13 +1019,21 @@ def _manual_source():
 
 def _manual_question_validate(data, exclude_id=None):
     errors = {}; statement = str(data.get("statement", "")).strip(); banca = str(data.get("banca", "")).strip(); discipline = str(data.get("discipline", "")).strip(); reference = str(data.get("source_url", "")).strip(); options = data.get("options", []); answer = data.get("correct_answer")
+    try:
+        if data.get("year") is not None and not 1800 <= int(data["year"]) <= 2100: raise ValueError()
+    except (TypeError, ValueError): errors["year"] = ["Informe um ano válido entre 1800 e 2100."]
+    if data.get("exam"):
+        from apps.questions.models import Exam
+        try:
+            if not Exam.objects.filter(pk=int(data["exam"])).exists(): errors["exam"] = ["Prova não encontrada."]
+        except (TypeError, ValueError): errors["exam"] = ["Informe uma prova válida."]
     if not statement: errors["statement"] = ["Informe o enunciado."]
     if not banca: errors["banca"] = ["Informe a banca."]
     if not discipline: errors["discipline"] = ["Informe a disciplina."]
     if reference and not reference.startswith(("https://", "http://")): errors["source_url"] = ["Informe uma URL de referência HTTP(S) ou deixe o campo em branco."]
     if not isinstance(options, list) or len(options) < 2 or any(not isinstance(x, str) or not x.strip() for x in options): errors["options"] = ["Informe ao menos duas alternativas preenchidas."]
-    if not isinstance(answer, int) or not isinstance(options, list) or answer < 0 or answer >= len(options): errors["correct_answer"] = ["Escolha uma alternativa válida como gabarito."]
-    if statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"]).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, banca e ano."]
+    if not isinstance(answer, int) or isinstance(answer, bool) or not isinstance(options, list) or answer < 0 or answer >= len(options): errors["correct_answer"] = ["Escolha uma alternativa válida como gabarito."]
+    if not errors and statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"]).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, banca e ano."]
     if errors: raise ValidationError(errors)
 
 def _manual_question_write(question, data):
@@ -948,7 +1045,7 @@ def _manual_question_write(question, data):
     return question
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def manual_questions(request):
     if request.method == "POST":
         question = Question(source=_manual_source(), created_by=request.user, status=Question.Status.DRAFT)
@@ -960,14 +1057,34 @@ def manual_questions(request):
     # A gestão exibe todo o acervo publicado; rascunhos e rejeitadas podem
     # incluir fontes importadas para fins de acompanhamento. As ações de edição
     # direta continuam restritas ao cadastro manual nos endpoints específicos.
-    qs = Question.objects.select_related("exam", "source", "created_by", "search_run__started_by").order_by("-updated_at")
-    return Response({"results": [_question_payload(q, []) for q in qs[:500]]})
+    qs = Question.objects.select_related("exam", "source", "created_by", "reviewed_by", "search_run__started_by")
+    overview = qs.aggregate(total=Count("id"), **{value: Count("id", filter=Q(status=value)) for value in Question.Status.values})
+    for key in ("status", "banca", "discipline"):
+        if value := request.query_params.get(key): qs = qs.filter(**{key: value})
+    if request.query_params.get("origin") == "manual": qs = qs.filter(source__slug="manual")
+    elif request.query_params.get("origin") == "imported": qs = qs.exclude(source__slug="manual")
+    if request.query_params.get("explanation") == "missing": qs = qs.filter(explanation="")
+    try:
+        if value := request.query_params.get("year"): qs = qs.filter(year=int(value))
+        if value := request.query_params.get("question_id"): qs = qs.filter(pk=int(value))
+        page_size = max(1, min(100, int(request.query_params.get("page_size", 12))))
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (TypeError, ValueError): return Response({"detail": "Informe ano, ID e paginação válidos."}, status=400)
+    if value := request.query_params.get("search", "").strip(): qs = qs.filter(Q(statement__icontains=value) | Q(explanation__icontains=value))
+    ordering = {"recent": ("-updated_at", "-id"), "oldest": ("created_at", "id"), "year": ("-year", "id")}
+    qs = qs.order_by(*ordering.get(request.query_params.get("ordering"), ordering["recent"]))
+    count = qs.count(); page = min(page, max(1, (count + page_size - 1) // page_size))
+    rows = qs[(page - 1) * page_size:page * page_size] if "page" in request.query_params else qs[:500]
+    return Response({"results": [_question_payload(q, []) for q in rows], "count": count, "page": page, "overview": overview,
+                     "permissions": {"can_edit": has_role(request.user, "admin", "editor"), "can_review": has_role(request.user, "admin", "reviewer")}})
 
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([EditorialAccess])
 def manual_question_detail(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+    if _stale(request, question):
+        return Response({"detail": "Esta questão foi alterada. Recarregue antes de salvar.", "code": "stale"}, status=409)
     if question.status not in {Question.Status.DRAFT, Question.Status.REJECTED, Question.Status.APPROVED}: return Response({"detail": "A questão está na fila de revisão e não pode ser alterada aqui."}, status=status.HTTP_409_CONFLICT)
     before = {"status": question.status, "banca": question.banca, "statement": question.statement}
     try: _manual_question_write(question, request.data)
@@ -976,7 +1093,7 @@ def manual_question_detail(request, pk):
     return Response(_question_payload(question, []))
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def manual_question_publish(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -989,7 +1106,7 @@ def manual_question_publish(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def manual_question_unpublish(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -1000,7 +1117,7 @@ def manual_question_unpublish(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([ReviewAccess])
 def manual_question_submit(request, pk):
     question = Question.objects.filter(pk=pk, source__slug=MANUAL_SOURCE_SLUG).first()
     if not question: return Response({"detail": "Questão manual não encontrada."}, status=status.HTTP_404_NOT_FOUND)

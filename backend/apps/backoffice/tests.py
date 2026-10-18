@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -18,6 +19,7 @@ User = get_user_model()
 class Base(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user("admin-user", password="password", is_staff=True)
+        self.staff.groups.add(Group.objects.get(name="Administrador"))
         self.user = User.objects.create_user("regular-user", password="password")
         self.client = APIClient()
         self.client.force_authenticate(self.staff)

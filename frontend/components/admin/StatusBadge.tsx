@@ -10,6 +10,10 @@ const colorByVariant: Record<string, string> = {
 } as const;
 
 const variantByStatus: Record<string, keyof typeof colorByVariant> = {
+  scheduled: "info",
+  draft: "warning",
+  published: "success",
+  archived: "info",
   active: "success",
   approved: "success",
   reviewed: "info",
@@ -28,6 +32,10 @@ const variantByStatus: Record<string, keyof typeof colorByVariant> = {
 };
 
 export const statusLabels: Record<string, string> = {
+  scheduled: "Agendado",
+  draft: "Rascunho",
+  published: "Publicado",
+  archived: "Arquivado",
   active: "Ativo",
   approved: "Aprovada",
   pending_payment: "Pagamento pendente",

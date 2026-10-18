@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.questions.models import Question
+from apps.backoffice.audit import log as audit_log
 
 MIN_EXPLANATION_CHARS = 120
 
@@ -35,7 +36,7 @@ REVIEW_FIELDS = [
 ]
 
 
-def approve(question, reviewer, explanation=None):
+def approve(question, reviewer, explanation=None, *, request=None):
     """Aprova e publica a questão.
 
     A explicação curada é obrigatória: é ela que o aluno lê depois de errar. Sem
@@ -54,6 +55,7 @@ def approve(question, reviewer, explanation=None):
             }
         )
     with transaction.atomic():
+        before = _snapshot(question)
         question.explanation = text
         question.status = Question.Status.APPROVED
         question.reviewed_by = reviewer
@@ -62,10 +64,11 @@ def approve(question, reviewer, explanation=None):
         question.rejection_reason = ""
         question.rejection_reason_code = ""
         question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
+        audit_log(request, actor=reviewer, action="question.approved", resource_type="question", resource_id=question.pk, before=before, after=_snapshot(question), reason="", context={"entrypoint": "moderation.approve"})
     return question
 
 
-def reject(question, reviewer, reason, reason_code):
+def reject(question, reviewer, reason, reason_code, *, request=None):
     """Rejeita a questão, tirando-a da leitura dos alunos.
 
     `reason_code` é o motivo estruturado (o que o filtro da fila conta) e `reason`
@@ -87,6 +90,7 @@ def reject(question, reviewer, reason, reason_code):
             }
         )
     with transaction.atomic():
+        before = _snapshot(question)
         question.status = Question.Status.REJECTED
         question.reviewed_by = reviewer
         question.reviewed_at = timezone.now()
@@ -94,12 +98,14 @@ def reject(question, reviewer, reason, reason_code):
         question.rejection_reason = reason
         question.rejection_reason_code = reason_code
         question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
+        audit_log(request, actor=reviewer, action="question.rejected", resource_type="question", resource_id=question.pk, before=before, after=_snapshot(question), reason=reason, context={"entrypoint": "moderation.reject"})
     return question
 
 
-def reopen(question, reviewer, note=""):
+def reopen(question, reviewer, note="", *, request=None):
     """Devolve a questão para a fila, por exemplo quando o conteúdo mudou na fonte."""
     with transaction.atomic():
+        before = _snapshot(question)
         question.status = Question.Status.PENDING
         question.reviewed_by = reviewer
         question.reviewed_at = timezone.now()
@@ -107,4 +113,9 @@ def reopen(question, reviewer, note=""):
         question.rejection_reason = ""
         question.rejection_reason_code = ""
         question.save(update_fields=[*REVIEW_FIELDS, "updated_at"])
+        audit_log(request, actor=reviewer, action="question.reopened", resource_type="question", resource_id=question.pk, before=before, after=_snapshot(question), reason=note, context={"entrypoint": "moderation.reopen"})
     return question
+
+
+def _snapshot(question):
+    return {field: getattr(question, field) for field in ("status", "explanation", "reviewed_by_id", "reviewed_at", "review_note", "rejection_reason", "rejection_reason_code")}
