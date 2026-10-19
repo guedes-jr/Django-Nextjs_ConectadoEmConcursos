@@ -19,6 +19,7 @@ import {
   Trophy,
   XCircle,
 } from "lucide-react";
+import { SupportTextPanel } from "@/components/SupportTextPanel";
 import { QuestionContent } from "@/components/QuestionContent";
 import { Explanation } from "@/components/Explanation";
 
@@ -120,6 +121,12 @@ export default function SimulacoesPage() {
         setBancas(facets.bancas);
         setYears(facets.years);
         setExams(examList);
+        const requestedExam = Number(params.get("exam"));
+        if (Number.isSafeInteger(requestedExam) && requestedExam > 0 && !conversation && !message) {
+          const found = examList.find(item => item.id === requestedExam);
+          if (found) {setSelectedExams([found.id]);setFullExam(true);setDiscipline("");setBanca("");setYear("");}
+          else setError("Esta prova não está disponível. Escolha outra prova.");
+        }
         setRecent(runs.slice(0, 5));
         setTemplates(savedTemplates);
       } catch {
@@ -351,6 +358,7 @@ export default function SimulacoesPage() {
     () => new Map(results.map((item) => [item.question_id, item])),
     [results],
   );
+  const configuredExam = fullExam && selectedExams.length===1 ? exams.find(item=>item.id===selectedExams[0]) : null;
   const total = questions.length;
   const score = results.filter((item) => item.is_correct).length;
   const blankCount = results.filter((item) => item.selected_answer === null).length;
@@ -450,7 +458,8 @@ export default function SimulacoesPage() {
             </div>
             <div className="px-5 py-6 sm:px-7">
               <div className="mb-5 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400"><CircleHelp size={15} /> Enunciado</div>
-              <QuestionContent text={question.statement} className="font-medium leading-relaxed text-slate-800 dark:text-slate-100 text-[15px] sm:text-base" />
+              <SupportTextPanel text={question.support_text}/>
+                <QuestionContent text={question.statement} className="font-medium leading-relaxed text-slate-800 dark:text-slate-100 text-[15px] sm:text-base" />
               <div className="mt-7 space-y-2.5" role="radiogroup" aria-label={`Alternativas da questão ${index + 1}`}>
                 {question.options.map((option, optionIndex) => {
                   const isSelected = answers[index] === optionIndex;
@@ -782,6 +791,7 @@ export default function SimulacoesPage() {
       <div className="mx-auto max-w-4xl space-y-6">
         <header className="flex flex-col gap-2">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Simulados Digital</h1>
+          {configuredExam&&<div className="mt-4 space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/30"><p className="font-semibold">Prova completa: {configuredExam.title}</p><p className="text-sm">{configuredExam.banca} · {configuredExam.year} · {configuredExam.question_count} questões aprovadas disponíveis</p><div className="flex flex-wrap gap-4 text-sm"><Link href={`/exams/${configuredExam.id}`} className="text-blue-600 underline">Dados da prova</Link>{configuredExam.concurso&&<Link href={`/concursos/${configuredExam.concurso.id}`} className="text-blue-600 underline">Concurso e materiais</Link>}</div><p className="text-xs text-slate-500">Inclui todas as questões aprovadas vinculadas à prova, na ordem de numeração disponível. O resultado será salvo no seu histórico.</p></div>}
           <p className="text-slate-500 dark:text-slate-400">
             Monte um simulado com questões de provas anteriores e receba a correção na hora.
           </p>

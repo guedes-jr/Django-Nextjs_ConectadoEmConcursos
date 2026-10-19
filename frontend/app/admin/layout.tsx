@@ -52,6 +52,7 @@ const navGroups = [
       { href: "/admin/concursos", label: "Concursos", icon: Trophy },
       { href: "/admin/provas", label: "Provas", icon: FilePlus2 },
       { href: "/admin/questoes", label: "Questões", icon: HelpCircle },
+      { href: "/admin/textos-apoio", label: "Textos de apoio", icon: Search },
       { href: "/admin/artigos", label: "Artigos", icon: Newspaper },
     ],
   },

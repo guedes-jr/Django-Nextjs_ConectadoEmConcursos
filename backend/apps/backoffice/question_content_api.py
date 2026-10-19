@@ -18,6 +18,7 @@ from rest_framework.response import Response
 
 from apps.backoffice.audit import log as audit_log, audit_request
 from apps.backoffice.permissions import EditorialAccess, ReviewAccess, has_role
+from .support_text_api import support_text_payload, validate_support_text_id
 from apps.questions import moderation
 from apps.questions.ingest import run as run_search
 from apps.questions.ingest.duplicates import DuplicateChecker, content_hash
@@ -136,6 +137,8 @@ def _question_payload(question, duplicates: list[dict] | None = None):
         "id": question.id,
         "search_run": question.search_run_id,
         "status": question.status,
+        "support_text": support_text_payload(question.support_text) if question.support_text_id else None,
+        "support_text_id": question.support_text_id,
         "statement": question.statement,
         "options": question.options,
         "correct_answer": question.correct_answer,
@@ -381,7 +384,7 @@ def questions_queue(request):
     # Mesma prioridade do admin (`apps/questions/queue.py`): se as duas telas
     # divergirem, o revisor corrige uma questão e a API entrega outra.
     queryset = annotate_queue_priority(
-        Question.objects.select_related("source", "exam", "reviewed_by", "search_run")
+        Question.objects.select_related("support_text", "source", "exam", "reviewed_by", "search_run")
     )
     overview = Question.objects.aggregate(total=Count("id"), **{value: Count("id", filter=Q(status=value)) for value in Question.Status.values})
     try:
@@ -427,7 +430,7 @@ def questions_queue(request):
 @api_view(["GET"])
 @permission_classes([EditorialAccess])
 def questions_queue_next(request):
-    queryset = Question.objects.select_related("source", "exam", "reviewed_by", "search_run").filter(status=Question.Status.PENDING).order_by("id")
+    queryset = Question.objects.select_related("support_text", "source", "exam", "reviewed_by", "search_run").filter(status=Question.Status.PENDING).order_by("id")
     if search_run := request.query_params.get("search_run"):
         queryset = queryset.filter(search_run_id=search_run)
     if cursor := request.query_params.get("cursor"):
@@ -880,6 +883,7 @@ def official_exam_pair(request, pk):
 # Catálogo de bancas: deliberadamente separado das fontes de questões. Ele apenas
 # padroniza nomes para os próximos cadastros e não reescreve registros existentes.
 def _banca_payload(banca, include_aliases=True):
+    from apps.questions.naming import banca_query
     payload = {
         "id": banca.id,
         "name": banca.name,
@@ -894,10 +898,12 @@ def _banca_payload(banca, include_aliases=True):
         "created_at": banca.created_at,
         "updated_at": banca.updated_at,
         # Contagens são informativas: dados antigos continuam texto livre.
-        "questions_count": Question.objects.filter(banca__iexact=banca.name).count(),
+        "questions_count": Question.objects.filter(banca_query(banca.name)).count(),
     }
     from apps.questions.models import Exam
-    payload["exams_count"] = Exam.objects.filter(banca__iexact=banca.name).count()
+    from apps.questions.naming import banca_query
+    payload["exams_count"] = Exam.objects.filter(Q(banca_catalog=banca) | (Q(banca_catalog__isnull=True) & banca_query(banca.name))).count()
+    payload["concursos_count"] = banca.concursos.count()
     if include_aliases:
         payload["aliases"] = [
             {"id": alias.id, "alias": alias.alias, "created_at": alias.created_at}
@@ -922,6 +928,8 @@ def _banca_write(banca, data, user):
         setattr(banca, field, value.strip() if isinstance(value, str) else value)
     banca.updated_by = user
     banca.save()
+    from apps.backoffice.banca_catalog import relink_exams
+    relink_exams(banca)
     return banca
 
 
@@ -947,6 +955,8 @@ def bancas(request):
     queryset = BancaCatalog.objects.prefetch_related("aliases", "created_by", "updated_by")
     overview = queryset.aggregate(total=Count("id"), active=Count("id", filter=Q(is_active=True)),
                                   inactive=Count("id", filter=Q(is_active=False)), featured=Count("id", filter=Q(is_featured=True)))
+    if request.query_params.get("options") == "1":
+        return Response({"results": [{"id": row.id, "name": row.name, "is_active": row.is_active, "aliases": [alias.alias for alias in row.aliases.all()]} for row in queryset.order_by("name")]})
     if request.query_params.get("active") in {"0", "1"}:
         queryset = queryset.filter(is_active=request.query_params["active"] == "1")
     if request.query_params.get("featured") in {"0", "1"}:
@@ -1033,13 +1043,19 @@ def _manual_question_validate(data, exclude_id=None):
     if reference and not reference.startswith(("https://", "http://")): errors["source_url"] = ["Informe uma URL de referência HTTP(S) ou deixe o campo em branco."]
     if not isinstance(options, list) or len(options) < 2 or any(not isinstance(x, str) or not x.strip() for x in options): errors["options"] = ["Informe ao menos duas alternativas preenchidas."]
     if not isinstance(answer, int) or isinstance(answer, bool) or not isinstance(options, list) or answer < 0 or answer >= len(options): errors["correct_answer"] = ["Escolha uma alternativa válida como gabarito."]
-    if not errors and statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"]).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, banca e ano."]
+    if "support_text_id" in data:
+        validate_support_text_id(data["support_text_id"])
+    support_id = data.get("support_text_id")
+    if "support_text_id" not in data and exclude_id:
+        support_id = Question.objects.filter(pk=exclude_id).values_list("support_text_id", flat=True).first()
+    if not errors and statement and banca and data.get("year") and Question.objects.filter(statement=statement, banca=banca, year=data["year"], support_text_id=support_id).exclude(pk=exclude_id).exists(): errors["statement"] = ["Já existe uma questão com este enunciado, texto de apoio, banca e ano."]
     if errors: raise ValidationError(errors)
 
 def _manual_question_write(question, data):
     _manual_question_validate(data, question.pk)
     for field in ("statement", "banca", "discipline", "year", "options", "correct_answer", "explanation", "source_url", "number"):
         if field in data: setattr(question, field, data[field].strip() if isinstance(data[field], str) else data[field])
+    if "support_text_id" in data: question.support_text_id = data["support_text_id"]
     if "exam" in data: question.exam_id = data["exam"] or None
     question.save()
     return question
@@ -1057,7 +1073,7 @@ def manual_questions(request):
     # A gestão exibe todo o acervo publicado; rascunhos e rejeitadas podem
     # incluir fontes importadas para fins de acompanhamento. As ações de edição
     # direta continuam restritas ao cadastro manual nos endpoints específicos.
-    qs = Question.objects.select_related("exam", "source", "created_by", "reviewed_by", "search_run__started_by")
+    qs = Question.objects.select_related("support_text", "exam", "source", "created_by", "reviewed_by", "search_run__started_by")
     overview = qs.aggregate(total=Count("id"), **{value: Count("id", filter=Q(status=value)) for value in Question.Status.values})
     for key in ("status", "banca", "discipline"):
         if value := request.query_params.get(key): qs = qs.filter(**{key: value})

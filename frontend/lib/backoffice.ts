@@ -238,6 +238,7 @@ export const backoffice = {
   getUser: (id: number) => http.get<any>(`/api/backoffice/users/${id}/`).then((r) => r.data),
   updateUser: (id: number, data: Record<string, unknown>) => http.patch<any>(`/api/backoffice/users/${id}/`, data).then((r) => r.data),
   userHistory: (id: number) => http.get<any>(`/api/backoffice/users/${id}/history/`).then((r) => r.data),
+  resetUserPassword: (id:number,data:{new_password:string;confirmation:string;reason:string}) => http.post<{ok:boolean;reauthenticate:boolean}>(`/api/backoffice/users/${id}/password/`,data).then(r=>r.data),
   userAction: (id: number, action: string, reason = "") => http.post<any>(`/api/backoffice/users/${id}/actions/`, { action, reason }).then((r) => r.data),
   sendUserNotification: (id: number, data: { title: string; body?: string; category?: string; link?: string }) => http.post(`/api/backoffice/users/${id}/notification/`, data).then((r) => r.data),
   setUserActive: (id: number, isActive: boolean) =>
@@ -409,20 +410,20 @@ export const cycleLabel: Record<string, string> = {
   semestral: "Semestral",
   anual: "Anual",
 };
-export type EditorialConcurso = { id: number; title: string; organization: string; state: string; status: string; deadline: string | null; source_url: string; origin: "manual" | "imported"; editorial_status: "published" | "archived"; exams_count: number; updated_at: string };
-export type EditorialExam = { id: number; title: string; banca: string; institution: string; role: string; year: number; level: string; state: string; is_published: boolean; concurso: number | null; concurso_title: string | null; questions_count: number; updated_at: string };
+export type EditorialConcurso = { official_url:string;description:string;materials_count:number; banca: number | null; banca_name: string | null; id: number; title: string; organization: string; state: string; status: string; deadline: string | null; source_url: string; origin: "manual" | "imported"; editorial_status: "published" | "archived"; exams_count: number; updated_at: string };
+export type EditorialExam = { banca_catalog: number | null; banca_name: string | null; id: number; title: string; banca: string; institution: string; role: string; year: number; level: string; state: string; is_published: boolean; concurso: number | null; concurso_title: string | null; questions_count: number; updated_at: string };
 export const editorial = {
   listConcursos: (opts: Record<string,string> = {}) => http.get<{results: EditorialConcurso[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/concursos/?${new URLSearchParams(opts)}`).then(r => r.data),
   concursoOptions: () => http.get<{results: {id:number;title:string}[]}>("/api/backoffice/content/editorial/concursos/?options=1").then(r => r.data),
   createConcurso: (data: Partial<EditorialConcurso>) => http.post<EditorialConcurso>("/api/backoffice/content/editorial/concursos/", data).then(r => r.data),
   updateConcurso: (id: number, data: Partial<EditorialConcurso>) => http.patch<EditorialConcurso>(`/api/backoffice/content/editorial/concursos/${id}/`, data).then(r => r.data),
   listExams: (opts: Record<string,string> = {}) => http.get<{results: EditorialExam[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/provas/?${new URLSearchParams(opts)}`).then(r => r.data),
-  examOptions: () => http.get<{results:{id:number;title:string;banca:string;year:number}[]}>("/api/backoffice/content/editorial/provas/?options=1").then(r=>r.data),
+  examOptions: (concurso?:number) => http.get<{results:{id:number;title:string;banca:string;year:number;role:string;is_published:boolean;concurso:number|null}[]}>(`/api/backoffice/content/editorial/provas/?options=1${concurso?`&concurso=${concurso}`:""}`).then(r=>r.data),
   createExam: (data: Partial<EditorialExam>) => http.post<EditorialExam>("/api/backoffice/content/editorial/provas/", data).then(r => r.data),
   updateExam: (id: number, data: Partial<EditorialExam>) => http.patch<EditorialExam>(`/api/backoffice/content/editorial/provas/${id}/`, data).then(r => r.data),
 };
 
-export type ManualQuestion = { id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; origin?: "manual" | "imported"; created_by?: string | null; imported_by?: string | null; added_by?: string | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
+export type ManualQuestion = { support_text_id?: number|null; support_text?: SupportText|null; id: number; status: "draft" | "pending" | "rejected" | "approved"; statement: string; options: string[]; correct_answer: number; discipline: string; banca: string; year: number; source_url: string; source?: { slug: string; label: string } | null; origin?: "manual" | "imported"; created_by?: string | null; imported_by?: string | null; added_by?: string | null; exam: string | null; exam_id?: number | null; number?: number | null; explanation?: string; rejection_reason: string; updated_at: string };
 export const manualQuestions = {
   list: (opts:Record<string,string>={}) => http.get<{results:ManualQuestion[];count:number;page:number;overview:Record<string,number>;permissions:Record<string,boolean>}>(`/api/backoffice/content/questions/manual/?${new URLSearchParams(opts)}`).then(r=>r.data),
   create: (data: Omit<ManualQuestion, "id" | "status" | "exam" | "rejection_reason" | "updated_at">) => http.post<ManualQuestion>("/api/backoffice/content/questions/manual/", data).then(r => r.data),
@@ -434,7 +435,7 @@ export const manualQuestions = {
 export type EditorialArticle = { id:number; title:string; slug:string; summary:string; body:string; category:string; image_url:string; seo_title:string; seo_description:string; tags:string[]; is_featured:boolean; is_pinned:boolean; origin:"manual"|"imported"; editorial_status:"draft"|"scheduled"|"published"|"archived"; is_published:boolean; scheduled_for?: string | null };
 export const editorialCategories = { list:()=>http.get<{results:Array<{id:number;name:string;slug:string;is_active:boolean}>}>("/api/backoffice/content/editorial/categorias/").then(r=>r.data), create:(name:string)=>http.post<{id:number;name:string;slug:string;is_active:boolean}>("/api/backoffice/content/editorial/categorias/",{name}).then(r=>r.data) };
 export const editorialArticles = { list:(opts:Record<string,string>={})=>{const q=new URLSearchParams();Object.entries(opts).forEach(([k,v])=>{if(v)q.set(k,v)});return http.get<{results:EditorialArticle[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/editorial/artigos/?${q}`).then(r=>r.data)}, overview:()=>http.get<{total:number;draft:number;scheduled:number;published:number;archived:number;featured:number}>("/api/backoffice/content/editorial/artigos/overview/").then(r=>r.data), history:(id:number)=>http.get<{results:AuditEventRow[]}>(`/api/backoffice/content/editorial/artigos/${id}/history/`).then(r=>r.data), bulk:(ids:number[],action:"draft"|"published"|"archived")=>http.post<{updated:number}>("/api/backoffice/content/editorial/artigos/bulk/",{ids,action}).then(r=>r.data), duplicate:(id:number)=>http.post<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/duplicate/`).then(r=>r.data), create:(data:Partial<EditorialArticle>)=>http.post<EditorialArticle>("/api/backoffice/content/editorial/artigos/",data).then(r=>r.data), update:(id:number,data:Partial<EditorialArticle>)=>http.patch<EditorialArticle>(`/api/backoffice/content/editorial/artigos/${id}/`,data).then(r=>r.data) };
-export type BancaCatalogRow={id:number;name:string;slug:string;official_url:string;description:string;image_url:string;is_active:boolean;is_featured:boolean;aliases:{id:number;alias:string}[];questions_count:number;exams_count:number};
+export type BancaCatalogRow={id:number;name:string;slug:string;official_url:string;description:string;image_url:string;is_active:boolean;is_featured:boolean;aliases:{id:number;alias:string}[];questions_count:number;exams_count:number;concursos_count:number};
 export const bancasAdmin={list:(opts: Record<string,string> = {})=>http.get<{results:BancaCatalogRow[];count:number;page:number;overview:Record<string,number>;can_manage:boolean}>(`/api/backoffice/content/bancas/?${new URLSearchParams(opts)}`).then(r=>r.data),create:(data:Partial<BancaCatalogRow> & {alias?:string})=>http.post<BancaCatalogRow>("/api/backoffice/content/bancas/",data).then(r=>r.data),update:(id:number,data:Partial<BancaCatalogRow> & {alias?:string})=>http.patch<BancaCatalogRow>(`/api/backoffice/content/bancas/${id}/`,data).then(r=>r.data),addAlias:(id:number,alias:string)=>http.post(`/api/backoffice/content/bancas/${id}/aliases/`,{alias}).then(r=>r.data)};
 
 
@@ -517,3 +518,36 @@ export const diagnostics = {
 };
 
 export const editorialDashboard={get:()=>http.get("/api/backoffice/editorial-dashboard/").then(r=>r.data)};
+
+export type BancaOption = {id:number;name:string;is_active:boolean;aliases:string[]};
+export const bancaOptions = () => http.get<{results:BancaOption[]}>("/api/backoffice/content/bancas/",{params:{options:"1"}}).then(r=>r.data.results);
+
+export type SupportText = { id: number; title: string; content: string; reference: string; updated_at: string; question_count: number };
+export const supportTexts = {
+  list: (opts: Record<string, string> = {}) => http.get<{results: SupportText[];count:number;page:number;overview:Record<string,number>;permissions:Record<string,boolean>}>(`/api/backoffice/content/support-texts/?${new URLSearchParams(opts)}`).then(r=>r.data),
+  get: (id:number) => http.get<SupportText>(`/api/backoffice/content/support-texts/${id}/`).then(r=>r.data),
+  create: (data: {title:string;content:string;reference:string}) => http.post<SupportText>("/api/backoffice/content/support-texts/",data).then(r=>r.data),
+  update: (item:SupportText) => http.patch<SupportText>(`/api/backoffice/content/support-texts/${item.id}/`,item).then(r=>r.data),
+  remove: (item:SupportText) => http.delete(`/api/backoffice/content/support-texts/${item.id}/`,{data:{updated_at:item.updated_at}}),
+  link: (question:{id:number;updated_at:string},id:number|null) => http.patch(`/api/backoffice/content/questions/${question.id}/support-text/`,{support_text_id:id,updated_at:question.updated_at}).then(r=>r.data),
+};
+
+export type AdminConcursoResource = import("@/lib/concursos").ConcursoResource & {exam:number|null;official_document:number|null;is_published:boolean;updated_at:string};
+export const concursoResources = {
+ list:(id:number)=>http.get<{results:AdminConcursoResource[];can_manage:boolean}>(`/api/backoffice/content/editorial/concursos/${id}/resources/`).then(r=>r.data),
+ create:(id:number,data:Partial<AdminConcursoResource> & {remove_file?:boolean})=>http.post<AdminConcursoResource>(`/api/backoffice/content/editorial/concursos/${id}/resources/`,data).then(r=>r.data),
+ update:(id:number,item:AdminConcursoResource & {remove_file?:boolean})=>http.patch<AdminConcursoResource>(`/api/backoffice/content/editorial/concursos/${id}/resources/${item.id}/`,item).then(r=>r.data),
+ remove:(id:number,item:AdminConcursoResource)=>http.delete(`/api/backoffice/content/editorial/concursos/${id}/resources/${item.id}/`,{data:{updated_at:item.updated_at}}),
+};
+
+export async function saveConcursoResourceFile(id:number,item:Partial<AdminConcursoResource>,file:File|undefined,onProgress:(percent:number)=>void){
+ const data=new FormData();
+ for(const key of ["title","kind","description","url","updated_at"] as const)if(item[key]!==undefined)data.append(key,String(item[key]));
+ data.append("exam",item.exam==null?"":String(item.exam));
+ data.append("official_document",item.official_document==null?"":String(item.official_document));
+ data.append("is_published",String(item.is_published??false));
+ if(file)data.append("file",file);
+ const url=`/api/backoffice/content/editorial/concursos/${id}/resources/${item.id?`${item.id}/`:""}`;
+ const response=await http.request<AdminConcursoResource>({url,method:item.id?"PATCH":"POST",data,onUploadProgress:event=>{if(event.total)onProgress(Math.round(event.loaded*100/event.total));}});
+ return response.data;
+}

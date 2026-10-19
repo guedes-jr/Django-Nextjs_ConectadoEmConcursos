@@ -111,6 +111,7 @@ export default function SimulationsHistoryPage() {
                   key={run.id}
                   className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
                 >
+                  {!!run.exams?.length&&<div className="mb-3 flex flex-wrap gap-2">{run.exams.map(exam=><Link key={exam.id} href={`/exams/${exam.id}`} className="text-sm font-semibold text-blue-600 underline dark:text-blue-300">{exam.title}</Link>)}</div>}
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-lg font-bold text-slate-900 dark:text-slate-100">

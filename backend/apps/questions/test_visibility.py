@@ -300,10 +300,10 @@ class ChatContextVisibilityTests(TestCase):
         context = build_study_context(
             question_ids=[approved.id, pending.id, rejected.id]
         )
-        # Cada questão aparece no contexto como "Questão {id} (..."
-        self.assertIn(f"Questão {approved.id} (", context)
-        self.assertNotIn(f"Questão {pending.id} (", context)
-        self.assertNotIn(f"Questão {rejected.id} (", context)
+        # Referências do contexto usam os identificadores de citação [Q{id}].
+        self.assertIn(f"[Q{approved.id}] (", context)
+        self.assertNotIn(f"[Q{pending.id}] (", context)
+        self.assertNotIn(f"[Q{rejected.id}] (", context)
         # Textos distintivos também não devem aparecer
         self.assertNotIn("pendente que não deve aparecer", context)
         self.assertNotIn("rejeitada que não deve aparecer", context)

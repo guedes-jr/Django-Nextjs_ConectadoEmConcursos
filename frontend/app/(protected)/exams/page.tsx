@@ -49,7 +49,7 @@ export default function ExamsPage() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="max-[520px]:space-y-1">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 max-[520px]:text-xl">Provas de concursos públicos</h1>
-          <p className="mt-1 text-slate-500 dark:text-slate-400 max-[520px]:text-sm">Encontre uma prova e acesse somente as questões vinculadas a ela.</p>
+          <p className="mt-1 text-slate-500 dark:text-slate-400 max-[520px]:text-sm">Confira os dados da prova, consulte o concurso e prepare um simulado com as questões disponíveis.</p>
         </header>
 
         <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 md:grid-cols-2 lg:grid-cols-5 max-[520px]:gap-2 max-[520px]:p-3">
@@ -68,7 +68,7 @@ export default function ExamsPage() {
 
         <section className="space-y-3 max-[520px]:space-y-2.5">
           {exams.map((exam) => (
-            <Link key={exam.id} href={`/questions?exam=${exam.id}`} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 max-[520px]:gap-3 max-[520px]:p-4">
+            <Link key={exam.id} href={`/exams/${exam.id}`} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 max-[520px]:gap-3 max-[520px]:p-4">
               <div className="flex min-w-0 items-start gap-4 max-[520px]:gap-3">
                 <div className="rounded-xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-950 dark:text-blue-300 max-[520px]:rounded-lg max-[520px]:p-2"><BookOpen className="h-5 w-5 max-[520px]:h-4 max-[520px]:w-4" /></div>
                 <div className="min-w-0">

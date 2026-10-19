@@ -9,10 +9,3 @@ export async function deleteConversation(id: number) { await http.delete(`/api/c
 export async function sendMessage(id: number, content: string, context: { question_ids?: number[]; exam_id?: number } = {}) {
   return (await http.post<{ user_message: ChatMessage; assistant_message: ChatMessage }>(`/api/conversations/${id}/send/`, { content, ...context })).data;
 }
-
-export type StudyMaterial = { id: number; title: string; message: ChatMessage; created_at: string };
-export async function listStudyMaterials() { return (await http.get<StudyMaterial[]>("/api/study-materials/")).data; }
-export async function saveStudyMaterial(message: ChatMessage) {
-  return (await http.post<StudyMaterial>("/api/study-materials/", { message_id: message.id, title: message.content.slice(0, 100) })).data;
-}
-export async function deleteStudyMaterial(id: number) { await http.delete(`/api/study-materials/${id}/`); }

@@ -10,6 +10,7 @@ export type Question = {
   discipline: string;
   banca: string;
   year: number;
+  support_text?: {id:number;title:string;content:string;reference:string} | null;
   statement: string;
   options: string[];
   is_favorite: boolean;

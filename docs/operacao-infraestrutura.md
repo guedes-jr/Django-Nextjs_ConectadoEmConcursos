@@ -21,9 +21,12 @@ houve execução de backup/restauração de produção nem envio de e-mail real.
 - O arquivo final só aparece após concluir a compactação, com permissão 0600,
   nome único e manifesto de versão, motor e SHA-256 do banco. O manifesto detecta
   corrupção, mas não autentica a procedência: restaurar apenas cópias confiáveis.
-- Inclui banco e MEDIA_ROOT, inclusive mídia vazia. Não inclui .env, chaves,
-  diretório de código, Redis, roles globais PostgreSQL ou OFFICIAL_EXAMS_ROOT.
-  O acervo privado precisa de snapshot/backup próprio, associado à mesma janela.
+- Inclui banco, MEDIA_ROOT (inclusive vazio) e os PDFs enviados aos concursos,
+  em `OFFICIAL_EXAMS_ROOT/concurso-materials`, como `concurso-files/` no arquivo.
+  Não inclui .env, chaves, código, Redis, roles globais PostgreSQL nem os demais
+  documentos do acervo em OFFICIAL_EXAMS_ROOT. Esses documentos ainda precisam
+  de snapshot próprio associado à mesma janela. Os uploads de concursos usam
+  o mesmo lock dos backups para manter arquivos e vínculos consistentes.
 - BACKUP_DIR deve ser persistente e privado, fora da mídia pública. BACKUP_KEEP
   mantém os últimos arquivos normais; cópias pré-restauração são preservadas para
   recuperação manual e precisam de retenção operacional separada.
@@ -135,3 +138,15 @@ Permanecem operacionais: provisionar volumes e clientes PostgreSQL, roundtrip re
 em banco isolado, cópia externa/PITR, snapshot do acervo privado, configuração e
 validação do proxy, credenciais/remetente e recebimento real de e-mail. Esses itens
 não podem ser comprovados apenas por configuração no repositório.
+
+## PDFs enviados aos concursos
+
+Novos backups incluem `concurso_files_included: true` no manifesto e a pasta
+`concurso-files/`, mesmo vazia. A extração limita tamanho/quantidade, rejeita links
+e caminhos externos, e mantém arquivos privados com permissão 0600.
+
+A restauração prepara mídia e PDFs em pastas isoladas antes de alterar o banco,
+preserva as árvores anteriores e troca os diretórios no mesmo volume. Se uma
+troca falhar, tenta restabelecer as árvores anteriores e informa a necessidade
+de recuperação do banco; manter manutenção e escritores parados. Backups antigos
+sem essa seção continuam aceitos e não alteram a pasta atual dos uploads.

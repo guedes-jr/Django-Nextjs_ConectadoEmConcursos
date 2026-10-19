@@ -18,9 +18,10 @@ const primary = [
   { label: "Área de Estudos", href: "/study", icon: CalendarDays },
 ];
 const groups = [
-  { title: "Concursos & notícias", items: [
+  { title: "Concursos e conteúdos", items: [
     { label: "Concursos", href: "/concursos", icon: Landmark },
     { label: "Notícias", href: "/noticias", icon: Newspaper },
+    { label: "Artigos", href: "/artigos", icon: BookOpen },
   ] },
   { title: "Estudos & planejamento", items: [
     { label: "Cadernos de Questões", href: "/notebooks", icon: ClipboardList },
@@ -29,7 +30,6 @@ const groups = [
     { label: "Resumos", href: "/summaries", icon: FileText },
     { label: "Lousa Mágica", href: "/lousa", icon: Presentation },
     { label: "ChatIA", href: "/chatIA", icon: MessageSquare },
-    { label: "Biblioteca de Materiais", href: "/materials", icon: FileText },
     { label: "Criar Planejamento de Estudos", href: "/study", icon: CalendarDays },
     { label: "Minhas Dúvidas", href: "/chatIA", icon: HelpCircle },
   ] },

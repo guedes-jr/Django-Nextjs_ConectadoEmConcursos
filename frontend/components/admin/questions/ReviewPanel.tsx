@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Copy } from "lucide-react";
+import { SupportTextPanel } from "@/components/SupportTextPanel";
 import { QuestionContent } from "@/components/QuestionContent";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -113,7 +114,8 @@ export function ReviewPanel({
       )}
 
       <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-        <QuestionContent text={question.statement} className="text-sm leading-relaxed text-slate-800 dark:text-slate-100" />
+        <SupportTextPanel text={question.support_text}/>
+                <QuestionContent text={question.statement} className="text-sm leading-relaxed text-slate-800 dark:text-slate-100" />
         <ul className="mt-4 space-y-2">
           {question.options.map((option, index) => {
             const correct = index === question.correct_answer;

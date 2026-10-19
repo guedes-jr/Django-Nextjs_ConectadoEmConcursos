@@ -1,0 +1,679 @@
+{
+  "version": 1,
+  "verified_at": "2026-10-18",
+  "bancas": [
+    {
+      "name": "CEBRASPE",
+      "official_url": "https://www.cebraspe.org.br/concursos/",
+      "aliases": [
+        "CESPE",
+        "CESPE/UnB",
+        "CEB"
+      ],
+      "description": "Centro Brasileiro de Pesquisa em Avaliação e Seleção e de Promoção de Eventos. Organização de concursos, seleções e avaliações.",
+      "sources": [
+        "https://www.cebraspe.org.br/concursos/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FGV",
+      "official_url": "https://conhecimento.fgv.br/concursos",
+      "aliases": [
+        "Fundação Getulio Vargas",
+        "Fundação Getúlio Vargas",
+        "FGV Conhecimento"
+      ],
+      "description": "Fundação Getulio Vargas. A FGV Conhecimento organiza concursos, exames, certificações e avaliações educacionais.",
+      "sources": [
+        "https://conhecimento.fgv.br/concursos"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FCC",
+      "official_url": "https://www.concursosfcc.com.br/",
+      "aliases": [
+        "Fundação Carlos Chagas",
+        "Fundação Carlos Chagas - FCC"
+      ],
+      "description": "Fundação Carlos Chagas. Portal oficial de concursos públicos, processos seletivos, certificações, provas e resultados.",
+      "sources": [
+        "https://www.concursosfcc.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "VUNESP",
+      "official_url": "https://www.vunesp.com.br/",
+      "aliases": [
+        "Fundação Vunesp"
+      ],
+      "description": "Fundação Vunesp. Organização de concursos públicos, vestibulares e avaliações.",
+      "sources": [
+        "https://www.vunesp.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "CESGRANRIO",
+      "official_url": "https://www.cesgranrio.org.br/",
+      "aliases": [
+        "Fundação Cesgranrio"
+      ],
+      "description": "Fundação Cesgranrio. Instituição responsável por avaliações, exames e concursos públicos.",
+      "sources": [
+        "https://www.cesgranrio.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto AOCP",
+      "official_url": "https://www.institutoaocp.org.br/",
+      "aliases": [],
+      "description": "Organização de concursos públicos e processos seletivos. O portal disponibiliza editais, inscrições, provas e resultados.",
+      "sources": [
+        "https://www.institutoaocp.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBFC",
+      "official_url": "https://concursos.ibfc.org.br/",
+      "aliases": [
+        "Instituto Brasileiro de Formação e Capacitação"
+      ],
+      "description": "Instituto Brasileiro de Formação e Capacitação. Concursos públicos e processos seletivos.",
+      "sources": [
+        "https://concursos.ibfc.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IDECAN",
+      "official_url": "https://idecan.org.br/",
+      "aliases": [
+        "Instituto de Desenvolvimento Educacional Cultural e Assistencial Nacional"
+      ],
+      "description": "Instituto de Desenvolvimento Educacional, Cultural e Assistencial Nacional. Organização e execução de concursos públicos e seleções.",
+      "sources": [
+        "https://idecan.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Consulplan",
+      "official_url": "https://www.institutoconsulplan.org.br/",
+      "aliases": [
+        "Consulplan"
+      ],
+      "description": "Organizadora de concursos e processos seletivos. Consulte editais e canais oficiais no portal institucional.",
+      "sources": [
+        "https://www.institutoconsulplan.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBADE",
+      "official_url": "https://ibade.org.br/",
+      "aliases": [
+        "Instituto Brasileiro de Apoio e Desenvolvimento Executivo"
+      ],
+      "description": "Instituto Brasileiro de Apoio e Desenvolvimento Executivo. Sociedade civil sem fins lucrativos, fundada em 2016, com sede em Niterói/RJ. Atua em concursos e processos seletivos municipais, estaduais e federais.",
+      "sources": [
+        "https://ibade.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IADES",
+      "official_url": "https://www.iades.com.br/",
+      "aliases": [
+        "Instituto Americano de Desenvolvimento"
+      ],
+      "description": "Instituto Americano de Desenvolvimento. Portal oficial de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.iades.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Quadrix",
+      "official_url": "https://quadrix.org.br/",
+      "aliases": [
+        "Instituto Quadrix"
+      ],
+      "description": "Instituto Quadrix. Organização de concursos públicos e processos seletivos, com acompanhamento de inscrições, provas e resultados pelo portal oficial.",
+      "sources": [
+        "https://quadrix.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FUNDATEC",
+      "official_url": "https://www.fundatec.org.br/",
+      "aliases": [
+        "Fundação Universidade Empresa de Tecnologia e Ciências"
+      ],
+      "description": "Fundação Universidade Empresa de Tecnologia e Ciências. Fundação privada sem fins lucrativos, criada em 1973, com sede em Porto Alegre/RS. Atua em concursos, educação e desenvolvimento institucional.",
+      "sources": [
+        "https://www.fundatec.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FUNDEP",
+      "official_url": "https://www.gestaodeconcursos.com.br/",
+      "aliases": [
+        "Gestão de Concursos FUNDEP",
+        "Fundação de Desenvolvimento da Pesquisa"
+      ],
+      "description": "Fundação de Desenvolvimento da Pesquisa. Gestão de Concursos é o portal para acompanhamento de seus concursos e processos seletivos.",
+      "sources": [
+        "https://www.gestaodeconcursos.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FUMARC",
+      "official_url": "https://www.fumarc.com.br/",
+      "aliases": [
+        "Fundação Mariana Resende Costa"
+      ],
+      "description": "Fundação Mariana Resende Costa. Portal institucional com concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.fumarc.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FEPESE",
+      "official_url": "https://fepese.org.br/concursos/",
+      "aliases": [
+        "Fundação de Estudos e Pesquisas Socioeconômicos"
+      ],
+      "description": "Fundação de Estudos e Pesquisas Socioeconômicos. Instituição com atuação em concursos e processos seletivos.",
+      "sources": [
+        "https://fepese.org.br/concursos/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FADESP",
+      "official_url": "https://portalfadesp.org.br/",
+      "aliases": [
+        "Fundação de Amparo e Desenvolvimento da Pesquisa"
+      ],
+      "description": "Fundação de Amparo e Desenvolvimento da Pesquisa. Fundação de apoio com atuação na realização de concursos e processos seletivos.",
+      "sources": [
+        "https://portalfadesp.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FAURGS",
+      "official_url": "https://www.faurgs.com.br/",
+      "aliases": [
+        "Fundação de Apoio da Universidade Federal do Rio Grande do Sul"
+      ],
+      "description": "Fundação de Apoio da Universidade Federal do Rio Grande do Sul. Atua em processos de seleção e concursos.",
+      "sources": [
+        "https://www.faurgs.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FAFIPA",
+      "official_url": "https://www.fundacaofafipa.org.br/",
+      "aliases": [
+        "Fundação FAFIPA"
+      ],
+      "description": "Fundação FAFIPA. Organização de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.fundacaofafipa.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FAUEL",
+      "official_url": "https://www.fauel.org.br/",
+      "aliases": [
+        "Fundação de Apoio ao Desenvolvimento da Universidade Estadual de Londrina"
+      ],
+      "description": "Fundação de Apoio ao Desenvolvimento da Universidade Estadual de Londrina. Portal de concursos e seleções.",
+      "sources": [
+        "https://www.fauel.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FURB",
+      "official_url": "https://concursos.furb.br/",
+      "aliases": [
+        "Universidade Regional de Blumenau"
+      ],
+      "description": "Universidade Regional de Blumenau. Portal oficial de concursos públicos e processos seletivos organizados pela instituição.",
+      "sources": [
+        "https://concursos.furb.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Fundação La Salle",
+      "official_url": "https://fundacaolasalle.org.br/concursos/",
+      "aliases": [
+        "La Salle"
+      ],
+      "description": "Fundação La Salle. Organização e execução de concursos e processos seletivos.",
+      "sources": [
+        "https://fundacaolasalle.org.br/concursos/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Legalle",
+      "official_url": "https://legalleconcursos.com.br/",
+      "aliases": [
+        "Legalle Concursos"
+      ],
+      "description": "Legalle Concursos. Portal de concursos públicos e processos seletivos, com editais, inscrições e resultados.",
+      "sources": [
+        "https://legalleconcursos.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Objetiva",
+      "official_url": "https://www.objetivas.com.br/",
+      "aliases": [
+        "Objetiva Concursos"
+      ],
+      "description": "Objetiva Concursos. Organização e execução de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.objetivas.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Mais",
+      "official_url": "https://www.institutomais.org.br/",
+      "aliases": [],
+      "description": "Instituto Mais. Portal institucional de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.institutomais.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBAM",
+      "official_url": "https://www.ibam-concursos.org.br/",
+      "aliases": [
+        "Instituto Brasileiro de Administração Municipal"
+      ],
+      "description": "Instituto Brasileiro de Administração Municipal. Portal dedicado a concursos e processos seletivos.",
+      "sources": [
+        "https://www.ibam-concursos.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBGP",
+      "official_url": "https://www.ibgpconcursos.com.br/",
+      "aliases": [
+        "Instituto Brasileiro de Gestão e Pesquisa"
+      ],
+      "description": "Instituto Brasileiro de Gestão e Pesquisa. Organização de concursos e processos seletivos.",
+      "sources": [
+        "https://www.ibgpconcursos.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IDCAP",
+      "official_url": "https://www.idcap.org.br/",
+      "aliases": [
+        "Instituto de Desenvolvimento e Capacitação"
+      ],
+      "description": "Instituto de Desenvolvimento e Capacitação. Concursos e processos seletivos, com acompanhamento pelo portal oficial.",
+      "sources": [
+        "https://www.idcap.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IDIB",
+      "official_url": "https://concursando.idib.org.br/",
+      "aliases": [
+        "Instituto de Desenvolvimento Institucional Brasileiro"
+      ],
+      "description": "Instituto de Desenvolvimento Institucional Brasileiro. Organização de concursos públicos e seleções.",
+      "sources": [
+        "https://concursando.idib.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto ACCESS",
+      "official_url": "https://concursos.access.org.br/",
+      "aliases": [
+        "ACCESS"
+      ],
+      "description": "Instituto ACCESS. Portal de concursos e processos seletivos da instituição.",
+      "sources": [
+        "https://concursos.access.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Avalia",
+      "official_url": "https://www.avalia.org.br/",
+      "aliases": [
+        "Avalia"
+      ],
+      "description": "Instituto Avalia. Portal oficial de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.avalia.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "SELECON",
+      "official_url": "https://selecon.org.br/",
+      "aliases": [
+        "Instituto Nacional de Seleções e Concursos"
+      ],
+      "description": "Instituto Nacional de Seleções e Concursos. Organização de concursos e processos seletivos, com atendimento ao candidato e acompanhamento das etapas pelo portal oficial.",
+      "sources": [
+        "https://selecon.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "CONSULPAM",
+      "official_url": "https://www.consulpam.com.br/",
+      "aliases": [
+        "Instituto Consulpam"
+      ],
+      "description": "Instituto Consulpam. Portal institucional de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.consulpam.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "ADM&TEC",
+      "official_url": "https://www.admtec.org.br/",
+      "aliases": [
+        "ADMTEC",
+        "Instituto ADMTEC"
+      ],
+      "description": "Instituto de Administração e Tecnologia. Organização de concursos e processos seletivos.",
+      "sources": [
+        "https://www.admtec.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IGEDUC",
+      "official_url": "https://igeduc.org.br/",
+      "aliases": [
+        "Instituto IGEDUC"
+      ],
+      "description": "Instituto IGEDUC. Portal oficial de concursos e processos seletivos.",
+      "sources": [
+        "https://igeduc.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IAUPE",
+      "official_url": "https://www.upenet.com.br/",
+      "aliases": [
+        "UPENET",
+        "IAUPE/UPENET"
+      ],
+      "description": "Instituto de Apoio à Universidade de Pernambuco. UPENET é o portal de concursos e processos seletivos.",
+      "sources": [
+        "https://www.upenet.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBPTEC",
+      "official_url": "https://ibptec.org.br/concursos/",
+      "aliases": [],
+      "description": "Organizadora de concursos e processos seletivos identificada como IBPTEC no portal oficial. Sede administrativa informada: Edifício Wall Street East, Torre A, sala 125, Avenida Luís Viana Filho, 6462, Salvador/BA. Atendimento: 0800 803 1000, de segunda a sexta, das 09h às 17h. Conferir os canais atuais no site oficial. Cadastro distinto de SEPROD.",
+      "sources": [
+        "https://ibptec.org.br/concursos/",
+        "https://www.ibptec.org.br/concursos/login_candidato_sistema/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "SEPROD",
+      "official_url": "https://www.seprod.com.br/concursos/",
+      "aliases": [
+        "Instituto SEPROD"
+      ],
+      "description": "SEPROD — Serviço de Processamento de Dados. Concursos e processos seletivos. Cadastro distinto de IBPTEC: conferir o edital antes de corrigir identificações históricas.",
+      "sources": [
+        "https://www.seprod.com.br/concursos/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "OMNI",
+      "official_url": "https://www.omniconcursospublicos.com.br/",
+      "aliases": [
+        "OMNI Concursos Públicos"
+      ],
+      "description": "OMNI Concursos Públicos. Portal institucional de concursos e processos seletivos.",
+      "sources": [
+        "https://www.omniconcursospublicos.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IPEFAE",
+      "official_url": "https://www.ipefae.org.br/",
+      "aliases": [
+        "Instituto de Pesquisas Econômicas IPEFAE"
+      ],
+      "description": "Instituto IPEFAE. Portal de concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.ipefae.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Verbena/UFG",
+      "official_url": "https://institutoverbena.ufg.br/",
+      "aliases": [
+        "Instituto Verbena",
+        "Verbena",
+        "UFG/Instituto Verbena"
+      ],
+      "description": "Instituto Verbena da Universidade Federal de Goiás. Portal oficial de processos seletivos e concursos.",
+      "sources": [
+        "https://institutoverbena.ufg.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "AOCP",
+      "official_url": "https://www.aocp.com.br/",
+      "aliases": [],
+      "description": "AOCP Concursos. Organização de concursos e processos seletivos. Cadastro distinto do Instituto AOCP; consulte a pessoa jurídica indicada no edital.",
+      "sources": [
+        "https://www.aocp.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "CPCON/UEPB",
+      "official_url": "https://cpcon.uepb.edu.br/",
+      "aliases": [
+        "CPCON",
+        "UEPB/CPCON"
+      ],
+      "description": "Comissão Permanente de Concursos da Universidade Estadual da Paraíba. Portal institucional de concursos e seleções.",
+      "sources": [
+        "https://cpcon.uepb.edu.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "COPESE/UFPI",
+      "official_url": "https://copese.ufpi.br/",
+      "aliases": [
+        "UFPI/COPESE"
+      ],
+      "description": "Coordenadoria de Concursos, Projetos Estratégicos e Seleções da Universidade Federal do Piauí. Portal institucional de concursos, editais e processos seletivos.",
+      "sources": [
+        "https://copese.ufpi.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "CEV/UECE",
+      "official_url": "https://www.uece.br/cev/",
+      "aliases": [
+        "UECE/CEV"
+      ],
+      "description": "Comissão Executiva do Vestibular da Universidade Estadual do Ceará. Portal institucional de processos seletivos e concursos.",
+      "sources": [
+        "https://www.uece.br/cev/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "NC/UFPR",
+      "official_url": "https://servicos.nc.ufpr.br/",
+      "aliases": [
+        "UFPR/NC",
+        "Núcleo de Concursos da UFPR"
+      ],
+      "description": "Núcleo de Concursos da Universidade Federal do Paraná. Portal institucional de concursos e processos seletivos.",
+      "sources": [
+        "https://servicos.nc.ufpr.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "COPS/UEL",
+      "official_url": "https://www.cops.uel.br/",
+      "aliases": [
+        "UEL/COPS"
+      ],
+      "description": "Coordenadoria de Processos Seletivos da Universidade Estadual de Londrina. Portal oficial de concursos e processos seletivos.",
+      "sources": [
+        "https://www.cops.uel.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FUNCERN",
+      "official_url": "https://funcern.br/concursos/",
+      "aliases": [
+        "Fundação de Apoio à Educação e ao Desenvolvimento Tecnológico do RN"
+      ],
+      "description": "Fundação de Apoio à Educação e ao Desenvolvimento Tecnológico do Rio Grande do Norte. Concursos e processos seletivos.",
+      "sources": [
+        "https://funcern.br/concursos/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "IBRASP",
+      "official_url": "https://ibrasp.org.br/",
+      "aliases": [
+        "Instituto Brasileiro de Seleção e Projetos"
+      ],
+      "description": "Instituto Brasileiro de Seleção e Projetos. Portal oficial de concursos e processos seletivos.",
+      "sources": [
+        "https://ibrasp.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "FUNVAPI",
+      "official_url": "https://www.funvapi.com.br/",
+      "aliases": [
+        "Fundação Vale do Piauí"
+      ],
+      "description": "Fundação Vale do Piauí. Concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.funvapi.com.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "INDEPAC",
+      "official_url": "https://indepac.selecao.net.br/",
+      "aliases": [
+        "Instituto INDEPAC"
+      ],
+      "description": "INDEPAC — Instituto de Cultura, Desenvolvimento Educacional, Promoção Humana e Ação Comunitária. Portal oficial de concursos e processos seletivos.",
+      "sources": [
+        "https://indepac.selecao.net.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Nosso Rumo",
+      "official_url": "https://www.nossorumo.org.br/",
+      "aliases": [
+        "Nosso Rumo"
+      ],
+      "description": "Instituto Nosso Rumo. Concursos públicos e processos seletivos.",
+      "sources": [
+        "https://www.nossorumo.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    },
+    {
+      "name": "Instituto Social Univida",
+      "official_url": "https://www.institutounivida.org.br/",
+      "aliases": [
+        "UNIVIDA"
+      ],
+      "description": "Instituto Social Univida. Portal de concursos e processos seletivos.",
+      "sources": [
+        "https://www.institutounivida.org.br/"
+      ],
+      "verified_at": "2026-10-18"
+    }
+  ],
+  "concurso_links": [
+    {
+      "source_url": "https://www.pciconcursos.com.br/noticias/prefeitura-de-cruzeta-rn-abre-tres-concursos-publicos-com-diversas-vagas-e-cadastro-de-reserva",
+      "title_contains": "Cruzeta",
+      "banca": "IDIB",
+      "evidence_url": "https://concurso.idib.org.br/Concurso.aspx?ID=359"
+    },
+    {
+      "source_url": "https://www.pciconcursos.com.br/noticias/prefeitura-de-acarau-ce-abre-concurso-com-vagas-para-diversos-niveis-de-escolaridade",
+      "title_contains": "Acaraú",
+      "banca": "IDIB",
+      "evidence_url": "https://concurso.idib.org.br/SITE/CandidatoLogin.aspx?AcessoInicial=1"
+    },
+    {
+      "source_url": "https://www.pciconcursos.com.br/noticias/prefeitura-de-salvador-ba-abre-concurso-publico-para-guardas-civis-municipais",
+      "title_contains": "Salvador",
+      "banca": "FGV",
+      "evidence_url": "https://conhecimento.fgv.br/concursos/pmsguarda2026"
+    },
+    {
+      "source_url": "https://www.pciconcursos.com.br/noticias/sead-e-ssp-ma-divulgam-retificacao-de-concurso-para-pericia-oficial",
+      "title_contains": "perícia oficial",
+      "banca": "CEBRASPE",
+      "evidence_url": "https://www.cebraspe.org.br/concursos/PERICIA_OFICIAL_MA_26"
+    },
+    {
+      "source_url": "https://www.pciconcursos.com.br/noticias/dpe-pb-abre-concurso-publico-com-salarios-de-ate-5197",
+      "title_contains": "DPE - PB",
+      "banca": "FCC",
+      "evidence_url": "https://www.concursosfcc.com.br/concursoInscricaoAberta.html"
+    }
+  ]
+}

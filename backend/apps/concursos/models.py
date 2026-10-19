@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from .files import concurso_file_storage, resource_upload_path
+
 
 class Concurso(models.Model):
     class Origin(models.TextChoices):
@@ -23,6 +25,7 @@ class Concurso(models.Model):
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_concursos")
     external_id = models.CharField(max_length=255, db_index=True)
     title = models.CharField(max_length=300)
+    banca = models.ForeignKey("questions.BancaCatalog", null=True, blank=True, on_delete=models.SET_NULL, related_name="concursos")
     organization = models.CharField(max_length=255, blank=True)
     body = models.TextField(blank=True)
     headline = models.CharField(max_length=160, blank=True)
@@ -32,6 +35,8 @@ class Concurso(models.Model):
     region = models.CharField(max_length=40, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN, db_index=True)
     deadline = models.DateField(null=True, blank=True, db_index=True)
+    official_url = models.URLField(max_length=600, blank=True)
+    description = models.TextField(blank=True)
     source_url = models.URLField(max_length=600, blank=True)
     vacancies = models.PositiveIntegerField(null=True, blank=True)
     max_salary = models.IntegerField(null=True, blank=True)
@@ -50,6 +55,38 @@ class Concurso(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.source})"
+
+
+class ConcursoResource(models.Model):
+    class Kind(models.TextChoices):
+        NOTICE = "notice", "Edital"
+        EXAM = "exam", "Prova em PDF"
+        KEY = "answer_key", "Gabarito"
+        KEY_PRELIMINARY = "answer_key_preliminary", "Gabarito preliminar"
+        KEY_FINAL = "answer_key_final", "Gabarito final"
+        MATERIAL = "material", "Material de estudo"
+        LINK = "link", "Link útil"
+
+    file = models.FileField(storage=concurso_file_storage, upload_to=resource_upload_path, blank=True, max_length=255)
+    file_name = models.CharField(max_length=200, blank=True)
+    file_size = models.PositiveBigIntegerField(default=0)
+    file_sha256 = models.CharField(max_length=64, blank=True)
+    concurso = models.ForeignKey(Concurso, on_delete=models.CASCADE, related_name="resources")
+    exam = models.ForeignKey("questions.Exam", null=True, blank=True, on_delete=models.PROTECT, related_name="resources")
+    official_document = models.ForeignKey("questions.OfficialExamDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="concurso_resources")
+    title = models.CharField(max_length=200)
+    kind = models.CharField(max_length=28, choices=Kind.choices)
+    description = models.CharField(max_length=600, blank=True)
+    url = models.URLField(max_length=1000, blank=True)
+    is_published = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["kind", "title", "id"]
+
+    def __str__(self):
+        return self.title
 
 
 class NewsArticle(models.Model):

@@ -6,7 +6,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.billing.models import Plan, Subscription
-from apps.chat.models import ChatUsage, Conversation, Message
+from apps.chat.models import ChatUsage, Conversation, Message, StudyMaterial
 from apps.chat.services import search_related_questions
 from apps.questions.models import Question
 from apps.workspace.models import SimulationRun
@@ -74,13 +74,9 @@ class GroundedAssistantTests(APITestCase):
         self.assertEqual(self.client.post(self.url, {"content": "Concordância"}).status_code, 503)
         self.assertFalse(ChatUsage.objects.exists())
 
-    def test_material_and_practice_are_private_and_recheck_sources(self):
+    def test_practice_is_private_and_rechecks_sources(self):
         message = Message.objects.create(conversation=self.conversation, role="assistant", content="Material",
                                          source_question_ids=[self.question.pk, self.hidden.pk])
-        response = self.client.post("/api/study-materials/", {"title": "Concordância", "message_id": message.pk})
-        self.assertEqual(response.status_code, 201)
-        material_id = response.data["id"]
-        self.assertEqual(self.client.post("/api/study-materials/", {"title": "Duplicado", "message_id": message.pk}).status_code, 400)
         practice_url = f"/api/conversations/{self.conversation.pk}/practice/"
         practice = self.client.post(practice_url, {"message_id": message.pk})
         self.assertEqual(practice.status_code, 201)
@@ -94,23 +90,22 @@ class GroundedAssistantTests(APITestCase):
         run.refresh_from_db()
         self.assertEqual((run.status, run.score, run.total), ("finished", 1, 1))
         self.client.force_authenticate(self.other)
-        self.assertEqual(self.client.get("/api/study-materials/").data, [])
-        self.assertEqual(self.client.post("/api/study-materials/", {"title": "Alheio", "message_id": message.pk}).status_code, 400)
-        self.assertEqual(self.client.delete(f"/api/study-materials/{material_id}/").status_code, 404)
         self.assertEqual(self.client.post(practice_url, {"message_id": message.pk}).status_code, 404)
         self.client.force_authenticate(self.user)
         self.question.status = "rejected"
         self.question.save(update_fields=["status"])
-        self.assertEqual(self.client.get("/api/study-materials/").data[0]["message"]["sources"], [])
         self.assertEqual(self.client.post(practice_url, {"message_id": message.pk}).status_code, 400)
-        self.assertEqual(self.client.delete(f"/api/study-materials/{material_id}/").status_code, 204)
         self.assertTrue(Message.objects.filter(pk=message.pk).exists())
 
-    def test_saved_material_survives_conversation_deletion(self):
-        message = Message.objects.create(conversation=self.conversation, role="assistant", content="Resumo salvo",
-                                         source_question_ids=[self.question.pk])
-        self.assertEqual(self.client.post("/api/study-materials/", {"title": "Resumo", "message_id": message.pk}).status_code, 201)
+    def test_retired_material_api_is_unavailable_and_saved_data_is_preserved(self):
+        message = Message.objects.create(conversation=self.conversation, role="assistant", content="Resumo salvo")
+        saved = StudyMaterial.objects.create(user=self.user, message=message, title="Resumo", content=message.content)
+        self.assertEqual(self.client.get("/api/study-materials/").status_code, 404)
+        self.assertEqual(self.client.post("/api/study-materials/", {"message_id": message.pk}).status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/study-materials/{saved.pk}/").status_code, 404)
+        saved.refresh_from_db()
+        self.assertEqual(saved.content, "Resumo salvo")
         self.assertEqual(self.client.delete(f"/api/conversations/{self.conversation.pk}/").status_code, 204)
-        saved = self.client.get("/api/study-materials/").data[0]
-        self.assertEqual(saved["message"]["content"], "Resumo salvo")
-        self.assertEqual(saved["message"]["sources"][0]["id"], self.question.pk)
+        saved.refresh_from_db()
+        self.assertIsNone(saved.message_id)
+        self.assertEqual(saved.content, "Resumo salvo")

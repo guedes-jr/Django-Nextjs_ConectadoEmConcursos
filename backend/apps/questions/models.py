@@ -16,6 +16,7 @@ LEGACY_SOURCE_SLUG = "legacy"
 class Exam(models.Model):
     title = models.CharField(max_length=200)
     banca = models.CharField(max_length=100, db_index=True)
+    banca_catalog = models.ForeignKey("BancaCatalog", null=True, blank=True, on_delete=models.SET_NULL, related_name="exams")
     institution = models.CharField(max_length=160, blank=True, db_index=True)
     role = models.CharField(max_length=160, blank=True, db_index=True)
     year = models.PositiveSmallIntegerField(db_index=True)
@@ -35,6 +36,15 @@ class Exam(models.Model):
                 fields=["title", "banca", "year"], name="unique_exam_title_banca_year"
             )
         ]
+
+    def save(self, *args, **kwargs):
+        from .naming import resolve_banca_catalog
+        fields = kwargs.get("update_fields")
+        if fields is None or "banca" in fields or "banca_catalog" in fields:
+            self.banca_catalog = resolve_banca_catalog(self.banca)
+            if fields is not None:
+                kwargs["update_fields"] = set(fields) | {"banca_catalog"}
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.banca} - {self.title} ({self.year})"
@@ -211,6 +221,22 @@ class SearchRun(models.Model):
         return self.name or f"{self.source_id} · {self.started_at:%d/%m/%Y %H:%M}"
 
 
+class SupportText(models.Model):
+    """Texto compartilhado por questões, independente de prova ou disciplina."""
+
+    title = models.CharField(max_length=200)
+    content = models.TextField()
+    reference = models.CharField(max_length=600, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self):
+        return self.title
+
+
 class Question(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Rascunho"
@@ -251,6 +277,10 @@ class Question(models.Model):
     banca = models.CharField(max_length=100, db_index=True)
     year = models.PositiveSmallIntegerField(db_index=True)
     number = models.PositiveSmallIntegerField(null=True, blank=True)
+    support_text = models.ForeignKey(
+        SupportText, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="questions",
+    )
     statement = models.TextField()
     options = models.JSONField(default=list)
     correct_answer = models.PositiveSmallIntegerField()

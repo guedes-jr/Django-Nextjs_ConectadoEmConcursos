@@ -21,6 +21,7 @@ export type SimulationRun = {
   discipline: string;
   banca: string;
   year: number | null;
+  exams?: {id:number;title:string}[];
   exam_ids: number[];
   time_limit_minutes: number | null;
   duration_seconds: number | null;
@@ -47,6 +48,7 @@ export type SimulationQuestion = {
   discipline: string;
   banca: string;
   year: number;
+  support_text?: {id:number;title:string;content:string;reference:string}|null;
   statement: string;
   options: string[];
 };

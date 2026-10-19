@@ -49,7 +49,7 @@ def search_related_questions(prompt, question_ids=None, exam_id=None):
     # Retain accented forms as well: SQLite's icontains does not remove accents.
     originals = re.findall(r"[^\W_]{3,}", prompt.lower())
     tokens = list(dict.fromkeys(tokens + [t for t in originals if "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)) not in STOP_WORDS]))[:24]
-    base = visible()
+    base = visible().select_related("support_text")
     if exam_id:
         base = base.filter(exam_id=exam_id, exam__is_published=True)
     selected = list(base.filter(pk__in=question_ids or []).order_by("pk")[:5])
@@ -63,6 +63,7 @@ def search_related_questions(prompt, question_ids=None, exam_id=None):
         score += Case(
             When(discipline__icontains=token, then=Value(4)),
             When(statement__icontains=token, then=Value(2)),
+            When(support_text__content__icontains=token, then=Value(2)),
             When(explanation__icontains=token, then=Value(1)),
             default=Value(0), output_field=IntegerField(),
         )
@@ -77,10 +78,11 @@ def build_study_context(question_ids=None, exam_id=None, *, questions=None):
         if exam:
             parts.append(f"Prova: {exam.title} — {exam.banca}, {exam.year}, {exam.institution}, {exam.role}.")
     if questions is None:
-        questions = visible(Question.objects.filter(pk__in=question_ids or []))[:5]
+        questions = visible(Question.objects.filter(pk__in=question_ids or []).select_related("support_text"))[:5]
     for question in questions:
         options = " | ".join(f"{index}: {str(text)[:600]}" for index, text in enumerate(question.options[:8]))
-        parts.append(f"[Q{question.pk}] ({question.discipline}, {question.banca}, {question.year}): {question.statement[:3000]}\nAlternativas (índice iniciado em zero): {options}\nGabarito cadastrado: {question.correct_answer}\nComentário cadastrado: {question.explanation[:2000] or 'Não disponível.'}")
+        support = f"\nTexto de apoio ({question.support_text.title}): {question.support_text.content[:12000]}\nReferência: {question.support_text.reference}" if question.support_text_id else ""
+        parts.append(f"[Q{question.pk}] ({question.discipline}, {question.banca}, {question.year}): {question.statement[:3000]}{support}\nAlternativas (índice iniciado em zero): {options}\nGabarito cadastrado: {question.correct_answer}\nComentário cadastrado: {question.explanation[:2000] or 'Não disponível.'}")
     return "\n\n".join(parts)
 
 

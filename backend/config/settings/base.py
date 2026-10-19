@@ -185,6 +185,9 @@ REST_FRAMEWORK = {
     ),
 }
 
+# Vincula JWTs ao hash da senha; trocas de senha invalidam credenciais antigas.
+SIMPLE_JWT = {"CHECK_REVOKE_TOKEN": True}
+
 REST_USE_JWT = True
 JWT_AUTH_COOKIE = "access"
 JWT_AUTH_REFRESH_COOKIE = "refresh"

@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.utils import timezone
-from rest_framework import mixins
 from rest_framework.exceptions import ValidationError
 from apps.questions.visibility import visible
 from apps.workspace.models import SimulationRun
@@ -8,8 +7,8 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.chat.models import ChatUsage, Conversation, Message, StudyMaterial
-from apps.chat.serializers import ConversationSerializer, MessageSerializer, SendSerializer, StudyMaterialSerializer
+from apps.chat.models import ChatUsage, Conversation, Message
+from apps.chat.serializers import ConversationSerializer, MessageSerializer, SendSerializer
 from apps.chat.services import build_study_context, generate_response, search_related_questions
 from apps.billing.services import capabilities_for
 
@@ -90,16 +89,3 @@ class ConversationViewSet(viewsets.ModelViewSet):
              "exam_role": q.exam.role if q.exam else "", "exam_institution": q.exam.institution if q.exam else "",
              "discipline": q.discipline, "banca": q.banca, "year": q.year,
              "statement": q.statement, "options": q.options} for q in questions]}, status=201)
-
-
-class StudyMaterialViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin,
-                           viewsets.GenericViewSet):
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = StudyMaterialSerializer
-    http_method_names = ["get", "post", "delete", "head", "options"]
-
-    def get_queryset(self):
-        return StudyMaterial.objects.filter(user=self.request.user).select_related("message")
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)

@@ -39,10 +39,9 @@ restrita ao Avançado; busca automática funciona em todos os planos.
 ## Fluxo de estudo
 
 - No ChatIA, peça explicações sobre um tema específico e abra as questões de referência.
-- “Salvar material” guarda uma cópia privada na Biblioteca de Materiais (`/materials`),
-  acessível também pelo menu de estudos. A cópia sobrevive à exclusão da conversa.
-  Salvar duas vezes a mesma resposta retorna erro de validação. Excluir um material
-  não exclui a conversa nem as questões.
+- Biblioteca de Materiais retirada temporariamente em 18/10/2026: sem menu,
+  atalhos, botão de salvamento ou API. `/materials` redireciona ao ChatIA após
+  autenticação. Os materiais já salvos permanecem no banco, sem exclusão de dados.
 - “Praticar questões relacionadas” abre uma confirmação e cria um simulado com até
   cinco questões recuperadas para aquela resposta. Não cria questões sintéticas.
   Enunciados e alternativas vêm do banco; gabaritos não são enviados no início.
@@ -64,3 +63,26 @@ Referências oficiais consultadas:
 [roteador gratuito](https://openrouter.ai/openrouter/free),
 [API de chat](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request),
 [limites de preço por provedor](https://openrouter.ai/docs/guides/routing/provider-selection).
+
+## Retirada temporária da biblioteca — produção, 18/10/2026
+
+Publicada a release `20261018T232242Z-5e50bd3484a0-sem-biblioteca`, build
+`d1f8ebee-5e26-4dcd-8a6d-e96954055cc5`, com backup anterior
+`backup-20261018-202446-536447-db909efd.tar.gz`. Sem alteração de esquema.
+
+Menu, atalho, salvamento, cliente e API de materiais removidos; `/materials`
+redireciona ao ChatIA após autenticação. A tabela e as migrações foram preservadas.
+A comparação de hashes confirmou a preservação de conversas, mensagens, materiais
+e demais dados históricos. Produção tinha quatro conversas e nenhum material salvo.
+API de materiais retorna 404 por HTTPS, API do chat responde 200 para conta comum,
+prontidão 200 e serviços/timers ativos.
+
+Validação local: 13 testes Django do chat, três fluxos Playwright (chat/simulado,
+acesso anônimo e redirecionamento/menu móvel), TypeScript, ESLint e ausência de
+migrações pendentes. Build e ensaio isolado passaram no servidor. Evidências em
+`/srv/conectado/operations/sem-biblioteca-verification.json`,
+`sem-biblioteca-api-verification.json` e `sem-biblioteca-promotion-20261018-232444.log`.
+
+Publicado por overlay com manifesto sobre `5e50bd3`, mantendo os recursos das
+releases anteriores. As alterações locais ainda precisam acompanhar o próximo
+commit/push. Não houve exclusão de banco nem envio de mensagens.

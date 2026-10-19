@@ -1,5 +1,5 @@
 """Local SQLite/PostgreSQL backup artifacts, with staged media and atomic publication."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import hashlib
 import json
 import os
@@ -119,12 +119,26 @@ def validate_media_tree(root):
     return total, count
 
 
+def concurso_files_root():
+    return Path(settings.OFFICIAL_EXAMS_ROOT).absolute() / "concurso-materials"
+
+
+def _validate_private_root(root, media, directory):
+    if (root.is_symlink() or root == Path(root.anchor) or
+            root.resolve().is_relative_to(media.resolve()) or media.resolve().is_relative_to(root.resolve()) or
+            directory.resolve().is_relative_to(root.resolve()) or root.resolve().is_relative_to(directory.resolve())):
+        raise ValueError("Destino de arquivos privados inválido ou sobreposto à mídia/backups.")
+
+
 def create_archive(directory, name, *, db_path=None, media_root=None):
     directory = Path(directory)
     root = Path(media_root or settings.MEDIA_ROOT).absolute()
+    private = concurso_files_root()
     if directory.resolve().is_relative_to(root.resolve()):
         raise ValueError("O diretório de backup deve ficar fora da mídia pública.")
+    _validate_private_root(private, root, directory)
     media_bytes, media_count = validate_media_tree(root)
+    private_bytes, private_count = validate_media_tree(private)
     with tempfile.TemporaryDirectory(dir=directory) as tmp:
         tmp = Path(tmp)
         filename = "db.dump" if engine() == "postgresql" else "db.sqlite3"
@@ -132,9 +146,10 @@ def create_archive(directory, name, *, db_path=None, media_root=None):
         database_copy(database, db_path=db_path)
         if not database.is_file() or database.stat().st_size == 0:
             raise ValueError("Utilitário não produziu um backup de banco válido.")
-        manifest = {"version": 1, "engine": engine(), "database": filename, "sha256": digest(database), "media_included": True}
+        manifest = {"version": 1, "engine": engine(), "database": filename, "sha256": digest(database),
+                    "media_included": True, "concurso_files_included": True}
         (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        if media_count + 2 > settings.BACKUP_MAX_FILES or media_bytes + database.stat().st_size + (tmp / "manifest.json").stat().st_size > settings.BACKUP_MAX_UNPACKED_BYTES:
+        if media_count + private_count + 4 > settings.BACKUP_MAX_FILES or media_bytes + private_bytes + database.stat().st_size + (tmp / "manifest.json").stat().st_size > settings.BACKUP_MAX_UNPACKED_BYTES:
             raise ValueError("Backup excede os limites de arquivos/tamanho descompactado.")
         empty = tmp / "empty-media"
         empty.mkdir()
@@ -143,6 +158,7 @@ def create_archive(directory, name, *, db_path=None, media_root=None):
             tar.add(database, arcname=filename)
             tar.add(tmp / "manifest.json", arcname="manifest.json")
             tar.add(root if root.exists() else empty, arcname="media")
+            tar.add(private if private.exists() else empty, arcname="concurso-files")
         archive.chmod(0o600)
         os.replace(archive, directory / name)
     return name
@@ -156,12 +172,12 @@ def extract_archive(archive, target):
         for member in tar:
             path = Path(member.name)
             if (path.is_absolute() or ".." in path.parts or "\\" in member.name or not path.parts
-                    or path.parts[0] not in {"manifest.json", "db.dump", "db.sqlite3", "media"}
+                    or path.parts[0] not in {"manifest.json", "db.dump", "db.sqlite3", "media", "concurso-files"}
                     or not (member.isfile() or member.isdir()) or str(path) in seen):
                 raise ValueError("Backup contém caminho, link ou tipo de arquivo não permitido.")
             member.uid = member.gid = None
             member.uname = member.gname = None
-            member.mode = 0o755 if member.isdir() else 0o644 if path.parts[0] == "media" else 0o600
+            member.mode = (0o700 if path.parts[0] == "concurso-files" else 0o755) if member.isdir() else 0o644 if path.parts[0] == "media" else 0o600
             seen.add(str(path))
             total += member.size
             members.append(member)
@@ -185,10 +201,16 @@ def validate_database(tmp):
         filename = "db.dump" if engine() == "postgresql" else "db.sqlite3"
         if manifest.get("database") != filename or manifest.get("media_included") is not True or not (tmp / "media").is_dir():
             raise ValueError("Conteúdo do backup não corresponde ao manifesto.")
+        if "concurso_files_included" in manifest and manifest["concurso_files_included"] is not True:
+            raise ValueError("Manifesto de arquivos privados inválido.")
+        if (tmp / "concurso-files").exists() != bool(manifest.get("concurso_files_included")):
+            raise ValueError("Arquivos privados não correspondem ao manifesto.")
     else:
         if engine() != "sqlite3" or (tmp / "db.dump").exists():
             raise ValueError("Backup PostgreSQL exige manifesto de formato/banco.")
         filename = "db.sqlite3"
+        if (tmp / "concurso-files").exists():
+            raise ValueError("Arquivos privados exigem manifesto de backup.")
         manifest = None  # Compatibility with existing SQLite archives.
     database = tmp / filename
     if not database.is_file() or database.stat().st_size == 0:
@@ -222,13 +244,21 @@ def restore_archive(directory, name, *, db_path=None, media_root=None, maintenan
     if root.is_symlink() or root == Path(root.anchor) or directory.resolve().is_relative_to(root.resolve()):
         raise ValueError("Destino de mídia inválido ou sobreposto ao diretório de backups.")
     root.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=root.parent) as media_stage:
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory(dir=root.parent) as media_stage, ExitStack() as stages:
         tmp = Path(tmp)
         try:
             extract_archive(archive, tmp)
         except (tarfile.TarError, OSError) as exc:
             raise ValueError("Arquivo de backup inválido ou ilegível.") from exc
         database = validate_database(tmp)
+        private_copy = tmp / "concurso-files"
+        private_root = concurso_files_root()
+        if private_copy.exists():
+            _validate_private_root(private_root, root, directory)
+            private_root.parent.mkdir(parents=True, exist_ok=True)
+            private_stage = stages.enter_context(tempfile.TemporaryDirectory(dir=private_root.parent))
+            staged_private = Path(private_stage) / "concurso-files"
+            shutil.copytree(private_copy, staged_private)
         media_copy = tmp / "media"
         staged = Path(media_stage) / "media"
         if media_copy.exists():
@@ -248,15 +278,41 @@ def restore_archive(directory, name, *, db_path=None, media_root=None, maintenan
             recovery.chmod(0o600)
             with sqlite3.connect(database) as source, sqlite3.connect(destination) as target:
                 source.backup(target)
-        previous_media = root.parent / f".before-restore-media-{uuid4().hex}"
-        if media_copy.exists():
-            try:
-                if root.exists():
-                    os.replace(root, previous_media)
-                os.replace(staged, root)
-            except OSError as exc:
-                if previous_media.exists() and not root.exists():
-                    os.replace(previous_media, root)
-                raise ValueError("Banco restaurado, mas troca de mídia falhou. Mídia anterior preservada; mantenha manutenção e use a cópia de recuperação do banco.") from exc
+        previous_media = None
+        previous_private = None
+        swaps = []
+        try:
+            if media_copy.exists():
+                previous_media = _swap_tree(root, staged, "media")
+                swaps.append((root, previous_media, "media"))
+            if private_copy.exists():
+                previous_private = _swap_tree(private_root, staged_private, "concurso-files")
+                swaps.append((private_root, previous_private, "concurso-files"))
+        except OSError as exc:
+            # Keep both the old and restored files available for recovery.
+            for destination, previous, label in reversed(swaps):
+                try:
+                    if destination.exists():
+                        os.replace(destination, destination.parent / f".failed-restore-{label}-{uuid4().hex}")
+                    if previous and previous.exists():
+                        os.replace(previous, destination)
+                except OSError:
+                    pass
+            raise ValueError("Banco restaurado, mas troca dos arquivos falhou. Arquivos anteriores preservados; mantenha manutenção e use a cópia de recuperação do banco.") from exc
+
     return {"restored": name, "previous_db_saved_at": recovery.name,
-            "previous_media_saved_at": previous_media.name if previous_media.exists() else None}
+            "previous_media_saved_at": previous_media.name if previous_media and previous_media.exists() else None,
+            "previous_concurso_files_saved_at": previous_private.name if previous_private and previous_private.exists() else None}
+
+
+def _swap_tree(root, staged, label):
+    previous = root.parent / f".before-restore-{label}-{uuid4().hex}"
+    try:
+        if root.exists():
+            os.replace(root, previous)
+        os.replace(staged, root)
+    except OSError:
+        if previous.exists() and not root.exists():
+            os.replace(previous, root)
+        raise
+    return previous if previous.exists() else None

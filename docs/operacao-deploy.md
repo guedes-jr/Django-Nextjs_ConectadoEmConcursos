@@ -11,8 +11,7 @@ push, cobrança, importação ou sincronização.
 ## Provisionamento antes da primeira atualização
 
 1. Confirmar destino, domínio, usuário `deploy`, acesso SSH, janela e cópia externa
-   restaurável. Conferir o status da CI no commit escolhido. O atualizador exige
-   checkout limpo, incluindo arquivos não rastreados; não faz stash/reset/clean.
+   restaurável. Conferir o status da CI no commit escolhido. Em instalações por releases, o atualizador busca o Git em cache separado e prepara uma nova pasta. No modo legado, exige checkout limpo, incluindo arquivos não rastreados; não faz stash/reset/clean.
 2. Provisionar Node 24, Python compatível com a CI (3.12), virtualenv, clientes
    PostgreSQL compatíveis, Redis, nginx, certificados TLS, curl, flock e sudo.
    Não há mais instalação automática de pacotes do sistema pelo atualizador.
@@ -61,21 +60,47 @@ e ambientes usados no build/checks.
 
 No computador local, `make deploy-plan` apenas descreve as etapas. Não acessa o
 servidor, Git remoto, banco, Redis ou serviços. No servidor já provisionado, o
-operador executa a revisão/implantação com `bash scripts/update.sh --apply`.
-Executar sem argumentos equivale a `--plan`, sem efeitos operacionais.
+operador executa a implantação com `./scripts/update.sh` (ou `--apply`).
+**Sem argumentos, executa a atualização.** Para somente consultar, usar
+`./scripts/update.sh --plan`; `make deploy-plan` continua sem efeitos.
 
-O script valida ferramentas, branch limpa, unidades e Redis local, busca a branch
-remota e exige fast-forward. Confirma as permissões sudo, cria exclusivamente o
-marcador de manutenção e exige 503 no HTTPS público antes de continuar. Para timers,
-jobs, worker, Django e Next antes de modificar dependências, código, `.next` ou
-esquema. Assim o build não sobrescreve um frontend em execução. A janela inclui o
-tempo de instalação/build; não há promessa de deploy sem interrupção.
+Na instalação por releases, o script reconhece `/srv/conectado/current`, busca o
+`main` em `/srv/conectado/repository.git` e extrai o commit para uma pasta nova.
+Cada pasta recebe virtualenv, dependências e build próprios, além de links aos
+dotenv privados em `/srv/conectado/config/`. O Node 24 dedicado em `/opt/conectado/`
+é usado sem alterar o Node global. Preparação e build acontecem com o site ativo.
+Somente depois dos checks entra manutenção, param os escritores, é criado backup,
+são aplicadas migrações/estáticos e o ponteiro é trocado atomicamente. A release
+anterior é preservada. Falha antes da manutenção mantém o site anterior ativo;
+falha depois dela mantém manutenção para recuperação sem sobrescrever dados.
 
-Com os escritores parados, cria backup usando o código anterior, avança o Git,
-sincroniza dependências, roda `check --deploy --fail-level WARNING`, verifica drift
-nas migrações, valida URLs públicas/tipos e gera o build. Qualquer aviso de deploy
-precisa ser corrigido; o script não o silencia. Aplica migrações, confirma ausência
-de pendências e coleta estáticos. Não executa importação, sincronização nem retenção.
+`DEPLOY_ROOT`, `DEPLOY_REPOSITORY_URL` e `DEPLOY_BRANCH` permitem configurar a
+origem e o diretório de releases. `PROJECT_DIR` deve apontar ao ponteiro ativo.
+`deployment.json` registra commit, release anterior e hash do atualizador sem
+incluir segredos. Durante o bootstrap desta correção, se o Git ainda trouxer o
+script antigo, ele é substituído pela versão compatível em execução. Enviar a
+correção ao Git; após isso, a versão compatível do repositório prevalece.
+
+Depois de uma atualização, iniciar nova sessão ou executar `cd` novamente pelo
+caminho `/var/www/conectado-em-concursos/scripts`, pois o diretório corrente de
+uma sessão antiga pode continuar dentro da release anterior.
+
+O script valida ferramentas, unidades e Redis local. No modo legado exige branch
+limpa e avanço fast-forward; no modo de releases mantém o Git separado da aplicação
+ativa. Confirma as permissões sudo, cria exclusivamente o marcador de manutenção
+e exige 503 no HTTPS público antes de parar timers, jobs, worker, Django e Next.
+
+Com os escritores parados, cria backup usando o código anterior. No modo legado,
+a janela inclui atualização de código, dependências e build; no modo de releases,
+essa preparação já ocorreu em pasta isolada. Os dois modos exigem
+`check --deploy --fail-level WARNING`, ausência de drift nas migrações, configuração
+pública válida, tipos e build. Erros e avisos de deploy bloqueiam a publicação. A única exceção provisionada
+neste servidor é `core.W003` para o backend de e-mail em console, uma pendência
+anterior já aceita: o marcador privado `config/allow-console-email` habilita essa
+exceção, que aparece explicitamente no log. Não é aplicado a outros backends nem
+a outros avisos. Remover o marcador ao homologar SMTP; ele não configura transporte
+nem envia e-mails. Aplica migrações, confirma ausência de pendências e coleta
+estáticos. Não executa importação, sincronização nem retenção.
 
 Inicia Django, Next e worker; exige serviços ativos, `/api/ready/` local e Next 200.
 Só então remove manutenção e verifica HTTPS, prontidão pública, admin redirecionando
@@ -151,3 +176,13 @@ PostgreSQL, cópia externa, dispositivos e observação de 48 horas continuam pe
 
 Referências: [serviços systemd](https://www.freedesktop.org/software/systemd/man/systemd.service.html),
 [WebSocket no nginx](https://nginx.org/en/docs/http/websocket.html).
+
+## Proteção de migrações publicadas por overlay
+
+A release de bancas de 18/10/2026 registra `required_migration_files` em
+`deployment.json`. O atualizador exige que esses arquivos existam no código
+extraído do Git antes de construir a release ou entrar em manutenção. Enquanto
+o commit/push das alterações locais não incluir `questions/0026_exam_banca_catalog.py`
+e `concursos/0007_concurso_banca.py` nos respectivos diretórios de migrações,
+a atualização será interrompida com mensagem explícita, preservando a aplicação
+ativa. Enviar todo o código correspondente junto das migrações.

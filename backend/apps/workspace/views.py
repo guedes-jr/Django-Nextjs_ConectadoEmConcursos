@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from allauth.socialaccount.models import SocialAccount
-from apps.questions.models import Question, QuestionNote, UserAnswer
+from apps.questions.models import Exam, Question, QuestionNote, UserAnswer
 from apps.questions.visibility import visible
 from .models import CommunityPost, ExamSubmission, Flashcard, Notebook, SimulationRun
 
@@ -214,11 +214,13 @@ def people_detail(request, username):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def simulations(request):
-    runs = (
+    runs = list(
         SimulationRun.objects.filter(user=request.user)
         .exclude(status=SimulationRun.Status.IN_PROGRESS)
         .order_by("-created_at")[:50]
     )
+    exam_ids = {pk for run in runs for pk in run.exam_ids}
+    exams = {item.pk: {"id": item.pk, "title": item.title} for item in Exam.objects.filter(pk__in=exam_ids, is_published=True)}
     return Response([{
         "id": item.id,
         "score": item.score,
@@ -231,6 +233,7 @@ def simulations(request):
         "banca": item.banca,
         "year": item.year,
         "exam_ids": item.exam_ids,
+        "exams": [exams[pk] for pk in item.exam_ids if pk in exams],
         "time_limit_minutes": item.time_limit_minutes,
         "duration_seconds": item.duration_seconds,
         "started_at": item.started_at,

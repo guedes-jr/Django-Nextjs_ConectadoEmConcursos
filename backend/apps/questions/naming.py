@@ -103,3 +103,13 @@ def banca_query(value, prefix: str = ""):
     for variant in banca_variants(value):
         query |= Q(**{f"{field}__iexact": variant})
     return query
+
+
+def resolve_banca_catalog(value):
+    """Resolve somente nome/alias exato normalizado; nunca usa similaridade."""
+    from apps.questions.models import BancaCatalog
+    key = banca_key(value)
+    if not key:
+        return None
+    keys = {key, BANCAS_ALIASES.get(key, key)}
+    return BancaCatalog.objects.filter(Q(normalized_name__in=keys) | Q(aliases__normalized_alias__in=keys)).distinct().first()

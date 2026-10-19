@@ -18,6 +18,9 @@ class BackupStorageTests(SimpleTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        isolated = override_settings(OFFICIAL_EXAMS_ROOT=self.root / "private")
+        isolated.enable()
+        self.addCleanup(isolated.disable)
         self.backups = self.root / "backups"
         self.backups.mkdir()
         self.media = self.root / "media"
@@ -182,3 +185,58 @@ class PostgresBackupTests(SimpleTestCase):
                     storage.restore_archive(backups, "backup-pg.tar.gz", media_root=media, maintenance=True)
             self.assertEqual((media / "file").read_text(), "after")
             self.assertEqual(len(list(backups.glob("before-restore-*.dump"))), 1)
+
+
+class ConcursoFileBackupTests(SimpleTestCase):
+    setUp = BackupStorageTests.setUp
+    archive = BackupStorageTests.archive
+    def test_uploaded_files_roundtrip_with_database_and_remain_private(self):
+        private = storage.concurso_files_root()
+        private.mkdir(parents=True)
+        (private / "edital.pdf").write_bytes(b"%PDF-1.4\noriginal\n%%EOF")
+        name = self.archive()
+        with tarfile.open(self.backups / name) as archive:
+            self.assertIn("concurso-files/edital.pdf",archive.getnames())
+        (private / "edital.pdf").write_bytes(b"alterado")
+        result = storage.restore_archive(self.backups,name,db_path=self.db,media_root=self.media)
+        self.assertIn(b"original",(private / "edital.pdf").read_bytes())
+        self.assertEqual((private / "edital.pdf").stat().st_mode & 0o777,0o600)
+        self.assertEqual((private.parent / result["previous_concurso_files_saved_at"] / "edital.pdf").read_bytes(),b"alterado")
+
+    def test_private_symlinks_and_missing_private_manifest_are_rejected(self):
+        private=storage.concurso_files_root();private.mkdir(parents=True)
+        (private / "link.pdf").symlink_to(self.media / "file.txt")
+        with self.assertRaises(ValueError):self.archive()
+        (private / "link.pdf").unlink()
+        name=self.archive()
+        with tempfile.TemporaryDirectory() as temporary:
+            extracted=Path(temporary);storage.extract_archive(self.backups/name,extracted)
+            (extracted / "concurso-files").rmdir()
+            with self.assertRaisesRegex(ValueError,"privados"):
+                storage.validate_database(extracted)
+
+
+    def test_private_swap_failure_preserves_old_media_and_private_files(self):
+        private=storage.concurso_files_root();private.mkdir(parents=True)
+        (private / "edital.pdf").write_bytes(b"saved")
+        name=self.archive()
+        (private / "edital.pdf").write_bytes(b"current-private")
+        (self.media / "file.txt").write_text("current-media")
+        original=storage.os.replace
+        def replace(source,destination):
+            if Path(source).name=="concurso-files" and Path(destination)==private:
+                raise OSError("simulated disk failure")
+            return original(source,destination)
+        with patch.object(storage.os,"replace",side_effect=replace):
+            with self.assertRaisesRegex(ValueError,"troca dos arquivos falhou"):
+                storage.restore_archive(self.backups,name,db_path=self.db,media_root=self.media)
+        self.assertEqual((self.media / "file.txt").read_text(),"current-media")
+        self.assertEqual((private / "edital.pdf").read_bytes(),b"current-private")
+
+    def test_empty_private_snapshot_restores_empty_and_keeps_later_files_for_recovery(self):
+        name=self.archive()
+        private=storage.concurso_files_root();private.mkdir(parents=True)
+        (private / "later.pdf").write_bytes(b"later")
+        result=storage.restore_archive(self.backups,name,db_path=self.db,media_root=self.media)
+        self.assertEqual(list(private.iterdir()),[])
+        self.assertTrue((private.parent / result['previous_concurso_files_saved_at'] / 'later.pdf').is_file())

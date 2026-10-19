@@ -14,6 +14,8 @@ export type Concurso = {
   region: string;
   status: ConcursoStatus;
   deadline: string | null;
+  official_url: string;
+  banca_name: string|null;
   source_url: string;
   source: string;
   vacancies: number | null;
@@ -50,3 +52,7 @@ export async function listConcursos(filters: ConcursoFilters = {}) {
   });
   return response.data;
 }
+
+export type ConcursoResource = {has_file?:boolean;file_name?:string;file_size?:number;id:number;title:string;kind:string;kind_label:string;description:string;url:string;exam_id:number|null;exam_title:string|null};
+export type ConcursoDetail = Concurso & {description:string;body:string;resources:ConcursoResource[];exams:import("@/lib/exams").Exam[]};
+export async function getConcurso(id:number){return (await http.get<ConcursoDetail>(`/api/concursos/${id}/`)).data;}

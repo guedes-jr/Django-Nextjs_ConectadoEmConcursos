@@ -36,6 +36,10 @@ with tempfile.TemporaryDirectory(prefix="conectado-e2e-") as temporary:
                             statement="Concordância verbal: qual alternativa está correta?",
                             options=["Os candidatos estudam.", "Os candidatos estuda."], correct_answer=0,
                             explanation="O verbo concorda com o sujeito no plural.", status="approved")
+    from apps.concursos.models import NewsArticle
+    NewsArticle.objects.create(source="e2e", external_id="news", origin="imported", slug="noticia-automatica",
+                               title="Notícia automática de concurso", category="Prazos", body="Atualização da fonte.",
+                               source_url="https://example.test/noticia", editorial_status="published", is_published=True)
     try:
         call_command("runserver", "127.0.0.1:8100", use_reloader=False, verbosity=0)
     finally:

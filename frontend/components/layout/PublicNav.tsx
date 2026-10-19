@@ -11,6 +11,7 @@ const links = [
   { label: "Início", href: "/" },
   { label: "Concursos", href: "/concursos" },
   { label: "Notícias", href: "/noticias" },
+  { label: "Artigos", href: "/artigos" },
 ];
 
 export function PublicNav() {
@@ -106,6 +107,7 @@ export function PublicFooter() {
           <Link href="/" className="transition hover:text-blue-600 dark:hover:text-blue-400">Início</Link>
           <Link href="/concursos" className="transition hover:text-blue-600 dark:hover:text-blue-400">Concursos abertos</Link>
           <Link href="/noticias" className="transition hover:text-blue-600 dark:hover:text-blue-400">Notícias</Link>
+          <Link href="/artigos" className="transition hover:text-blue-600 dark:hover:text-blue-400">Artigos</Link>
           <Link href="/privacidade" className="transition hover:text-blue-600 dark:hover:text-blue-400">Privacidade</Link>
           <Link href="/termos-de-uso" className="transition hover:text-blue-600 dark:hover:text-blue-400">Termos de uso</Link>
           <Link href="/register" className="transition hover:text-blue-600 dark:hover:text-blue-400">Criar conta</Link>

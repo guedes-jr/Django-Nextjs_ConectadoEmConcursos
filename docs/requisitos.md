@@ -22,7 +22,7 @@
 - [x] Catálogo e seleção de planos
 - [ ] Checkout, webhooks, renovação e cancelamento financeiro reais
 - [x] Ferramenta avançada de contexto de provas/questões restrita ao plano Avançado
-- [x] Simulados com questões recuperadas pelo assistente e biblioteca privada de materiais (ver `operacao-ia.md`)
+- [x] Simulados com questões recuperadas pelo assistente (ver `operacao-ia.md`)
 
 ### PWA (ver `docs/plano-pwa.md`)
 - [x] Manifesto, ícones (any/maskable) e metadados de instalação (`viewport`, `appleWebApp`)

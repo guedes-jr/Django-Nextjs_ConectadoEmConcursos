@@ -75,7 +75,19 @@ class EditorialConcursoSerializer(serializers.ModelSerializer):
     class Meta:
         from apps.concursos.models import Concurso
         model = Concurso
-        fields = ["title", "organization", "state", "status", "source_url", "editorial_status"]
+        fields = ["title", "organization", "state", "status", "source_url", "editorial_status", "banca", "official_url", "description"]
+
+    def validate_official_url(self, value):
+        if value and not value.lower().startswith(("http://", "https://")):
+            raise serializers.ValidationError("Use uma URL HTTP(S).")
+        return value
+
+    def validate_banca(self, value):
+        if value and not value.is_active and (not self.instance or self.instance.banca_id != value.id):
+            raise serializers.ValidationError("Selecione uma banca ativa.")
+        if value and self.instance and self.instance.exams.exclude(banca_catalog__isnull=True).exclude(banca_catalog=value).exists():
+            raise serializers.ValidationError("Há provas vinculadas a outra banca. Confira os vínculos antes de alterar o concurso.")
+        return value
 
     def validate_state(self, value):
         if value and (len(value) != 2 or not value.isascii() or not value.isalpha()):
@@ -84,13 +96,57 @@ class EditorialConcursoSerializer(serializers.ModelSerializer):
 
 
 class EditorialExamSerializer(serializers.ModelSerializer):
+    banca = serializers.CharField(required=False)
     year = serializers.IntegerField(min_value=1980, max_value=2100)
     is_published = serializers.BooleanField(default=False)
 
     class Meta:
         from apps.questions.models import Exam
         model = Exam
-        fields = ["title", "banca", "institution", "role", "year", "level", "state", "is_published", "concurso"]
+        fields = ["title", "banca", "institution", "role", "year", "level", "state", "is_published", "concurso", "banca_catalog"]
+
+    def to_internal_value(self, data):
+        # A unicidade título/banca/ano é validada pelo DRF antes de validate().
+        if data.get("banca_catalog") and not data.get("banca"):
+            from apps.questions.models import BancaCatalog
+            value = str(data["banca_catalog"])
+            selected = BancaCatalog.objects.filter(pk=int(value)).first() if value.isdigit() else None
+            if selected:
+                data = data.copy()
+                data["banca"] = selected.name
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        from apps.questions.naming import resolve_banca_catalog
+        selected = attrs.get("banca_catalog")
+        text = attrs.get("banca")
+        if selected:
+            if not selected.is_active and (not self.instance or self.instance.banca_catalog_id != selected.id):
+                raise serializers.ValidationError({"banca_catalog": "Selecione uma banca ativa."})
+            if text and (resolved := resolve_banca_catalog(text)) and resolved.pk != selected.pk:
+                raise serializers.ValidationError({"banca": "Nome e catálogo indicam bancas diferentes."})
+            attrs["banca"] = selected.name
+        elif text:
+            attrs["banca_catalog"] = resolve_banca_catalog(text)
+        if not self.instance and not attrs.get("banca"):
+            raise serializers.ValidationError({"banca": "Selecione uma banca ou informe o identificador histórico."})
+        selected = attrs.get("banca_catalog", self.instance.banca_catalog if self.instance else None)
+        concurso = attrs.get("concurso", self.instance.concurso if self.instance else None)
+        if selected:
+            from apps.questions.models import Exam
+            from apps.questions.naming import banca_query
+            title = attrs.get("title", self.instance.title if self.instance else "")
+            year = attrs.get("year", self.instance.year if self.instance else None)
+            duplicates = Exam.objects.filter(title=title, year=year).filter(banca_query(selected.name))
+            if self.instance:
+                duplicates = duplicates.exclude(pk=self.instance.pk)
+            if duplicates.exists():
+                raise serializers.ValidationError({"title": "Já existe uma prova com este título, banca e ano, inclusive nas grafias alternativas."})
+        if self.instance and "concurso" in attrs and self.instance.resources.exclude(concurso=concurso).exists():
+            raise serializers.ValidationError({"concurso": "A prova possui materiais no concurso atual. Ajuste os materiais antes de mudar o vínculo."})
+        if selected and concurso and concurso.banca_id and selected.pk != concurso.banca_id:
+            raise serializers.ValidationError({"concurso": "O concurso está vinculado a outra banca. Confira os dados antes de associar."})
+        return attrs
 
     def validate_state(self, value):
         return EditorialConcursoSerializer().validate_state(value)

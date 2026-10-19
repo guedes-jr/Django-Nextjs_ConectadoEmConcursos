@@ -30,15 +30,16 @@ foram tratados como planos descartáveis.
 - [ ] Provisionar coletor e alertas de erros em produção e ampliar a matriz de navegadores conforme homologação. Ver [CI e E2E](operacao-ci-e2e.md).
 
 As pendências específicas de relatórios, notificações, retenção, observação por
-48 horas e publicação das telas locais estão no [plano do admin](../plano-maturidade-admin-notificacoes-auditoria.md).
+48 horas e homologação autenticada das telas publicadas estão no [plano do admin](../plano-maturidade-admin-notificacoes-auditoria.md).
 A homologação de instalação e experiência móvel está no [plano PWA](plano-pwa.md).
 
 ## Referências das entregas concluídas
 
+- [Atualização de produção após o push](atualizacao-producao-2026-10-18.md): publicação das telas e correção do atualizador.
 - [Implantação de 18/10/2026](implantacao-2026-10-18.md): evidências e limites da validação em produção.
-- [Padrão das páginas administrativas](padrao-paginas-admin.md): consolidações locais, incluindo Fontes de questões e Acervo de provas.
+- [Padrão das páginas administrativas](padrao-paginas-admin.md): consolidações de interface, incluindo Fontes de questões e Acervo de provas.
 - [Notificações](operacao-notificacoes.md), [auditoria](operacao-auditoria.md), [diagnóstico](operacao-diagnostico.md) e [relatórios](operacao-relatorios.md): contratos e procedimentos.
-- [IA e OpenRouter](operacao-ia.md): recuperação de questões aprovadas, modelos gratuitos por padrão e biblioteca privada.
+- [IA e OpenRouter](operacao-ia.md): recuperação de questões aprovadas, modelos gratuitos por padrão e simulados relacionados. Biblioteca retirada temporariamente, com dados preservados.
 - [Operação do PWA](operacao-pwa.md): comportamento implementado e testes reproduzíveis. Para a situação do nginx real, prevalece o registro posterior de implantação.
 
 Esta limpeza altera apenas documentação. Não publica código, altera serviços ou

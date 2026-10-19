@@ -42,3 +42,14 @@ export async function getNews(slug: string) {
   const response = await http.get<NewsArticle>(`/api/news/${slug}/`);
   return response.data;
 }
+export async function listArticles(filters: NewsFilters = {}) {
+  const response = await http.get<NewsResult>("/api/articles/", {
+    params: { ...filters, facets: filters.facets ? "1" : undefined },
+  });
+  return response.data;
+}
+
+export async function getArticle(slug: string) {
+  const response = await http.get<NewsArticle>(`/api/articles/${slug}/`);
+  return response.data;
+}

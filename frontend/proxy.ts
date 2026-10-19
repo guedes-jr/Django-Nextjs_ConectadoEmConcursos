@@ -33,6 +33,7 @@ export const config = {
     "/chatIA/:path*",
     "/concursos/:path*",
     "/noticias/:path*",
+    "/artigos/:path*",
     "/simulations/:path*",
     "/notebooks/:path*",
     "/flashcards/:path*",

@@ -74,6 +74,7 @@ export type Duplicate = {
 };
 
 export type ReviewQuestion = {
+  support_text?: {id:number;title:string;content:string;reference:string}|null;
   id: number;
   search_run: number | null;
   status: string;

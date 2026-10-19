@@ -1,12 +1,18 @@
+from . import user_password_api
 from django.urls import path
 
 from apps.notifications import admin_api
 
-from . import question_content_api, views
+from . import concurso_resources_api, question_content_api, support_text_api, views
 
 app_name = "backoffice"
 
 urlpatterns = [
+    path("content/editorial/concursos/<int:pk>/resources/", concurso_resources_api.resources, name="concurso-resources"),
+    path("content/editorial/concursos/<int:pk>/resources/<int:resource_id>/", concurso_resources_api.resource_detail, name="concurso-resource-detail"),
+    path("content/support-texts/", support_text_api.support_texts, name="support-texts"),
+    path("content/support-texts/<int:pk>/", support_text_api.support_text_detail, name="support-text-detail"),
+    path("content/questions/<int:pk>/support-text/", support_text_api.question_support_text, name="question-support-text"),
     path("overview/", views.overview, name="overview"),
     path("editorial-dashboard/", views.editorial_dashboard, name="editorial-dashboard"),
     path("diagnostics/overview/", views.diagnostics_overview, name="diagnostics-overview"),
@@ -20,6 +26,7 @@ urlpatterns = [
     path("users/<int:pk>/", views.update_user, name="user-detail"),
     path("users/<int:pk>/subscription/", views.assign_subscription, name="user-subscription"),
     path("users/<int:pk>/history/", views.user_history, name="user-history"),
+    path("users/<int:pk>/password/", user_password_api.reset_password, name="user-password"),
     path("users/<int:pk>/actions/", views.user_action, name="user-action"),
     path("users/<int:pk>/notification/", views.user_notification, name="user-notification"),
     path("subscriptions/", views.list_subscriptions, name="subscriptions"),

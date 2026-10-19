@@ -8,7 +8,6 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
-  ExternalLink,
   Search,
   Users,
   Wallet,
@@ -143,7 +142,7 @@ export default function ConcursosPage() {
               Concursos públicos com inscrições abertas
             </h1>
             <p className="text-slate-500 dark:text-slate-400">
-              Concursos de todo o Brasil reunidos e atualizados diariamente. Confirme sempre os detalhes no edital oficial.
+              Concursos de todo o Brasil reunidos e atualizados diariamente. Acesse dados, documentos e provas de cada concurso.
             </p>
           </header>
 
@@ -271,16 +270,7 @@ export default function ConcursosPage() {
                         {days < 0 ? "Prazo encerrado" : days === 0 ? "Encerra hoje" : `${days} ${days === 1 ? "dia" : "dias"} restantes`}
                       </span>
                     )}
-                    {item.source_url && (
-                      <a
-                        href={item.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-                      >
-                        Ver edital <ExternalLink size={15} />
-                      </a>
-                    )}
+                    <Link href={`/concursos/${item.id}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">Ver concurso e materiais <ArrowRight size={15}/></Link>
                   </div>
                 </article>
               );

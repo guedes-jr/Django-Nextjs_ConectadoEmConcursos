@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {ResetUserPassword} from "@/components/admin/ResetUserPassword";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, ShieldCheck, UserPlus, Pencil, Users, UserCheck, UserX, CalendarPlus, CreditCard, Loader2 } from "lucide-react";
 import { backoffice, UserRow, Plan, formatDate, cycleLabel } from "@/lib/backoffice";
@@ -184,7 +185,7 @@ export default function AdminUsersPage() {
             <TableCell className="whitespace-nowrap text-slate-500">{formatDate(user.date_joined)}</TableCell>
             <TableCell className="whitespace-nowrap text-slate-500">{user.last_login ? formatDate(user.last_login) : "Nunca acessou"}</TableCell>
             <TableCell><StatusBadge status={user.is_active ? "active" : "blocked"} /></TableCell>
-            <TableCell><div className="flex justify-end gap-2"><Button asChild variant="outline" size="sm"><Link href={`/admin/usuarios/${user.id}`}>Gerenciar</Link></Button><Button variant={user.is_active ? "ghost" : "secondary"} size="sm" disabled={busy !== null} onClick={() => { setActionUser(user); setReason(""); setActionError(null); }}>{busy === user.id ? <Loader2 className="h-4 w-4 animate-spin" /> : user.is_active ? "Bloquear" : "Desbloquear"}</Button></div></TableCell>
+            <TableCell><div className="flex justify-end gap-2"><ResetUserPassword user={user} disabled={busy!==null} onSuccess={()=>setNotice(`Senha de ${user.username} redefinida. Os acessos anteriores foram encerrados.`)}/><Button asChild variant="outline" size="sm"><Link href={`/admin/usuarios/${user.id}`}>Gerenciar</Link></Button><Button variant={user.is_active ? "ghost" : "secondary"} size="sm" disabled={busy !== null} onClick={() => { setActionUser(user); setReason(""); setActionError(null); }}>{busy === user.id ? <Loader2 className="h-4 w-4 animate-spin" /> : user.is_active ? "Bloquear" : "Desbloquear"}</Button></div></TableCell>
           </TableRow>)}
         </TableBody>
       </Table>

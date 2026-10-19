@@ -1,10 +1,17 @@
 from rest_framework import serializers
 
-from apps.questions.models import Comment, Exam, Question, SimulationTemplate
+from apps.questions.models import Comment, Exam, Question, SimulationTemplate, SupportText
 from apps.questions.visibility import visible
 
 
 class ExamSerializer(serializers.ModelSerializer):
+    concurso = serializers.SerializerMethodField()
+
+    def get_concurso(self, exam):
+        item = exam.concurso
+        if not item or item.editorial_status != "published":
+            return None
+        return {"id": item.id, "title": item.title, "organization": item.organization, "official_url": item.official_url}
     question_count = serializers.IntegerField(read_only=True)
     disciplines = serializers.SerializerMethodField()
 
@@ -12,7 +19,7 @@ class ExamSerializer(serializers.ModelSerializer):
         model = Exam
         fields = [
             "id", "title", "banca", "institution", "role", "year",
-            "question_count", "disciplines",
+            "question_count", "disciplines", "concurso", "level", "state",
         ]
 
     def get_disciplines(self, exam):
@@ -24,7 +31,14 @@ class ExamSerializer(serializers.ModelSerializer):
         )
 
 
+class SupportTextSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupportText
+        fields = ["id", "title", "content", "reference"]
+
+
 class QuestionSerializer(serializers.ModelSerializer):
+    support_text = SupportTextSerializer(read_only=True)
     exam_id = serializers.IntegerField(read_only=True, allow_null=True)
     exam_title = serializers.CharField(source="exam.title", read_only=True, allow_null=True, default="")
     exam_role = serializers.CharField(source="exam.role", read_only=True, allow_null=True, default="")
@@ -51,7 +65,7 @@ class QuestionSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             "id", "exam_id", "exam_title", "exam_role", "exam_institution",
-            "discipline", "banca", "year", "statement", "options",
+            "discipline", "banca", "year", "support_text", "statement", "options",
             "is_favorite", "comment_count", "latest_answer", "latest_is_correct",
             "is_marked", "review_due", "next_review_at", "explanation",
             "attribution", "source_url",

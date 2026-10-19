@@ -23,7 +23,7 @@ Referência: [operação de notificações](docs/operacao-notificacoes.md).
 - [ ] Homologar o modal e o isolamento de destinatários com contas controladas em produção.
 - [ ] Homologar a política e a rotina de retenção da auditoria; o expurgo automático não foi habilitado na implantação registrada.
 - [ ] Registrar evidências da observação por 48 horas antes de ampliar o uso.
-- [ ] Publicar e validar em produção as consolidações recentes das páginas administrativas, ainda locais.
+- [ ] Homologar os fluxos autenticados das páginas consolidadas em produção; a publicação do commit `5e50bd3` está registrada em [atualização de produção](docs/atualizacao-producao-2026-10-18.md).
 
 Referências: [implantação registrada](docs/implantacao-2026-10-18.md),
 [operação de auditoria](docs/operacao-auditoria.md) e

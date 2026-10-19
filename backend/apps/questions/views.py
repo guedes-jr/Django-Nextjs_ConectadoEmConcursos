@@ -2,7 +2,7 @@ from datetime import timedelta
 from random import sample
 
 from django.db import transaction
-from django.db.models import BooleanField, Count, DateTimeField, Exists, IntegerField, OuterRef, Q, Subquery
+from django.db.models import BooleanField, Count, DateTimeField, Exists, IntegerField, F, OuterRef, Q, Subquery
 from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -15,7 +15,7 @@ from apps.questions.models import Comment, ErrorReport, Exam, Favorite, Question
 from apps.questions.naming import banca_query
 from apps.questions.review import schedule_review
 from apps.questions.visibility import visible
-from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer, SimulationTemplateSerializer
+from apps.questions.serializers import AnswerSerializer, CommentSerializer, ExamSerializer, NoteSerializer, QuestionSerializer, ReportSerializer, SimulationTemplateSerializer, SupportTextSerializer
 from apps.billing.services import capabilities_for
 from apps.workspace.models import SimulationRun
 
@@ -25,7 +25,7 @@ def questions_for_user(user):
         user=user, question=OuterRef("pk")
     ).order_by("-created_at", "-id")
     reviews = QuestionReview.objects.filter(user=user, question=OuterRef("pk"))
-    return visible().select_related("exam", "source").annotate(
+    return visible().select_related("exam", "source", "support_text").annotate(
         is_favorite=Exists(Favorite.objects.filter(user=user, question=OuterRef("pk"))),
         comment_count=Count("comments", distinct=True),
         latest_answer=Subquery(
@@ -45,7 +45,7 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = Exam.objects.filter(is_published=True).annotate(
+        queryset = Exam.objects.filter(is_published=True).select_related("concurso").annotate(
             question_count=Count(
                 "questions", filter=Q(questions__status=Question.Status.APPROVED),
                 distinct=True,
@@ -66,8 +66,15 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
         if year.isdigit():
             queryset = queryset.filter(year=int(year))
         if discipline:
-            queryset = queryset.filter(questions__discipline__iexact=discipline).distinct()
+            queryset = queryset.filter(questions__discipline__iexact=discipline, questions__status=Question.Status.APPROVED).distinct()
         return queryset
+
+    @action(detail=True, methods=["get"])
+    def materials(self, request, pk=None):
+        from apps.concursos.catalog import public_resources
+        exam = self.get_object()
+        items = public_resources(exam.concurso, exam.pk) if exam.concurso_id and exam.concurso.editorial_status == "published" else []
+        return Response({"results": items})
 
     @action(detail=True, methods=["get"])
     def questions(self, request, pk=None):
@@ -191,17 +198,17 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             if not set(exam_ids).issubset(published_ids):
                 return Response({"detail": "Uma ou mais provas não estão disponíveis."}, status=status.HTTP_400_BAD_REQUEST)
             queryset = queryset.filter(exam__in=exam_ids)
-        if discipline:
+        if discipline and not full_exam:
             queryset = queryset.filter(discipline__iexact=discipline)
-        if banca:
+        if banca and not full_exam:
             queryset = queryset.filter(banca_query(banca))
-        if isinstance(year, int) or (isinstance(year, str) and year.isdigit()):
+        if not full_exam and (isinstance(year, int) or (isinstance(year, str) and year.isdigit())):
             queryset = queryset.filter(year=int(year))
 
         if full_exam:
             if len(exam_ids) != 1:
                 return Response({"detail": "A prova completa precisa de exatamente uma prova selecionada."}, status=status.HTTP_400_BAD_REQUEST)
-            ids = list(queryset.order_by("id").values_list("id", flat=True))
+            ids = list(queryset.order_by(F("number").asc(nulls_last=True), "id").values_list("id", flat=True))
             if not ids:
                 return Response({"detail": "Nenhuma questão disponível com esses critérios."}, status=status.HTTP_400_BAD_REQUEST)
         else:
@@ -221,8 +228,11 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
             unseen = [qid for qid in pool if qid not in answered_ids]
             ids = sample(unseen, count) if len(unseen) >= count else sample(pool, count)
 
-        ordered_ids = sorted(ids)
-        question_map = Question.objects.filter(pk__in=ordered_ids).select_related("exam").in_bulk()
+        if full_exam:
+            selected_exam = Exam.objects.get(pk=exam_ids[0])
+            discipline, banca, year = "", selected_exam.banca, selected_exam.year
+        ordered_ids = ids if full_exam else sorted(ids)
+        question_map = Question.objects.filter(pk__in=ordered_ids).select_related("exam", "support_text").in_bulk()
         ordered_ids = [qid for qid in ordered_ids if qid in question_map]
         now = timezone.now()
         run = SimulationRun.objects.create(
@@ -247,6 +257,7 @@ class QuestionViewSet(viewsets.ReadOnlyModelViewSet):
                 "discipline": q.discipline,
                 "banca": q.banca,
                 "year": q.year,
+                "support_text": SupportTextSerializer(q.support_text).data if q.support_text_id else None,
                 "statement": q.statement,
                 "options": q.options,
             }

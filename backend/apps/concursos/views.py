@@ -1,7 +1,8 @@
 from collections import Counter
 
 from django.db.models import Case, Count, F, Q, When
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import ArticleView, Concurso, NewsArticle
@@ -81,6 +82,8 @@ def concurso_repr(item: Concurso) -> dict:
     return {
         "id": item.id,
         "title": item.title,
+        "official_url": item.official_url,
+        "banca_name": item.banca.name if item.banca_id else None,
         "organization": item.organization,
         "headline": item.headline,
         "roles": item.roles,
@@ -113,7 +116,7 @@ def news_repr(item: NewsArticle) -> dict:
 
 @api_view(["GET"])
 def concursos_list(request):
-    queryset = Concurso.objects.all()
+    queryset = Concurso.objects.filter(editorial_status=Concurso.EditorialStatus.PUBLISHED).select_related("banca")
     state = request.query_params.get("state")
     status = request.query_params.get("status")
     region = request.query_params.get("region")
@@ -184,9 +187,8 @@ def concursos_list(request):
     return Response({"count": count, "results": results, "facets": facets})
 
 
-@api_view(["GET"])
-def news_list(request):
-    queryset = NewsArticle.objects.filter(is_published=True)
+def _content_list(request, origin):
+    queryset = NewsArticle.objects.filter(origin=origin, is_published=True, editorial_status=NewsArticle.EditorialStatus.PUBLISHED)
     category = request.query_params.get("category")
     search = request.query_params.get("search")
     if category:
@@ -216,11 +218,73 @@ def news_list(request):
     return Response({"count": count, "results": results, "facets": facets})
 
 
-@api_view(["GET"])
-def news_detail(request, slug):
-    item = NewsArticle.objects.filter(slug=slug, is_published=True).first()
+def _content_detail(request, slug, origin):
+    item = NewsArticle.objects.filter(origin=origin, slug=slug, is_published=True, editorial_status=NewsArticle.EditorialStatus.PUBLISHED).first()
     if not item:
-        return Response({"detail": "Notícia não encontrada."}, status=404)
+        return Response({"detail": "Conteúdo não encontrado."}, status=404)
     if not request.session.session_key: request.session.save()
     ArticleView.objects.create(article=item, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key or "", referrer=request.META.get("HTTP_REFERER", "")[:500])
     return Response(news_repr(item))
+
+@api_view(["GET"])
+def news_list(request):
+    return _content_list(request, "imported")
+
+
+@api_view(["GET"])
+def news_detail(request, slug):
+    return _content_detail(request, slug, "imported")
+
+
+@api_view(["GET"])
+def articles_list(request):
+    return _content_list(request, "manual")
+
+
+@api_view(["GET"])
+def articles_detail(request, slug):
+    return _content_detail(request, slug, "manual")
+
+
+@api_view(["GET"])
+def concurso_detail(request, pk):
+    from django.shortcuts import get_object_or_404
+    from apps.questions.models import Exam, Question
+    from apps.questions.serializers import ExamSerializer
+    from .catalog import public_resources
+    item = get_object_or_404(Concurso.objects.select_related("banca"), pk=pk, editorial_status=Concurso.EditorialStatus.PUBLISHED)
+    exams = Exam.objects.filter(concurso=item, is_published=True).select_related("concurso").annotate(
+        question_count=Count("questions", filter=Q(questions__status=Question.Status.APPROVED), distinct=True))
+    return Response({**concurso_repr(item), "description": item.description, "body": item.body,
+                     "resources": public_resources(item), "exams": ExamSerializer(exams, many=True).data})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def resource_file(request, pk, resource_id):
+    from django.http import FileResponse
+    from django.shortcuts import get_object_or_404
+    from .models import ConcursoResource
+    from apps.backoffice.audit import log as audit_log
+    item = get_object_or_404(ConcursoResource.objects.select_related("concurso", "exam"), pk=resource_id, concurso_id=pk)
+    staff = bool(request.user.is_active and request.user.is_staff)
+    published = (item.is_published and item.concurso.editorial_status == "published" and
+                 (not item.exam_id or (item.exam.is_published and item.exam.concurso_id == item.concurso_id)))
+    if not item.file or (not staff and not published):
+        return Response({"detail": "Arquivo não disponível."}, status=404)
+    try:
+        handle = item.file.open("rb")
+    except (OSError, ValueError):
+        return Response({"detail": "Arquivo não disponível."}, status=404)
+    try:
+        audit_log(request, action="concurso.resource_downloaded", resource_type="concurso_resource", resource_id=item.pk,
+                  context={"staff_preview": staff and not published})
+    except Exception:
+        handle.close()
+        raise
+    response = FileResponse(handle, as_attachment=True, filename=item.file_name or "material.pdf", content_type="application/pdf")
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    response["Cache-Control"] = "private, no-store"
+    response["Vary"] = "Cookie, Authorization"
+    return response

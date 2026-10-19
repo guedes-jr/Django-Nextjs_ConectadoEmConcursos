@@ -83,12 +83,14 @@ def resolve_exam(item: QuestionItem) -> Exam | None:
     return exam
 
 
-def find_existing(source: QuestionSource, item: QuestionItem) -> Question | None:
+def find_existing(source: QuestionSource, item: QuestionItem, match_by_statement: bool = True) -> Question | None:
     """Ordem de checagem: id externo da fonte primeiro, enunciado equivalente depois."""
     if item.external_id:
         found = Question.objects.filter(source=source, external_id=item.external_id).first()
         if found:
             return found
+    if not match_by_statement:
+        return None
     return Question.objects.filter(
         statement=item.statement, banca=normalize_banca(item.banca.strip()), year=item.year
     ).first()
@@ -124,12 +126,13 @@ def ingest_item(
     dry_run: bool = False,
     search_run=None,
     force_duplicates: bool = False,
+    match_by_statement: bool = True,
 ) -> Question | None:
     """Processa um item. Devolve a questão gravada ou `None` se foi pulado."""
     counts.bump("seen")
     validate(item)
     digest = content_hash(item.statement, item.options)
-    existing = find_existing(source, item)
+    existing = find_existing(source, item, match_by_statement=match_by_statement)
 
     if existing:
         return _update_existing(existing, item, digest, counts, checker, dry_run, search_run)

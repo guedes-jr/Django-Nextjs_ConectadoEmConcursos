@@ -1,0 +1,7 @@
+import type {ConcursoResource} from "@/lib/concursos";
+import {backendUrl} from "@/lib/admin";
+import {ExternalLink, Download} from "lucide-react";
+
+export function ConcursoMaterials({items,title="Documentos e materiais"}:{items:ConcursoResource[];title?:string}) {
+ return <section className="space-y-3"><h2 className="text-lg font-bold">{title}</h2>{items.length===0?<p className="rounded-xl border border-dashed border-slate-300 p-5 dark:border-slate-700 text-sm text-slate-500">Ainda não há materiais publicados. Consulte a página oficial do concurso ou a fonte da informação.</p>:<div className="grid gap-3 sm:grid-cols-2">{items.map(item=><a key={item.id} href={item.has_file?backendUrl(item.url):item.url} target="_blank" rel="noreferrer noopener" className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-white dark:border-slate-800 p-4 hover:border-blue-400 dark:bg-slate-900"><p className="text-xs font-semibold text-blue-600 dark:text-blue-300">{item.kind_label}</p><h3 className="break-words font-semibold">{item.title}</h3>{item.description&&<p className="text-sm text-slate-500">{item.description}</p>}{item.exam_title&&<p className="text-xs text-slate-500">Prova: {item.exam_title}</p>}<span className="inline-flex min-h-10 items-center gap-2 text-sm text-blue-600 dark:text-blue-300">{item.has_file?<>Baixar PDF <Download size={14}/></>:<>Abrir na fonte <ExternalLink size={14}/></>}</span></a>)}</div>}</section>;
+}

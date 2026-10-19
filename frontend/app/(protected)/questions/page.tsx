@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, CircleHelp, ClipboardCheck, Filter, List, MessageSquare, RotateCcw, Search, StickyNote, X } from "lucide-react";
+import { SupportTextPanel } from "@/components/SupportTextPanel";
 import { QuestionContent } from "@/components/QuestionContent";
 import { useMe } from "@/lib/useMe";
 
@@ -555,6 +556,7 @@ export default function QuestionsPage() {
                 </div>
                 <div className="px-5 py-6 sm:px-7">
                 <div className="mb-5 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400"><CircleHelp size={15} /> Enunciado</div>
+                <SupportTextPanel text={question.support_text}/>
                 <QuestionContent text={question.statement} className={`font-medium leading-relaxed text-slate-800 dark:text-slate-100 ${readingSize === "large" ? "text-lg sm:text-xl" : "text-[15px] sm:text-base"}`} />
                 <div className="mt-7 space-y-2.5" role="radiogroup" aria-label={`Alternativas da questão ${(page - 1) * pageSize + index + 1}`}>
                   {question.options.map((option, optionIndex) => {

@@ -1,5 +1,7 @@
 # Implantação de produção — 18/10/2026
 
+> Registro da implantação inicial. Para o atualizador corrigido e a publicação posterior, consulte [atualização após o push](atualizacao-producao-2026-10-18.md).
+
 Ambiente autorizado: https://conectadoemconcursos.com. Implantação por SSH com chave,
 sem exposição de segredos, envio de e-mail, cobrança, importação ou sincronização.
 Não houve commit/push nem execução da CI remota: a release foi empacotada do estado

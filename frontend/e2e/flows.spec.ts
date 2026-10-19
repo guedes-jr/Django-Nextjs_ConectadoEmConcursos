@@ -79,17 +79,14 @@ test("student cannot access admin APIs", async ({page}) => {
 });
 
 
-test("student retrieves platform questions, saves material and completes a related simulation", async ({page}) => {
+test("student retrieves platform questions and completes a related simulation", async ({page}) => {
   await login(page, "student", "/chatIA");
   await page.getByPlaceholder("Digite sua mensagem").fill("Explique concordância verbal");
   await page.getByRole("button", {name: "Enviar", exact: true}).click();
   await expect(page.getByText("Questões usadas como referência (1)")).toBeVisible();
-  await page.getByRole("button", {name: "Salvar material", exact: true}).click();
-  await expect(page.getByText("Salvo na biblioteca", {exact: true})).toBeVisible();
+  await expect(page.getByRole("button", {name: "Salvar material", exact: true})).toHaveCount(0);
+  await expect(page.getByRole("link", {name: "Biblioteca de materiais", exact: true})).toHaveCount(0);
   const practice = await page.getByRole("link", {name: "Praticar questões relacionadas"}).getAttribute("href");
-  await page.getByRole("link", {name: "Biblioteca de materiais", exact: true}).click();
-  await expect(page.getByRole("heading", {name: "Biblioteca de materiais", exact: true})).toBeVisible();
-  await expect(page.getByRole("article")).toHaveCount(1);
   await page.goto(practice!);
   await page.getByRole("button", {name: "Iniciar questões relacionadas", exact: true}).click();
   await expect(page.getByText("Concordância verbal: qual alternativa está correta?", {exact: true})).toBeVisible();
@@ -102,4 +99,17 @@ test("student retrieves platform questions, saves material and completes a relat
 test("anonymous material library access redirects to login", async ({page}) => {
   await page.goto("/materials");
   await expect(page).toHaveURL(/\/login\?next=%2Fmaterials/);
+});
+
+
+test("retired material library redirects student to chat without library actions", async ({page}) => {
+  await login(page, "student", "/chatIA");
+  await page.goto("/materials");
+  await expect(page).toHaveURL(/\/chatIA$/);
+  await expect(page.getByRole("heading", {name: "Chat de estudos", exact: true})).toBeVisible();
+  await expect(page.locator('a[href="/materials"]')).toHaveCount(0);
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole("button", {name:"Abrir menu",exact:true}).click();
+  await expect(page.getByRole("navigation",{name:"Menu móvel"})).toBeVisible();
+  await expect(page.getByRole("link", {name: /Biblioteca de materiais/i})).toHaveCount(0);
 });

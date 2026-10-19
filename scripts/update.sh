@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Atualização in-place com janela de manutenção. Não executa importações/sync.
+# Atualização por release (ou checkout legado) com janela de manutenção.
+# Não executa importações/sync.
+RELEASE_DEPLOY_VERSION=1
 set -Eeuo pipefail
 umask 027
 exec 3>&1
+UPDATER_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 
 PROJECT_DIR="${PROJECT_DIR:-/var/www/conectado-em-concursos}"
 BRANCH="${DEPLOY_BRANCH:-main}"
@@ -21,6 +24,11 @@ TIMERS=(conectado-concursos-publish.timer conectado-concursos-backup.timer)
 JOBS=(conectado-concursos-publish.service conectado-concursos-backup.service)
 MAINTENANCE_ENTERED=0
 SUCCESS=0
+RELEASE_MODE=0
+DEPLOY_ROOT="${DEPLOY_ROOT:-/srv/conectado}"
+CURRENT_LINK="$DEPLOY_ROOT/current"
+REPOSITORY_URL="${DEPLOY_REPOSITORY_URL:-https://github.com/guedes-jr/Django-Nextjs_ConectadoEmConcursos.git}"
+REPOSITORY_CACHE="$DEPLOY_ROOT/repository.git"
 
 fail() { echo "ERRO: $*" >&2; if [[ "${LOG_CAPTURED:-0}" == 1 ]]; then echo "ERRO: $*" >&3; fi; exit 1; }
 log() {
@@ -29,13 +37,33 @@ log() {
     if [[ "${LOG_CAPTURED:-0}" == 1 ]]; then printf '%s\n' "$line" >&3; fi
 }
 control() { sudo -n systemctl "$@"; }
+require_control() {
+    # `sudo -l comando` também aceita regras que exigem senha. Exigir NOPASSWD
+    # explicitamente antes de bloquear o tráfego.
+    sudo -n -ll systemctl "$@" | grep -Eq 'Options:.*!authenticate' || fail "Sudo sem senha não provisionado para systemctl $*."
+}
 django() {
     (
         cd "$BACKEND_DIR"
         # Não interpretar .env como shell nem propagar configurações de desenvolvimento.
-        env -i HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
-            PATH="$BACKEND_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
-            DJANGO_ENV=production "$PYTHON" manage.py "$@"
+        if [[ "${1:-}" == check && -f "$DEPLOY_ROOT/config/allow-console-email" ]]; then
+            env -i HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+                PATH="$BACKEND_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+                DJANGO_ENV=production DJANGO_SETTINGS_MODULE=config.settings "$PYTHON" -c '
+import sys, django
+django.setup()
+from django.conf import settings
+from django.core.management import call_command
+if settings.EMAIL_BACKEND == "django.core.mail.backends.console.EmailBackend":
+    print("AVISO ACEITO core.W003: e-mail em console já autorizado neste ambiente; entrega SMTP continua pendente.")
+    settings.SILENCED_SYSTEM_CHECKS = [*settings.SILENCED_SYSTEM_CHECKS, "core.W003"]
+call_command("check", *sys.argv[1:])
+' "${@:2}"
+        else
+            env -i HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+                PATH="$BACKEND_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+                DJANGO_ENV=production "$PYTHON" manage.py "$@"
+        fi
     )
 }
 cleanup() {
@@ -79,32 +107,96 @@ assert parse_qs(target.query).get("next") == [origin.path]
 ' "$url"
 
 }
+# Build fora da release ativa. Até a manutenção, nenhuma troca de ponteiro ou migração.
+prepare_release() {
+    [[ -d "$DEPLOY_ROOT/releases" && -w "$DEPLOY_ROOT/releases" && -w "$DEPLOY_ROOT" ]] || fail "Diretórios de releases sem permissão."
+    [[ -f "$DEPLOY_ROOT/config/backend.env" && -f "$DEPLOY_ROOT/config/frontend.env" ]] || fail "Configuração compartilhada ausente."
+    git check-ref-format "refs/heads/$BRANCH" >/dev/null || fail "Branch inválida."
+    if [[ ! -d "$REPOSITORY_CACHE" ]]; then git init --bare "$REPOSITORY_CACHE"; fi
+    GIT_TERMINAL_PROMPT=0 git --git-dir="$REPOSITORY_CACHE" fetch --depth=1 "$REPOSITORY_URL" "+refs/heads/$BRANCH:refs/heads/$BRANCH"
+    NEW_COMMIT="$(git --git-dir="$REPOSITORY_CACHE" rev-parse "refs/heads/$BRANCH^{commit}")"
+    NEW_RELEASE="$DEPLOY_ROOT/releases/$(date -u '+%Y%m%dT%H%M%SZ')-${NEW_COMMIT:0:12}"
+    mkdir "$NEW_RELEASE"
+    log "Preparando release $NEW_RELEASE a partir de $NEW_COMMIT; tráfego permanece aberto."
+    git --git-dir="$REPOSITORY_CACHE" archive "$NEW_COMMIT" | tar -x -C "$NEW_RELEASE"
+    # Uma release publicada por overlay pode conter migrações ainda não enviadas
+    # ao Git. Não publicar código que desconheça essas alterações do esquema.
+    "$PYTHON" -c '
+import json,pathlib,sys
+active=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2])
+manifest=active/"deployment.json"
+required=json.loads(manifest.read_text()).get("required_migration_files",[]) if manifest.exists() else []
+for name in required:
+ path=pathlib.Path(name)
+ if path.is_absolute() or ".." in path.parts or not (target/path).is_file():
+    raise SystemExit("ERRO: o Git ainda não contém as migrações da release ativa. Envie código e migrações antes de atualizar: " + name)
+' "$CURRENT_LINK" "$NEW_RELEASE"
+    # Bootstrap da correção: não reintroduzir o atualizador antigo ainda presente
+    # no main. Quando a versão compatível for enviada ao Git, prevalece a do Git.
+    if ! grep -q '^RELEASE_DEPLOY_VERSION=' "$NEW_RELEASE/scripts/update.sh"; then
+        install -m 0750 "$UPDATER_PATH" "$NEW_RELEASE/scripts/update.sh"
+        log "Atualizador compatível aplicado como patch de bootstrap; enviar esta correção ao Git."
+    fi
+    ln -s "$DEPLOY_ROOT/config/backend.env" "$NEW_RELEASE/backend/.env"
+    ln -s "$DEPLOY_ROOT/config/frontend.env" "$NEW_RELEASE/frontend/.env.production.local"
+    "$PYTHON" -m venv "$NEW_RELEASE/backend/.venv"
+    "$NEW_RELEASE/backend/.venv/bin/python" -m pip install --disable-pip-version-check -r "$NEW_RELEASE/backend/requirements.txt"
+    "$NEW_RELEASE/backend/.venv/bin/python" -m pip check
+    # Validar usando o mesmo dotenv da execução, sem imprimir seu conteúdo.
+    (
+        BACKEND_DIR="$NEW_RELEASE/backend"
+        PYTHON="$BACKEND_DIR/.venv/bin/python"
+        django check --deploy --fail-level WARNING
+        django makemigrations --check --dry-run
+    )
+    (
+        cd "$NEW_RELEASE/frontend"
+        npm ci --include=dev --no-audit --no-fund
+        NODE_ENV=production npm run check:production-env
+        npm run typecheck
+        E2E_RUN=0 NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 npm run build
+        [[ -s .next/BUILD_ID ]] || fail "Build sem identificador."
+    )
+    # Manifesto sem segredos; identifica também o patch de bootstrap.
+    "$PYTHON" -c '
+import hashlib, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+(root / "deployment.json").write_text(json.dumps({"commit": sys.argv[2], "previous_release": sys.argv[3], "updater_sha256": hashlib.sha256((root / "scripts/update.sh").read_bytes()).hexdigest()}, indent=2) + "\n")
+' "$NEW_RELEASE" "$NEW_COMMIT" "$(readlink -f "$CURRENT_LINK")"
+}
+
 main() {
-    case "${1:---plan}" in
+    case "${1:---apply}" in
         --plan)
             cat <<'PLAN'
 Plano de atualização (nenhum comando operacional foi executado):
-1. Validar usuário, ferramentas, serviços, branch e árvore Git limpa.
-2. Buscar main com fast-forward; não alterar a árvore ativa ainda.
+1. Validar usuário, ferramentas, serviços e a instalação.
+2. Buscar main; em instalação por releases, preparar dependências/build fora da pasta ativa.
 3. Ativar manutenção no proxy e confirmar HTTP 503 público.
 4. Parar timers, jobs, worker, backend e frontend; criar backup com o código anterior.
-5. Atualizar código e dependências; validar Django, tipos e build.
+5. Usar a nova release validada (ou atualizar o checkout legado por fast-forward).
 6. Aplicar migrações e coletar estáticos com os escritores parados.
-7. Iniciar aplicação/worker e verificar prontidão local.
+7. Ativar o ponteiro da release, iniciar aplicação/worker e verificar prontidão local.
 8. Remover manutenção, verificar HTTPS/admin/PWA e iniciar timers.
 Falhas após a entrada em manutenção mantêm o tráfego bloqueado e os serviços parados.
-A operação exige scripts/update.sh --apply no servidor provisionado.
+Sem argumentos executa a atualização. Use --plan apenas para consultar.
 PLAN
             return ;;
-        --apply) [[ "$#" == 1 ]] || fail "Use somente --plan ou --apply." ;;
-        *) fail "Use --plan (padrão, sem efeitos) ou --apply." ;;
+        --apply) [[ "$#" -le 1 ]] || fail "Use somente --plan ou --apply." ;;
+        *) fail "Use --plan (somente consulta) ou --apply (padrão)." ;;
     esac
     [[ "$(id -un)" == deploy ]] || fail "Execute como deploy."
     [[ "$DOMAIN" =~ ^https://[a-zA-Z0-9.-]+$ ]] || fail "DEPLOY_DOMAIN deve ser uma origem HTTPS sem caminho/porta."
     [[ "$DJANGO_PORT" =~ ^[0-9]+$ && "$NEXT_PORT" =~ ^[0-9]+$ ]] || fail "Portas inválidas."
     [[ "$PROJECT_DIR" == /* && "$MAINTENANCE_FILE" == /* && "$LOCK_FILE" == /* ]] || fail "Use caminhos absolutos."
     [[ ! -e "$MAINTENANCE_FILE" ]] || fail "Já existe uma manutenção; revisar antes de atualizar."
-    [[ -d "$PROJECT_DIR/.git" && -x "$PYTHON" && -f "$BACKEND_DIR/.env" ]] || fail "Repositório, virtualenv ou backend/.env ausente."
+    if [[ -L "$CURRENT_LINK" && "$(readlink -f "$PROJECT_DIR")" == "$(readlink -f "$CURRENT_LINK")" ]]; then RELEASE_MODE=1; fi
+    [[ "$RELEASE_MODE" == 1 || -d "$PROJECT_DIR/.git" ]] || fail "Instalação sem checkout Git ou ponteiro de release reconhecido."
+    [[ -x "$PYTHON" && -f "$BACKEND_DIR/.env" ]] || fail "Virtualenv ou backend/.env ausente."
+    # Node dedicado da instalação; não trocar o Node global usado por outros sites.
+    if [[ -d /opt/conectado/node-v24.22.0-linux-x64/bin ]]; then
+        export PATH="/opt/conectado/node-v24.22.0-linux-x64/bin:$PATH"
+    fi
     [[ -f "$FRONTEND_DIR/package-lock.json" ]] || fail "Lockfile do frontend ausente."
     for tool in git npm node curl flock sudo systemctl redis-cli; do
         command -v "$tool" >/dev/null || fail "Ferramenta ausente: $tool. Provisionar antes do deploy."
@@ -122,23 +214,30 @@ PLAN
     trap 'exit 130' INT
     trap 'exit 143' TERM
     cd "$PROJECT_DIR"
-    [[ "$(git branch --show-current)" == "$BRANCH" ]] || fail "Branch inesperada."
-    [[ -z "$(git status --porcelain)" ]] || fail "Há arquivos locais alterados/não rastreados; não serão sobrescritos."
+    if [[ "$RELEASE_MODE" == 0 ]]; then
+        [[ "$(git branch --show-current)" == "$BRANCH" ]] || fail "Branch inesperada."
+        [[ -z "$(git status --porcelain)" ]] || fail "Há arquivos locais alterados/não rastreados; não serão sobrescritos."
+    fi
     for unit in "${SERVICES[@]}" "${TIMERS[@]}" "${JOBS[@]}"; do
         systemctl cat "$unit" >/dev/null || fail "Unidade não provisionada: $unit."
     done
     systemctl is-active --quiet redis-server.service || fail "Redis não está ativo."
     [[ "$(redis-cli -h 127.0.0.1 -p 6379 ping)" == PONG ]] || fail "Redis local indisponível."
-    OLD_COMMIT="$(git rev-parse HEAD)"
-    git fetch --prune origin "$BRANCH"
-    NEW_COMMIT="$(git rev-parse "origin/$BRANCH")"
-    git merge-base --is-ancestor "$OLD_COMMIT" "$NEW_COMMIT" || fail "Atualização não é fast-forward."
+    if [[ "$RELEASE_MODE" == 1 ]]; then
+        OLD_COMMIT="$(readlink -f "$CURRENT_LINK")"
+        prepare_release
+    else
+        OLD_COMMIT="$(git rev-parse HEAD)"
+        git fetch --prune origin "$BRANCH"
+        NEW_COMMIT="$(git rev-parse "origin/$BRANCH")"
+        git merge-base --is-ancestor "$OLD_COMMIT" "$NEW_COMMIT" || fail "Atualização não é fast-forward."
+    fi
     log "Release anterior $OLD_COMMIT; destino $NEW_COMMIT"
     # Verifica as permissões sudo exatas antes de bloquear o tráfego.
-    sudo -n -l systemctl stop "${TIMERS[@]}" >/dev/null
-    sudo -n -l systemctl stop "${JOBS[@]}" "${SERVICES[@]}" >/dev/null
-    sudo -n -l systemctl start "${SERVICES[@]}" >/dev/null
-    sudo -n -l systemctl start "${TIMERS[@]}" >/dev/null
+    require_control stop "${TIMERS[@]}"
+    require_control stop "${JOBS[@]}" "${SERVICES[@]}"
+    require_control start "${SERVICES[@]}"
+    require_control start "${TIMERS[@]}"
     (set -o noclobber; : > "$MAINTENANCE_FILE")
     MAINTENANCE_ENTERED=1
     wait_http "$DOMAIN/api/health/" 503
@@ -146,23 +245,34 @@ PLAN
     control stop "${JOBS[@]}" "${SERVICES[@]}"
     log "Criando backup antes de alterar código, dependências ou esquema"
     django backup_db
-    git merge --ff-only "$NEW_COMMIT"
-    "$PYTHON" -m pip install --disable-pip-version-check -r "$BACKEND_DIR/requirements.txt"
-    "$PYTHON" -m pip check
-    "$PYTHON" -c 'import daphne'
-    django check --deploy --fail-level WARNING
-    django makemigrations --check --dry-run
-    (
-        cd "$FRONTEND_DIR"
-        npm ci --include=dev --no-audit --no-fund
-        NODE_ENV=production npm run check:production-env
-        npm run typecheck
-        E2E_RUN=0 NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 npm run build
-        [[ -s .next/BUILD_ID ]] || fail "Build sem identificador."
-    )
+    if [[ "$RELEASE_MODE" == 1 ]]; then
+        BACKEND_DIR="$NEW_RELEASE/backend"
+        FRONTEND_DIR="$NEW_RELEASE/frontend"
+        PYTHON="$BACKEND_DIR/.venv/bin/python"
+    else
+        git merge --ff-only "$NEW_COMMIT"
+        "$PYTHON" -m pip install --disable-pip-version-check -r "$BACKEND_DIR/requirements.txt"
+        "$PYTHON" -m pip check
+        "$PYTHON" -c 'import daphne'
+        django check --deploy --fail-level WARNING
+        django makemigrations --check --dry-run
+        (
+            cd "$FRONTEND_DIR"
+            npm ci --include=dev --no-audit --no-fund
+            NODE_ENV=production npm run check:production-env
+            npm run typecheck
+            E2E_RUN=0 NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 npm run build
+            [[ -s .next/BUILD_ID ]] || fail "Build sem identificador."
+        )
+    fi
     django migrate --noinput
     django migrate --check
     django collectstatic --noinput
+    if [[ "$RELEASE_MODE" == 1 ]]; then
+        ln -s "$NEW_RELEASE" "$DEPLOY_ROOT/current.next"
+        "$PYTHON" -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' "$DEPLOY_ROOT/current.next" "$CURRENT_LINK"
+        log "Ponteiro ativo alterado para $NEW_RELEASE; release anterior preservada."
+    fi
     control start "${SERVICES[@]}"
     for unit in "${SERVICES[@]}"; do systemctl is-active --quiet "$unit" || fail "Serviço inativo: $unit"; done
     wait_http "http://127.0.0.1:$DJANGO_PORT/api/ready/" 200 -H "Host: $PUBLIC_HOST" -H 'X-Forwarded-Proto: https'

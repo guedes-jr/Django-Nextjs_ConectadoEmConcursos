@@ -1654,7 +1654,8 @@ def _editorial_list_response(request, queryset, payload, overview):
 def _editorial_concurso_payload(item):
     return {"id": item.id, "title": item.title, "organization": item.organization, "state": item.state,
             "status": item.status, "deadline": item.deadline, "source_url": item.source_url,
-            "origin": item.origin, "editorial_status": item.editorial_status,
+            "official_url": item.official_url, "description": item.description, "materials_count": item.resources.count(),
+            "origin": item.origin, "editorial_status": item.editorial_status, "banca": item.banca_id, "banca_name": item.banca.name if item.banca_id else None,
             "exams_count": item.exams.count(), "updated_at": item.fetched_at}
 
 
@@ -1669,7 +1670,7 @@ def editorial_concursos(request):
         payload = _editorial_concurso_payload(item)
         audit_log(request, action="concurso.created", resource_type="concurso", resource_id=item.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
-    qs = Concurso.objects.prefetch_related("exams")
+    qs = Concurso.objects.select_related("banca").prefetch_related("exams", "resources")
     if request.query_params.get("options") == "1":
         return Response({"results": list(qs.order_by("title", "id").values("id", "title"))})
     overview = qs.aggregate(total=Count("id"), manual=Count("id", filter=Q(origin="manual")),
@@ -1677,6 +1678,9 @@ def editorial_concursos(request):
                             archived=Count("id", filter=Q(editorial_status="archived")))
     for key in ("origin", "editorial_status", "status"):
         if value := request.query_params.get(key): qs = qs.filter(**{key: value})
+    if banca := request.query_params.get("banca"):
+        if not banca.isdigit(): return Response({"banca": ["Banca inválida."]}, status=400)
+        qs = qs.filter(banca_id=int(banca))
     if state := request.query_params.get("state", "").strip(): qs = qs.filter(state__iexact=state)
     if search := request.query_params.get("search", "").strip():
         qs = qs.filter(Q(title__icontains=search) | Q(organization__icontains=search))
@@ -1705,6 +1709,7 @@ def editorial_concurso_detail(request, pk):
 def _editorial_exam_payload(item):
     return {"id": item.id, "title": item.title, "banca": item.banca, "institution": item.institution,
             "role": item.role, "year": item.year, "is_published": item.is_published,
+            "banca_catalog": item.banca_catalog_id, "banca_name": item.banca_catalog.name if item.banca_catalog_id else None,
             "level": item.level, "state": item.state, "concurso_title": item.concurso.title if item.concurso_id else None,
             "concurso": item.concurso_id, "questions_count": item.questions.count(), "updated_at": item.updated_at}
 
@@ -1719,9 +1724,7 @@ def editorial_exams(request):
         payload = _editorial_exam_payload(item)
         audit_log(request, action="exam.created", resource_type="exam", resource_id=item.id, after=payload)
         return Response(payload, status=status.HTTP_201_CREATED)
-    qs = Exam.objects.select_related("concurso").prefetch_related("questions")
-    if request.query_params.get("options") == "1":
-        return Response({"results": list(qs.order_by("-year", "title", "id").values("id", "title", "banca", "year"))})
+    qs = Exam.objects.select_related("concurso", "banca_catalog").prefetch_related("questions")
     overview = qs.aggregate(total=Count("id"), published=Count("id", filter=Q(is_published=True)), draft=Count("id", filter=Q(is_published=False)),
                             linked=Count("id", filter=Q(concurso__isnull=False)), unlinked=Count("id", filter=Q(concurso__isnull=True)))
     try:
@@ -1731,9 +1734,16 @@ def editorial_exams(request):
         return Response({"detail": "Informe ano e concurso válidos."}, status=400)
     if request.query_params.get("published") in {"1", "0"}: qs = qs.filter(is_published=request.query_params["published"] == "1")
     if request.query_params.get("linked") in {"1", "0"}: qs = qs.filter(concurso__isnull=request.query_params["linked"] == "0")
-    if banca := request.query_params.get("banca", "").strip(): qs = qs.filter(banca__icontains=banca)
+    if catalog_id := request.query_params.get("banca_catalog"):
+        if not catalog_id.isdigit(): return Response({"banca_catalog": ["Banca inválida."]}, status=400)
+        qs = qs.filter(banca_catalog_id=int(catalog_id))
+    if banca := request.query_params.get("banca", "").strip():
+        from apps.questions.naming import banca_query
+        qs = qs.filter(banca_query(banca))
     if search := request.query_params.get("search", "").strip():
         qs = qs.filter(Q(title__icontains=search) | Q(banca__icontains=search) | Q(institution__icontains=search) | Q(role__icontains=search))
+    if request.query_params.get("options") == "1":
+        return Response({"results": list(qs.order_by("-year", "title", "id").values("id", "title", "banca", "year", "role", "is_published", "concurso"))})
     orderings = {"year": ("-year", "title", "id"), "name": ("title", "id"), "recent": ("-updated_at", "-id")}
     qs = qs.order_by(*orderings.get(request.query_params.get("ordering"), orderings["year"]))
     return _editorial_list_response(request, qs, _editorial_exam_payload, overview)

@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 from tempfile import TemporaryDirectory
 
@@ -37,16 +38,27 @@ failure = (state / "failure").read_text() if (state / "failure").exists() else "
 if name == "id": print("deploy")
 elif name == "node": print("24")
 elif name == "git":
+    if os.environ.get("RELEASE_FIXTURE"):
+        sys.exit(subprocess.call([os.environ["REAL_GIT_PATH"], *args]))
     if args[:2] == ["branch", "--show-current"]: print("main")
     elif args[:2] == ["status", "--porcelain"]: print(" M changed.py" if failure == "dirty" else "", end="")
     elif args[0] == "rev-parse": print("old" if args[1] == "HEAD" else "new")
 elif name == "redis-cli": print("PONG")
-elif name == "sudo": pass
+elif name == "sudo":
+    if args[:2] == ["-n", "-ll"]:
+        print("Options: authenticate" if failure == "sudo_auth" else "Options: !authenticate")
 elif name == "systemctl": pass
 elif name == "sleep": pass
-elif name == "npm": pass
+elif name == "npm":
+    if args == ["run", "build"]:
+        pathlib.Path(".next").mkdir(exist_ok=True)
+        pathlib.Path(".next/BUILD_ID").write_text("new-build")
 elif name == "python":
-    if "manage.py" in args:
+    if args[:2] == ["-m", "venv"]:
+        target = pathlib.Path(args[2]) / "bin"
+        target.mkdir(parents=True)
+        (target / "python").symlink_to(pathlib.Path(sys.argv[0]).resolve())
+    elif "manage.py" in args:
         command = args[args.index("manage.py") + 1]
         if command == failure: sys.exit(1)
     elif args[:1] == ["-c"] and args[1] != "import daphne":
@@ -75,20 +87,26 @@ elif name == "curl":
         (self.project / "bin/flock").write_text("#!/bin/sh\nexit 0\n")
         (self.project / "bin/flock").chmod(0o755)
 
-    def run_script(self, failure="", flag="--apply"):
+    def run_script(self, failure="", flag=None):
         (self.state / "failure").write_text(failure)
-        return subprocess.run(["bash", str(self.script), flag], env=self.environment,
+        return subprocess.run(["bash", str(self.script), *([flag] if flag else [])], env=self.environment,
                               text=True, capture_output=True, timeout=30)
 
     def recorded(self):
         return [json.loads(line) for line in self.events.read_text().splitlines()]
 
-    def test_default_plan_has_no_operational_side_effects(self):
+    def test_explicit_plan_has_no_operational_side_effects(self):
         result = self.run_script(flag="--plan")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.events.exists())
         self.assertFalse(self.marker.exists())
         self.assertFalse((self.state / "logs").exists())
+
+    def test_password_required_sudo_is_rejected_before_maintenance(self):
+        result = self.run_script("sudo_auth")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(any("backup_db" in e for e in self.recorded()))
 
     def test_dirty_tree_is_rejected_before_fetch_or_maintenance(self):
         result = self.run_script("dirty")
@@ -134,3 +152,93 @@ elif name == "curl":
                 self.assertTrue(self.marker.exists())
                 self.assertNotIn("Atualização concluída", result.stdout)
                 self.assertTrue(any(event[:4] == ["sudo", "-n", "systemctl", "stop"] for event in self.recorded()))
+
+
+class ReleaseUpdateScriptTests(UpdateScriptTests):
+    """Real local Git archive plus fake services/builds, without remote access."""
+
+    def setUp(self):
+        super().setUp()
+        real_git = shutil.which("git")
+        self.source = self.root / "source"
+        self.source.mkdir()
+        for directory in ["backend", "frontend", "scripts"]:
+            (self.source / directory).mkdir()
+        (self.source / "backend/requirements.txt").write_text("")
+        (self.source / "frontend/package-lock.json").write_text("{}")
+        (self.source / "scripts/update.sh").write_text("#!/bin/bash\n# legacy updater\n")
+        for args in [["init", "-b", "main"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "Synthetic release"]]:
+            subprocess.run([real_git, *args], cwd=self.source, check=True, capture_output=True)
+        self.deploy_root = self.root / "deployment"
+        (self.deploy_root / "releases").mkdir(parents=True)
+        (self.deploy_root / "config").mkdir()
+        for name in ["backend.env", "frontend.env"]:
+            (self.deploy_root / "config" / name).write_text("# synthetic\n")
+        self.current = self.deploy_root / "current"
+        self.current.symlink_to(self.project)
+        self.environment.update(PROJECT_DIR=str(self.current), DEPLOY_ROOT=str(self.deploy_root), DEPLOY_REPOSITORY_URL=str(self.source), RELEASE_FIXTURE="1", REAL_GIT_PATH=real_git)
+
+    # Legacy assertions exercise in-place behavior in the parent class only.
+    def test_dirty_tree_is_rejected_before_fetch_or_maintenance(self):
+        # A release is an artifact, never a checkout to clean/reset.
+        result = self.run_script("dirty")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotEqual(self.current.resolve(), self.project.resolve())
+
+    def test_success_stops_writers_backs_up_then_migrates_before_starting(self):
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        active = self.current.resolve()
+        self.assertNotEqual(active, self.project.resolve())
+        self.assertTrue((active / "backend/.env").is_symlink())
+        self.assertTrue((active / "frontend/.env.production.local").is_symlink())
+        self.assertIn("RELEASE_DEPLOY_VERSION=1", (active / "scripts/update.sh").read_text())
+        self.assertTrue((self.project / "backend/.env").exists())
+        self.assertEqual(json.loads((active / "deployment.json").read_text())["previous_release"], str(self.project.resolve()))
+        events = self.recorded()
+        build = next(i for i,e in enumerate(events) if e == ["npm", "run", "build"])
+        backup = next(i for i,e in enumerate(events) if "backup_db" in e)
+        migration = next(i for i,e in enumerate(events) if "migrate" in e)
+        self.assertLess(build, backup)
+        self.assertLess(backup, migration)
+        self.assertFalse(self.marker.exists())
+
+    def test_git_without_active_overlay_migrations_is_rejected_before_maintenance(self):
+        (self.project / "deployment.json").write_text(json.dumps({"required_migration_files": ["backend/apps/questions/migrations/9999_not_in_git.py"]}))
+        result = self.run_script()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.current.resolve(), self.project.resolve())
+        self.assertFalse(any("backup_db" in e or "migrate" in e for e in self.recorded()))
+
+    def test_build_check_failure_preserves_active_release_without_maintenance(self):
+        result = self.run_script("check")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.current.resolve(), self.project.resolve())
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(any("backup_db" in e or "migrate" in e for e in self.recorded()))
+
+    def test_migration_failure_never_starts_the_application(self):
+        super().test_migration_failure_never_starts_the_application()
+        self.assertEqual(self.current.resolve(), self.project.resolve())
+
+
+class AcceptedDeploymentWarningTests(SimpleTestCase):
+    def test_console_exception_is_exact_and_preserves_strict_check_arguments(self):
+        import contextlib
+        import io
+        import re
+        from unittest.mock import patch
+        from django.test import override_settings
+
+        source = (settings.BASE_DIR.parent / 'scripts/update.sh').read_text()
+        snippet = re.search(r'DJANGO_SETTINGS_MODULE=config.settings "\$PYTHON" -c \'\n(.*?)\n\'', source, re.S).group(1)
+        cases = [('django.core.mail.backends.console.EmailBackend', ['core.W003']),
+                 ('django.core.mail.backends.smtp.EmailBackend', []),
+                 ('django.core.mail.backends.locmem.EmailBackend', [])]
+        for backend, expected in cases:
+            with self.subTest(backend=backend), override_settings(EMAIL_BACKEND=backend, SILENCED_SYSTEM_CHECKS=[]):
+                with patch('django.setup'), patch('sys.argv', ['-c', '--deploy', '--fail-level', 'WARNING']), patch('django.core.management.call_command') as check, contextlib.redirect_stdout(io.StringIO()):
+                    exec(snippet, {})
+                self.assertEqual(settings.SILENCED_SYSTEM_CHECKS, expected)
+                check.assert_called_once_with('check', '--deploy', '--fail-level', 'WARNING')
