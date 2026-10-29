@@ -112,6 +112,7 @@ class NewsArticle(models.Model):
     seo_title = models.CharField(max_length=300, blank=True)
     seo_description = models.CharField(max_length=160, blank=True)
     tags = models.JSONField(default=list, blank=True)
+    source_metadata = models.JSONField(default=dict, blank=True)
     is_featured = models.BooleanField(default=False, db_index=True)
     is_pinned = models.BooleanField(default=False, db_index=True)
     source_url = models.URLField(max_length=600, blank=True)
