@@ -28,6 +28,7 @@ export type StudyPlan = {
   goal: string;
   exam_date: string | null;
   disciplines: string[];
+  discipline_colors: Record<string, string>;
   weekdays: number[];
   minutes_per_day: number;
   schedule: { weekday: number; disciplines: string[]; minutes: number }[];
@@ -61,6 +62,7 @@ export type PlanSummary = {
   goal: string;
   exam_date: string | null;
   disciplines: string[];
+  discipline_colors?: Record<string, string>;
   weekdays: number[];
   minutes_per_day: number;
   active: boolean;

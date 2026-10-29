@@ -195,6 +195,7 @@ JWT_AUTH_HTTPONLY = True
 
 REST_AUTH = {
     "REGISTER_SERIALIZER": "apps.core.registration.TermsRegisterSerializer",
+    "LOGIN_SERIALIZER": "apps.core.auth_serializers.LoginWithBlockStatusSerializer",
 }
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")

@@ -1,5 +1,24 @@
 import { http } from "@/lib/http";
 
+export type SMTPSettings = {
+  source: "admin" | "environment";
+  configured: boolean;
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  has_password: boolean;
+  use_tls: boolean;
+  use_ssl: boolean;
+  from_email: string;
+};
+
+export const smtpSettings = {
+  get: () => http.get<SMTPSettings>("/api/backoffice/settings/smtp/").then((response) => response.data),
+  save: (data: Omit<SMTPSettings, "source" | "configured" | "has_password"> & { password?: string }) => http.put<SMTPSettings>("/api/backoffice/settings/smtp/", data).then((response) => response.data),
+  test: (email: string) => http.post<{ detail: string }>("/api/backoffice/settings/smtp/test/", { email }).then((response) => response.data),
+};
+
 export type Overview = {
   users: { total: number; active: number; staff: number };
   subscriptions: { total: number; active: number; pending_payment: number; canceled: number };

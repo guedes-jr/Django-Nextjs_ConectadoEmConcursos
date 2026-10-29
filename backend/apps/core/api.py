@@ -1,15 +1,12 @@
 import logging
-from smtplib import SMTPException
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
-from django.conf import settings
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
 from django.http import JsonResponse
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -19,6 +16,7 @@ from rest_framework.response import Response
 
 from apps.core.models import Profile
 from apps.core.serializers import ProfileSerializer
+from apps.core.email_delivery import send_password_reset_link
 
 
 @api_view(["GET", "PATCH"])
@@ -70,17 +68,9 @@ def password_reset_request(request):
         return Response({"detail": "Se o e-mail existir, enviaremos as instruções."})
     user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
     if user:
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
         try:
-            send_mail(
-                "Redefinição de senha — Conectado em Questões",
-                f"Use este link para criar uma nova senha: {url}",
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-            )
-        except (SMTPException, OSError) as exc:
+            send_password_reset_link(user)
+        except Exception as exc:
             logging.getLogger(__name__).error("Falha de entrega de recuperação de senha (%s).", type(exc).__name__)
     return Response({"detail": "Se o e-mail existir, enviaremos as instruções."})
 

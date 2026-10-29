@@ -10,6 +10,8 @@ import PlanCard from "@/components/plans/PlanCard";
 import FAQ from "@/components/plans/FAQ";
 import WhoWeAre from "@/components/plans/WhoWeAre";
 
+const statusLabel = { active: "Ativa", pending_payment: "Aguardando pagamento", canceled: "Encerrada" } as const;
+
 function errorMessage(error: unknown) {
   if (isAxiosError(error) && typeof error.response?.data?.detail === "string") return error.response.data.detail;
   return "Não foi possível concluir a solicitação. Tente novamente.";
@@ -107,17 +109,16 @@ export default function PlansPage() {
         </div>
 
         <section aria-label="Sua assinatura" className="mx-auto mt-8 max-w-2xl rounded-xl bg-white p-5 text-sm shadow-sm dark:bg-slate-900">
-          <p className="font-semibold">Sua assinatura: {subscription?.plan?.name ?? "Sem assinatura contratada"}</p>
-          {subscription && <p className="mt-2">{subscription.access_active ? "Acesso ativo" : subscription.status === "canceled" ? "Assinatura encerrada" : "Sem acesso pago confirmado"}
-            {subscription.current_period_end && ` · Período pago até ${new Date(subscription.current_period_end).toLocaleString("pt-BR")}`}
-          </p>}
-          {subscription?.cancel_at_period_end && <p className="mt-2">Renovação automática cancelada.</p>}
+          <p className="font-semibold">Plano e assinatura</p>
+          {subscription ? <dl className="mt-4 grid gap-3 sm:grid-cols-3"><div><dt className="text-xs text-slate-500">Plano ativo</dt><dd className="mt-1 font-semibold">{subscription.plan.name}</dd></div><div><dt className="text-xs text-slate-500">Ativado em</dt><dd className="mt-1 font-semibold">{subscription.activated_at ? new Date(subscription.activated_at).toLocaleDateString("pt-BR") : "Aguardando ativação"}</dd></div><div><dt className="text-xs text-slate-500">Status</dt><dd className="mt-1 font-semibold">{subscription.cancel_at_period_end ? "Encerramento agendado" : statusLabel[subscription.status]}</dd></div></dl> : <p className="mt-2 text-slate-600 dark:text-slate-300">Você ainda não possui uma assinatura contratada.</p>}
+          {subscription?.current_period_end && <p className="mt-3 text-slate-600 dark:text-slate-300">Período atual até {new Date(subscription.current_period_end).toLocaleDateString("pt-BR")}.</p>}
+          {subscription?.cancel_at_period_end && <p className="mt-2 text-slate-600 dark:text-slate-300">A renovação automática foi cancelada.</p>}
           {subscription?.provider_status === "past_due" && <p className="mt-2">A renovação está com pagamento pendente.</p>}
           <div className="mt-4 flex flex-wrap gap-4">
             <button type="button" disabled={busy} className="underline disabled:opacity-50" onClick={() => void manage("refresh")}>Atualizar status</button>
             <button type="button" disabled={busy} className="underline disabled:opacity-50" onClick={() => void manage("expire")}>Encerrar checkout pendente</button>
             {subscription?.gateway === "stripe" && !subscription.cancel_at_period_end && !["canceled", "incomplete_expired"].includes(subscription.provider_status) && (
-              <button type="button" disabled={busy} className="underline disabled:opacity-50" onClick={() => void manage("cancel")}>Cancelar renovação automática</button>
+              <details className="w-full pt-2 text-xs text-slate-500"><summary className="cursor-pointer hover:text-slate-700 dark:hover:text-slate-300">Precisa encerrar a renovação automática?</summary><button type="button" disabled={busy} className="mt-2 underline disabled:opacity-50" onClick={() => void manage("cancel")}>Cancelar renovação automática</button></details>
             )}
           </div>
         </section>

@@ -10,7 +10,6 @@ from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.sessions.models import Session
 from django.db import transaction, DatabaseError
 from django.http import HttpResponse
@@ -33,6 +32,7 @@ from apps.questions.moderation import REJECTION_REASONS
 from apps.questions.models import Exam, OfficialExamDownload, Question, UserAnswer
 from apps.studies.models import StudySession
 from apps.core.models import Profile
+from apps.core.email_delivery import send_password_reset_link
 from apps.workspace.models import (
     CommunityPost,
     ExamSubmission,
@@ -700,7 +700,11 @@ def user_action(request, pk):
         user.is_active = True; user.save(update_fields=["is_active"]); meta.block_reason = ""; meta.updated_by = request.user; meta.save()
     elif action == "password_reset":
         if not user.email: return Response({"detail": "O usuário não possui e-mail cadastrado."}, status=status.HTTP_400_BAD_REQUEST)
-        PasswordResetForm({"email": user.email}).save(request=request, use_https=request.is_secure(), email_template_name="registration/password_reset_email.html")
+        try:
+            send_password_reset_link(user)
+        except Exception:
+            logging.getLogger(__name__).exception("Falha ao enviar redefinição de senha do usuário %s.", user.pk)
+            return Response({"detail": "Não foi possível enviar o e-mail. Revise a configuração SMTP."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     elif action == "verify_email":
         from allauth.account.models import EmailAddress
         EmailAddress.objects.update_or_create(user=user, email=user.email, defaults={"verified": True, "primary": True})

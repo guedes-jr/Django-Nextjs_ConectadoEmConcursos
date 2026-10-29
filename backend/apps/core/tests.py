@@ -203,3 +203,17 @@ class PasswordAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("changed-password-789"))
+
+    def test_blocked_user_with_correct_password_receives_blocked_status(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            "/api/auth/login/",
+            {"email": self.user.email, "password": "old-password-123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], ["account_blocked"])
+        self.assertIn("bloqueada", response.data["detail"][0])

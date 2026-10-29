@@ -3,11 +3,13 @@ from django.urls import path
 
 from apps.notifications import admin_api
 
-from . import concurso_resources_api, question_content_api, support_text_api, views
+from . import concurso_resources_api, question_content_api, smtp_api, support_text_api, views
 
 app_name = "backoffice"
 
 urlpatterns = [
+    path("settings/smtp/", smtp_api.smtp_configuration, name="smtp-configuration"),
+    path("settings/smtp/test/", smtp_api.smtp_test, name="smtp-test"),
     path("content/editorial/concursos/<int:pk>/resources/", concurso_resources_api.resources, name="concurso-resources"),
     path("content/editorial/concursos/<int:pk>/resources/<int:resource_id>/", concurso_resources_api.resource_detail, name="concurso-resource-detail"),
     path("content/support-texts/", support_text_api.support_texts, name="support-texts"),

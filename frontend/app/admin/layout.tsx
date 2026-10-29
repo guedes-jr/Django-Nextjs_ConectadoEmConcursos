@@ -28,6 +28,7 @@ import {
   History,
   Activity,
   ChevronDown,
+  Mail,
 } from "lucide-react";
 import { useMe } from "@/lib/useMe";
 import { adminUrl } from "@/lib/admin";
@@ -66,6 +67,7 @@ const navGroups = [
       { href: "/admin/notificacoes", label: "Notificações", icon: Bell },
       { href: "/admin/auditoria", label: "Auditoria", icon: History },
       { href: "/admin/diagnostico", label: "Diagnóstico", icon: Activity },
+      { href: "/admin/configuracoes/smtp", label: "E-mail (SMTP)", icon: Mail },
     ],
   },
   {

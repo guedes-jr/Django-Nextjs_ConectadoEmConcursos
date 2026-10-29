@@ -177,8 +177,12 @@ export default function LoginPage() {
     try {
       await http.post("/api/auth/login/", { email, password });
       router.replace(nextPath);
-    } catch {
-      setError("E-mail ou senha inválidos.");
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: { detail?: string | string[]; code?: string | string[] } } }).response?.data;
+      const detail = Array.isArray(data?.detail) ? data.detail[0] : data?.detail;
+      setError(data?.code === "account_blocked" || data?.code?.[0] === "account_blocked"
+        ? "Esta conta está bloqueada. Entre em contato com o suporte para mais informações."
+        : detail || "E-mail ou senha inválidos.");
     } finally {
       setLoading(false);
     }

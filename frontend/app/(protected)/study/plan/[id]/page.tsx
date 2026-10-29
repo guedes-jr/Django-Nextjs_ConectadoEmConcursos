@@ -138,6 +138,8 @@ export default function StudyPlanDetailPage() {
     const minutes = nextPhase === "break" ? breakMinutes : focusMinutes;
     setSecondsLeft(minutes * 60);
     setRunning(true);
+    sessionStorage.setItem("study-timer", JSON.stringify({ duration: minutes * 60, endsAt: Date.now() + minutes * 60000, running: true }));
+    window.dispatchEvent(new Event("study-timer"));
   }
   function toggleRunning() {
     if (phase === "idle") { void startTimer("focus"); return; }

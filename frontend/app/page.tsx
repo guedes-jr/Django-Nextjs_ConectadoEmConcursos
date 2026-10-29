@@ -16,11 +16,13 @@ import {
   Headphones,
   Mail,
   MessageCircle,
+  Menu,
   NotebookTabs,
   ScrollText,
   Sparkles,
   Trophy,
   Users,
+  X,
 } from "lucide-react";
 import { listPlans, type ApiPlan } from "@/lib/plans";
 import { formatBRL } from "@/utils/format";
@@ -142,6 +144,7 @@ export default function LandingPage() {
   const [plansLoading, setPlansLoading] = useState(true);
   const [plansError, setPlansError] = useState(false);
   const [plansRequest, setPlansRequest] = useState(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -177,8 +180,18 @@ export default function LandingPage() {
       >
         <MessageCircle size={22} />
       </a>
-      <header className="relative z-30 border-b border-white/10 bg-[#172b4d] text-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-end gap-6 px-5 py-3 lg:px-8">
+      <header className="relative z-30 border-b border-white/10 bg-[#172b4d]/95 text-white backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-5 lg:px-8">
+          <a href="#inicio" className="flex min-w-0 items-center gap-2" aria-label="Ir para o início">
+            <Image
+              src="/landing/logo.png"
+              alt=""
+              width={34}
+              height={34}
+              className="shrink-0 rounded-lg"
+            />
+            <span className="truncate text-sm font-extrabold sm:text-base">Conectado em Concursos</span>
+          </a>
           <nav className="hidden items-center gap-7 text-sm font-medium md:flex">
             <a href="#recursos" className="transition hover:text-blue-200">
               Recursos
@@ -200,11 +213,48 @@ export default function LandingPage() {
             >
               Entrar <ArrowRight size={15} />
             </Link>
+            <button
+              type="button"
+              aria-label={mobileMenuOpen ? "Fechar menu" : "Abrir menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="landing-mobile-menu"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className="grid h-10 w-10 place-items-center rounded-lg border border-white/20 text-white transition hover:bg-white/10 md:hidden"
+            >
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
         </div>
+        {mobileMenuOpen && (
+          <nav
+            id="landing-mobile-menu"
+            aria-label="Menu da landing page"
+            className="absolute inset-x-0 top-full border-b border-white/10 bg-[#172b4d] px-4 py-3 shadow-xl md:hidden"
+          >
+            <div className="mx-auto grid max-w-7xl gap-1">
+              {["recursos", "planos", "comunidade", "faq"].map((item) => (
+                <a
+                  key={item}
+                  href={`#${item}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-lg px-3 py-3 text-sm font-semibold capitalize transition hover:bg-white/10"
+                >
+                  {item}
+                </a>
+              ))}
+              <Link
+                href="/register"
+                onClick={() => setMobileMenuOpen(false)}
+                className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
+              >
+                Criar conta <ArrowRight size={16} />
+              </Link>
+            </div>
+          </nav>
+        )}
       </header>
 
-      <section className="hero-reference relative isolate min-h-[780px] overflow-hidden px-5 pb-10 pt-16 text-white lg:px-8 lg:pb-0 lg:pt-20">
+      <section id="inicio" className="hero-reference relative isolate min-h-[680px] overflow-hidden px-5 pb-10 pt-12 text-white sm:min-h-[740px] sm:pt-16 lg:min-h-[780px] lg:px-8 lg:pb-0 lg:pt-20">
         <div className="landing-hero-reference-overlay absolute inset-0 -z-10" />
         <div className="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[1fr_.82fr]">
           <div className="max-w-2xl">
@@ -229,12 +279,12 @@ export default function LandingPage() {
               <Sparkles size={14} className="text-amber-400" /> Seja o
               concurseiro Nº1 dos Concursos
             </div>
-            <h1 className="text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
+            <h1 className="text-[clamp(2.25rem,10vw,4.5rem)] font-extrabold leading-[1.05] tracking-tight">
               Sua aprovação em{" "}
               <span className="text-amber-400">concursos públicos</span> começa
               aqui.
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-8 text-blue-100">
+            <p className="mt-5 max-w-xl text-base leading-7 text-blue-100 sm:mt-6 sm:text-lg sm:leading-8">
               A plataforma mais completa e fácil de usar para quem estuda para
               concursos públicos em Sergipe. Questões, provas, resumos, artigos,
               simulados, comunidade e IA em um só lugar.
@@ -265,7 +315,7 @@ export default function LandingPage() {
               </span>
             </div>
           </div>
-          <div className="relative mx-auto w-full max-w-md self-end">
+          <div className="relative mx-auto hidden w-full max-w-md self-end sm:block">
             <Image
               src="/landing/modelo.png"
               alt="Estudante aprovada usando Conectado em Concursos"

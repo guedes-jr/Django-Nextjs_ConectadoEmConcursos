@@ -244,15 +244,22 @@ export default function ReportsPage() {
     setLoading(true);
     void (async () => {
       try {
-        const [statistics, summaries, simulations] = await Promise.all([
+        const [statisticsResult, summariesResult, simulationsResult] = await Promise.allSettled([
           getStatistics(filters),
           getStudyPlans(),
           listSimulations(),
         ]);
+        if (statisticsResult.status === "rejected") {
+          throw statisticsResult.reason;
+        }
+        const summaries = summariesResult.status === "fulfilled" ? summariesResult.value : [];
         const chosen = summaries.find((item) => item.active) ?? summaries[0] ?? null;
-        const plan = chosen ? await getStudyPlan(chosen.id) : null;
+        const plan = chosen
+          ? await getStudyPlan(chosen.id).catch(() => null)
+          : null;
+        const simulations = simulationsResult.status === "fulfilled" ? simulationsResult.value : [];
         if (!active) return;
-        setData({ statistics, plan, simulations });
+        setData({ statistics: statisticsResult.value, plan, simulations });
         setError(null);
       } catch {
         if (active) setError("Não foi possível carregar os relatórios.");

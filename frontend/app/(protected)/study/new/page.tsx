@@ -46,6 +46,7 @@ export default function NewStudyPage() {
   const [title, setTitle] = useState("");
   const [examDate, setExamDate] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [disciplineColors, setDisciplineColors] = useState<Record<string, string>>({});
   const [disciplineSearch, setDisciplineSearch] = useState("");
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [minutes, setMinutes] = useState(60);
@@ -69,6 +70,7 @@ export default function NewStudyPage() {
       setTitle(plan.title || "");
       setExamDate(plan.exam_date);
       setSelected(plan.disciplines);
+      setDisciplineColors(plan.discipline_colors || {});
       setWeekdays(plan.weekdays);
       setMinutes(plan.minutes_per_day);
       setReminderEnabled(plan.reminder_enabled);
@@ -140,6 +142,7 @@ export default function NewStudyPage() {
       goal,
       exam_date: examDate,
       disciplines: selected,
+      discipline_colors: disciplineColors,
       weekdays,
       minutes_per_day: minutes,
       reminder_enabled: reminderEnabled,
@@ -197,6 +200,7 @@ export default function NewStudyPage() {
                 {!disciplineSearch.trim() && <p className="mt-2 text-xs text-slate-500">Pesquise pelo nome e adicione as disciplinas que farão parte do plano.</p>}
               </div>
             </div>
+            {selected.length > 0 && <fieldset className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"><legend className="px-1 text-sm font-semibold">Cores das disciplinas <span className="font-normal text-slate-500">(opcional)</span></legend><p className="mb-3 text-xs text-slate-500">Escolha uma cor apenas para diferenciar visualmente no cronograma.</p><div className="grid gap-2 sm:grid-cols-2">{selected.map((discipline) => <label key={discipline} className="flex items-center justify-between gap-3 text-sm"><span className="truncate">{discipline}</span><input aria-label={`Cor de ${discipline}`} type="color" value={disciplineColors[discipline] || "#2563eb"} onChange={(event) => setDisciplineColors((colors) => ({ ...colors, [discipline]: event.target.value }))} className="h-8 w-10 cursor-pointer rounded border p-0.5" /></label>)}</div></fieldset>}
             <fieldset>
               <legend className="mb-2 block text-sm font-semibold">Dias da semana disponíveis</legend>
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="group" aria-label="Dias disponíveis para estudo">

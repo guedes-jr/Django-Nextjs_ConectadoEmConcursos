@@ -146,6 +146,12 @@ def _validate(payload):
     if not disciplines:
         errors["disciplines"] = "Escolha de 1 a 12 disciplinas."
         disciplines = []
+    raw_colors = payload.get("discipline_colors", {})
+    colors = {}
+    if isinstance(raw_colors, dict):
+        for discipline, color in raw_colors.items():
+            if discipline in disciplines and isinstance(color, str) and __import__("re").fullmatch(r"#[0-9a-fA-F]{6}", color):
+                colors[discipline] = color.lower()
 
     weekdays = payload.get("weekdays")
     if not isinstance(weekdays, list) or not weekdays or any(type(x) is not int or x < 0 or x > 6 for x in weekdays):
@@ -240,7 +246,7 @@ def _validate(payload):
 
     return errors, dict(
         kind=kind, title=title, goal=goal, exam_date=exam_date,
-        disciplines=disciplines, weekdays=weekdays, minutes_per_day=minutes,
+        disciplines=disciplines, discipline_colors=colors, weekdays=weekdays, minutes_per_day=minutes,
         schedule=schedule, cycle=cycle,
         reminder_enabled=reminder_enabled, reminder_time=reminder_time, active=True,
     )
@@ -303,7 +309,7 @@ def _representation(plan, week):
     return {
         "id": plan.id, "kind": plan.kind, "title": plan.title, "goal": plan.goal,
         "exam_date": plan.exam_date.isoformat() if plan.exam_date else None,
-        "disciplines": plan.disciplines, "weekdays": plan.weekdays,
+        "disciplines": plan.disciplines, "discipline_colors": plan.discipline_colors, "weekdays": plan.weekdays,
         "minutes_per_day": plan.minutes_per_day, "schedule": plan.schedule, "cycle": plan.cycle,
         "reminder_enabled": plan.reminder_enabled,
         "reminder_time": plan.reminder_time.strftime("%H:%M") if plan.reminder_time else None,

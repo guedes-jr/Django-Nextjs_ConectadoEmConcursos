@@ -61,7 +61,7 @@ class PasswordResetDeliveryTests(TestCase):
         self.client = APIClient()
 
     def test_transport_failure_returns_generic_response_and_logs_no_address_or_token(self):
-        with patch("apps.core.api.send_mail", side_effect=SMTPException("mail@example.com token=private")), self.assertLogs("apps.core.api", level="ERROR") as logs:
+        with patch("apps.core.email_delivery.send_mail", side_effect=SMTPException("mail@example.com token=private")), self.assertLogs("apps.core.api", level="ERROR") as logs:
             response = self.client.post("/api/password/reset/", {"email": self.user.email})
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("mail@example.com", str(logs.output))
@@ -72,7 +72,7 @@ class PasswordResetDeliveryTests(TestCase):
     def test_blank_invalid_and_inactive_emails_do_not_send(self):
         self.user.is_active = False
         self.user.save()
-        with patch("apps.core.api.send_mail") as send:
+        with patch("apps.core.email_delivery.send_mail") as send:
             for email in ["", "invalid", self.user.email]:
                 self.assertEqual(self.client.post("/api/password/reset/", {"email": email}).status_code, 200)
             send.assert_not_called()

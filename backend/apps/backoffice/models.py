@@ -43,3 +43,21 @@ class UserManagementMeta(models.Model):
     class Meta:
         verbose_name = "Metadados de gestão de usuário"
         verbose_name_plural = "Metadados de gestão de usuários"
+
+
+class SMTPConfiguration(models.Model):
+    """Configuração única do transporte transacional, sem expor a credencial."""
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField(default=587)
+    username = models.CharField(max_length=255, blank=True)
+    password_encrypted = models.TextField(blank=True)
+    use_tls = models.BooleanField(default=True)
+    use_ssl = models.BooleanField(default=False)
+    from_email = models.EmailField()
+    enabled = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_smtp_configurations")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuração SMTP"
+        verbose_name_plural = "Configurações SMTP"

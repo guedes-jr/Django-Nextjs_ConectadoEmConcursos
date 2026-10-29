@@ -14,6 +14,7 @@ class StudyPlan(models.Model):
     goal = models.CharField(max_length=160)
     exam_date = models.DateField(null=True, blank=True)
     disciplines = models.JSONField(default=list)
+    discipline_colors = models.JSONField(default=dict, blank=True)
     weekdays = models.JSONField(default=list)
     minutes_per_day = models.PositiveSmallIntegerField(default=60)
     schedule = models.JSONField(default=list)
