@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Loader2, MailCheck, Save, Send } from "lucide-react";
 import { smtpSettings, type SMTPSettings } from "@/lib/backoffice";
-import { adminError } from "@/lib/admin";
+import { adminError } from "@/components/admin/useAdminListing";
 
 const initial: SMTPSettings = { source: "admin", configured: false, enabled: true, host: "", port: 587, username: "", has_password: false, use_tls: true, use_ssl: false, from_email: "" };
 

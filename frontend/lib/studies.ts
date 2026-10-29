@@ -77,6 +77,7 @@ export type PlanInput = {
   goal: string;
   exam_date: string | null;
   disciplines: string[];
+  discipline_colors?: Record<string, string>;
   weekdays: number[];
   minutes_per_day: number;
   schedule?: { weekday: number; disciplines: string[]; minutes: number }[];

@@ -5,7 +5,7 @@ import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { editorialDashboard } from "@/lib/backoffice";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { Button } from "@/components/ui/button";
-import { adminError } from "@/lib/admin";
+import { adminError } from "@/components/admin/useAdminListing";
 
 type EditorialIndicators = Record<string, number>;
 
