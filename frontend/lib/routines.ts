@@ -10,5 +10,6 @@ export const routines = {
   settings: async () => (await http.get<RoutineSettings>("/api/backoffice/routines/")).data,
   save: async (data: ScheduleInput, id?: number) => (id ? await http.put<Schedule>(`/api/backoffice/routines/${id}/`, data) : await http.post<Schedule>("/api/backoffice/routines/", data)).data,
   executions: async (query: { routine: string; status: string; page: number }) => (await http.get<ExecutionList>("/api/backoffice/routine-executions/", { params: query })).data,
+  remove: async (id: number) => (await http.delete<{ detail: string }>(`/api/backoffice/routines/${id}/`)).data,
   execution: async (id: number) => (await http.get<RoutineExecution>(`/api/backoffice/routine-executions/${id}/`)).data,
 };

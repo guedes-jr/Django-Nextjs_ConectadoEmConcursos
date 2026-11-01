@@ -192,3 +192,31 @@ class RoutineAPITests(RoutineTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("command", str(response.data))
         self.assertFalse(response.data["catalog"][0]["executor_active"])
+
+    def test_remove_hides_schedule_stops_future_runs_and_preserves_history(self):
+        with patch("apps.backoffice.routines.call_command"):
+            dispatch(["publish_news"])
+        execution = RoutineExecution.objects.get()
+        response = self.client.delete(f"/api/backoffice/routines/{self.schedule.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.schedule.refresh_from_db()
+        self.assertFalse(self.schedule.enabled)
+        self.assertIsNotNone(self.schedule.removed_at)
+        self.assertNotIn(self.schedule.pk, [row["id"] for row in self.client.get("/api/backoffice/routines/").data["results"]])
+        self.assertTrue(RoutineExecution.objects.filter(pk=execution.pk, schedule=self.schedule).exists())
+        history = self.client.get("/api/backoffice/routine-executions/").data
+        self.assertEqual(history["count"], 1)
+        self.assertTrue(AuditEvent.objects.filter(action="routine.schedule_removed", resource_id=str(self.schedule.pk)).exists())
+        with patch("apps.backoffice.routines.call_command") as run:
+            dispatch(["publish_news"])
+            run.assert_not_called()
+        payload = {**self.data, "routine": "publish_news"}
+        self.assertEqual(self.client.put(f"/api/backoffice/routines/{self.schedule.pk}/", payload, format="json").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/backoffice/routines/{self.schedule.pk}/").status_code, 404)
+
+    def test_removal_is_forbidden_to_ordinary_staff(self):
+        staff = get_user_model().objects.create_user("routine-removal-staff", is_staff=True)
+        self.client.force_authenticate(staff)
+        self.assertEqual(self.client.delete(f"/api/backoffice/routines/{self.schedule.pk}/").status_code, 403)
+        self.schedule.refresh_from_db()
+        self.assertIsNone(self.schedule.removed_at)

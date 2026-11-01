@@ -78,6 +78,7 @@ class RoutineSchedule(models.Model):
     routine = models.ForeignKey(OperationalRoutine, on_delete=models.PROTECT)
     name = models.CharField(max_length=120)
     enabled = models.BooleanField(default=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
     frequency = models.CharField(max_length=12, choices=Frequency.choices)
     interval_minutes = models.PositiveIntegerField(default=60)
     time_of_day = models.TimeField(default="03:15")

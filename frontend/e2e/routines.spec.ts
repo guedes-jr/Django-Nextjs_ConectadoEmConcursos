@@ -12,7 +12,7 @@ test("create and edit routine schedule without running it and use mobile diagnos
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await login(page);
-  await page.getByRole("button", { name: "Adicionar agendamento", exact: true }).click();
+  await page.getByRole("button", { name: "Adicionar rotina", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Nome do agendamento").fill("Backup extra E2E");
   await dialog.getByLabel(/Rotina do agendamento/).selectOption("backup");
@@ -31,9 +31,22 @@ test("create and edit routine schedule without running it and use mobile diagnos
   await page.goto("/plataform/rotinas");
   await expect(page).toHaveURL(url => url.pathname === "/admin/rotinas");
   await expect(page.getByRole("heading", { name: "Backup extra E2E", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Remover Backup extra E2E", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect(card).toBeVisible();
+  await page.getByRole("button", { name: "Remover Backup extra E2E", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirmar remoção", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(card).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Adicionar rotina", exact: true })).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "Operação", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Rotinas e monitoramento", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Diagnóstico", exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => (await page.locator("aside").boundingBox())?.x).toBeLessThanOrEqual(-255);
-  await page.getByRole("tab", { name: "Diagnósticos", exact: true }).click();
+  await page.getByRole("tab", { name: "Diagnósticos e logs", exact: true }).click();
   await expect(page.getByText("Nenhuma execução encontrada para os filtros.")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: "/tmp/routines-mobile.png", fullPage: true });
@@ -51,7 +64,7 @@ test("diagnostics shows success and failure and opens redacted error log", async
     await route.fulfill({ json: { count: results.length, results, summary: { success: 1, error: 1, running: 0, interrupted: 0 }, can_view_logs: true } });
   });
   await login(page);
-  await page.getByRole("tab", { name: "Diagnósticos", exact: true }).click();
+  await page.getByRole("tab", { name: "Diagnósticos e logs", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Publicação concluída E2E", exact: true })).toBeVisible();
   await page.getByLabel(/Status da execução/).selectOption("error");
   await expect(page.getByRole("heading", { name: "Publicação concluída E2E", exact: true })).toHaveCount(0);
@@ -62,5 +75,5 @@ test("diagnostics shows success and failure and opens redacted error log", async
 test("ordinary staff cannot manage routine schedules", async ({ page }) => {
   await login(page, "limited");
   await expect(page.getByRole("alert").filter({ hasText: /permissão/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Adicionar agendamento", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Adicionar rotina", exact: true })).toHaveCount(0);
 });

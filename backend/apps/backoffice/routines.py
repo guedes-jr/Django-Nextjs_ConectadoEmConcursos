@@ -85,7 +85,7 @@ def claim(schedule_id, now):
         initial = RoutineSchedule.objects.get(pk=schedule_id)
         OperationalRoutine.objects.select_for_update().get(pk=initial.routine_id)
         schedule = RoutineSchedule.objects.select_for_update().get(pk=schedule_id)
-        if not schedule.enabled or schedule.next_run_at > now:
+        if not schedule.enabled or schedule.removed_at is not None or schedule.next_run_at > now:
             return None
         running = RoutineExecution.objects.filter(routine_id=schedule.routine_id, status="running")
         if running.filter(status="running").exists():
@@ -145,7 +145,7 @@ def dispatch(routine_keys=None):
         try:
             with operation_lock(directory):
                 recover_stale(key, timezone.now())
-                due = list(RoutineSchedule.objects.filter(enabled=True, routine_id=key, next_run_at__lte=timezone.now())
+                due = list(RoutineSchedule.objects.filter(enabled=True, removed_at__isnull=True, routine_id=key, next_run_at__lte=timezone.now())
                            .order_by("next_run_at", "id").values_list("id", flat=True)[:50])
                 for schedule_id in due:
                     execution = claim(schedule_id, timezone.now())

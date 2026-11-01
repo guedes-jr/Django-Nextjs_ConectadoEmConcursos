@@ -58,7 +58,7 @@ def schedules(request):
     if request.method == "GET":
         routines = OperationalRoutine.objects.in_bulk()
         now = timezone.now()
-        return respond({"results": ScheduleSerializer(RoutineSchedule.objects.all(), many=True).data,
+        return respond({"results": ScheduleSerializer(RoutineSchedule.objects.filter(removed_at__isnull=True), many=True).data,
             "catalog": [{"id": key, "title": value["title"], "last_tick_at": routines[key].last_tick_at if key in routines else None,
                          "executor_active": bool(key in routines and routines[key].last_tick_at and (now - routines[key].last_tick_at).total_seconds() < 180)}
                         for key, value in CATALOG.items()], "timezones": TIMEZONES, "can_view_logs": diagnostics_allowed(request.user)})
@@ -72,7 +72,7 @@ def save_schedule(request, pk=None):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     with transaction.atomic():
-        schedule = get_object_or_404(RoutineSchedule.objects.select_for_update(), pk=pk) if pk else RoutineSchedule()
+        schedule = get_object_or_404(RoutineSchedule.objects.select_for_update(), pk=pk, removed_at__isnull=True) if pk else RoutineSchedule()
         if pk and data["routine"] != schedule.routine_id:
             raise serializers.ValidationError({"detail": "A rotina do agendamento é fixa. Crie outro agendamento para mudar a rotina."})
         before = ScheduleSerializer(schedule).data if pk else {}
@@ -91,10 +91,21 @@ def save_schedule(request, pk=None):
     return respond(after, status=200 if pk else 201)
 
 
-@api_view(["PUT"])
+@api_view(["PUT", "DELETE"])
 @permission_classes([SuperuserAccess])
 def schedule_detail(request, pk):
-    return save_schedule(request, pk)
+    if request.method == "PUT":
+        return save_schedule(request, pk)
+    with transaction.atomic():
+        schedule = get_object_or_404(RoutineSchedule.objects.select_for_update(), pk=pk, removed_at__isnull=True)
+        before = ScheduleSerializer(schedule).data
+        schedule.enabled = False
+        schedule.removed_at = timezone.now()
+        schedule.updated_by = request.user
+        schedule.save(update_fields=["enabled", "removed_at", "updated_by", "updated_at"])
+        audit_log(request, action="routine.schedule_removed", resource_type="routine_schedule",
+                  resource_id=schedule.pk, before=before, after={"removed_at": schedule.removed_at})
+    return respond({"detail": "Rotina removida. O histórico de execuções foi preservado."})
 
 
 @api_view(["GET"])

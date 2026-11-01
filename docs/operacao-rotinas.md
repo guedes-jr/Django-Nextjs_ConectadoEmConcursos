@@ -1,11 +1,17 @@
 # Gestão de rotinas operacionais
 
-A página **Operação → Rotinas**, em `/admin/rotinas`, também está disponível pelo
+A página **Operação → Rotinas e monitoramento**, em `/admin/rotinas`, também está disponível pelo
 atalho `/plataform/rotinas`. Ela exige superadministrador ativo e staff. O acesso
 à configuração e aos metadados do histórico não depende do diagnóstico técnico;
 a consulta do conteúdo dos logs exige também `DIAGNOSTICS_ENABLED=1` e concessão
 **explícita** de `backoffice.access_diagnostics`, como na área de diagnóstico
 existente. Leituras de logs e mudanças de agenda geram auditoria sem copiar logs.
+
+A navegação lateral tem uma única entrada para essa área. A primeira aba,
+**Rotinas**, concentra adicionar, editar e remover; a segunda, **Diagnósticos e
+logs**, reúne histórico, logs e acesso às ferramentas de diagnóstico técnico da
+plataforma. A antiga URL `/admin/diagnostico` continua funcionando para links
+existentes, sem entrada separada no menu.
 
 ## Agendamentos
 
@@ -30,7 +36,9 @@ verificação que iniciou a execução, sem depender do fuso do host.
 Ao criar ou mudar o horário/reativar, a próxima ocorrência é recalculada. Mudar
 somente o nome preserva a próxima ocorrência. Salvar não dispara uma execução.
 Pausar impede novas ocorrências; uma execução já iniciada continua. Não há
-exclusão de agendamentos: a pausa preserva o vínculo do histórico.
+exclusão física de agendamentos: a ação **Remover** retira o agendamento da lista
+e bloqueia novas ocorrências, preservando o histórico e sua auditoria. A remoção
+exige confirmação na página. A migração `backoffice.0015` adiciona esse estado.
 
 As migrações `backoffice.0013` e `0014` criam o histórico e a agenda padrão:
 publicações a cada minuto; backup diário às 03:15 de America/Fortaleza. Essa
