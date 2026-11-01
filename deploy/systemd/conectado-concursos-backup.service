@@ -8,7 +8,7 @@ User=deploy
 Group=www-data
 WorkingDirectory=/var/www/conectado-em-concursos/backend
 Environment=DJANGO_ENV=production
-ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py backup_db
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py run_scheduled_routines --routine backup
 TimeoutStartSec=900
 UMask=0077
 NoNewPrivileges=true

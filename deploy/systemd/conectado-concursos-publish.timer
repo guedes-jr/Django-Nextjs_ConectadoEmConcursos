@@ -1,5 +1,5 @@
 [Unit]
-Description=Publica conteúdo agendado a cada minuto
+Description=Verifica a agenda de publicações configurada no painel
 
 [Timer]
 OnCalendar=*-*-* *:*:00

@@ -124,9 +124,11 @@ OpenRouter, não envia mensagens e não modifica dados. Retorna somente `ready`/
 ou `unavailable`/503 e `Cache-Control: no-store`, sem erros internos ou credenciais.
 Não substitui `migrate --check`, nem comprova consumo pelo worker ou entrega real.
 
-O timer de publicação executa avisos e notícias agendados a cada minuto, sem buscar
-fontes externas. O timer de backup cria cópia local diária às 03:15 do fuso do host,
-com pequeno atraso aleatório; não faz snapshot do acervo privado nem cópia externa.
+Os timers de publicação e backup verificam a agenda configurada no painel a cada
+minuto, via `run_scheduled_routines`. O padrão é publicação a cada minuto e backup
+diário às 03:15 de America/Fortaleza. Não buscam fontes externas; o backup não faz
+snapshot do acervo privado nem cópia externa. Horários e execuções são gerenciados
+em `/admin/rotinas` (atalho `/plataform/rotinas`), conforme [operação de rotinas](operacao-rotinas.md).
 A retenção de auditoria continua exigindo sua homologação e confirmação explícita
 conforme `operacao-auditoria.md`; não foi habilitado expurgo automático. Desativar
 crons/agendadores antigos que dupliquem esses jobs. Processos externos ao conjunto

@@ -6,6 +6,8 @@ uma versão, tag ou publicação.
 
 ## [Unreleased]
 
+- Gestão de rotinas operacionais com horários e fusos editáveis, pausa, histórico de execuções, logs de erro redigidos e detecção de execuções interrompidas.
+
 - Checkout Efí para Pix via Bolix, boleto e cartão, com compra por período, confirmação de pagamento, reconciliação idempotente e configuração protegida no painel administrativo.
 
 - Importação auditada de artigos em CSV, preservando corpo completo, imagens, autoria, metadados e estados de publicação. Listagens de leitura não carregam os corpos completos; autoria e tempo de leitura aparecem no detalhe.

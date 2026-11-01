@@ -8,9 +8,8 @@ User=deploy
 Group=www-data
 WorkingDirectory=/var/www/conectado-em-concursos/backend
 Environment=DJANGO_ENV=production
-ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py publish_scheduled_notifications
-ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py publish_scheduled_news
-TimeoutStartSec=300
+ExecStart=/var/www/conectado-em-concursos/backend/.venv/bin/python manage.py run_scheduled_routines --routine publish_notifications --routine publish_news
+TimeoutStartSec=660
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

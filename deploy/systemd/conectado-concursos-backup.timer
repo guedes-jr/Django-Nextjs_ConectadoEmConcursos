@@ -1,10 +1,9 @@
 [Unit]
-Description=Backup diário do Conectado (cópia externa deve ser provisionada)
+Description=Verifica a agenda de backups configurada no painel
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
+OnCalendar=*-*-* *:*:00
 Persistent=true
-RandomizedDelaySec=300
 Unit=conectado-concursos-backup.service
 
 [Install]
