@@ -54,7 +54,10 @@ export default function PlansPage() {
       setMessage(result.detail ?? "Plano atualizado com sucesso.");
       if (result.checkout_url) {
         const url = new URL(result.checkout_url);
-        if (url.protocol === "https:" && url.hostname === "checkout.stripe.com") window.location.assign(url.href);
+        const allowed = result.checkout_gateway === "efi"
+          ? ["pagamento.gerencianet.com.br", "pagamento.efipay.com.br"]
+          : ["checkout.stripe.com"];
+        if (url.protocol === "https:" && allowed.includes(url.hostname) && !url.username && !url.password && (!url.port || url.port === "443")) window.location.assign(url.href);
         else setMessage("Endereço de checkout inválido. Contate o suporte.");
       }
     } catch (error) {
@@ -113,6 +116,7 @@ export default function PlansPage() {
           {subscription ? <dl className="mt-4 grid gap-3 sm:grid-cols-3"><div><dt className="text-xs text-slate-500">Plano ativo</dt><dd className="mt-1 font-semibold">{subscription.plan.name}</dd></div><div><dt className="text-xs text-slate-500">Ativado em</dt><dd className="mt-1 font-semibold">{subscription.activated_at ? new Date(subscription.activated_at).toLocaleDateString("pt-BR") : "Aguardando ativação"}</dd></div><div><dt className="text-xs text-slate-500">Status</dt><dd className="mt-1 font-semibold">{subscription.cancel_at_period_end ? "Encerramento agendado" : statusLabel[subscription.status]}</dd></div></dl> : <p className="mt-2 text-slate-600 dark:text-slate-300">Você ainda não possui uma assinatura contratada.</p>}
           {subscription?.current_period_end && <p className="mt-3 text-slate-600 dark:text-slate-300">Período atual até {new Date(subscription.current_period_end).toLocaleDateString("pt-BR")}.</p>}
           {subscription?.cancel_at_period_end && <p className="mt-2 text-slate-600 dark:text-slate-300">A renovação automática foi cancelada.</p>}
+          {subscription?.gateway === "efi" && <p className="mt-2">Pagamento por Pix, boleto ou cartão na Efí. Sem renovação automática: ao terminar o período, faça uma nova compra.</p>}
           {subscription?.provider_status === "past_due" && <p className="mt-2">A renovação está com pagamento pendente.</p>}
           <div className="mt-4 flex flex-wrap gap-4">
             <button type="button" disabled={busy} className="underline disabled:opacity-50" onClick={() => void manage("refresh")}>Atualizar status</button>

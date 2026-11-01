@@ -17,7 +17,7 @@ def user_plan_slug(user):
         return "gratis"
     if subscription.current_period_end and subscription.current_period_end <= timezone.now():
         return "gratis"
-    if subscription.gateway == "stripe" and not subscription.current_period_end:
+    if subscription.gateway != "local" and not subscription.current_period_end:
         return "gratis"
     return subscription.plan.slug
 

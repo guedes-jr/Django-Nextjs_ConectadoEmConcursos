@@ -49,7 +49,8 @@ class ExamViewSet(viewsets.ReadOnlyModelViewSet):
             question_count=Count(
                 "questions", filter=Q(questions__status=Question.Status.APPROVED),
                 distinct=True,
-            )
+            ),
+            pending_question_count=Count("questions", filter=Q(questions__status=Question.Status.PENDING), distinct=True),
         )
         search = self.request.query_params.get("search", "").strip()
         banca = self.request.query_params.get("banca", "").strip()

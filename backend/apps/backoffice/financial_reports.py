@@ -48,10 +48,10 @@ def financial_report(since, until, *, now=None):
     # This is a present-day snapshot. Historical subscription states cannot be
     # reconstructed reliably from today's one-to-one subscription record.
     active = Subscription.objects.filter(
-        status="active", gateway="stripe", provider_status__in=["active", "past_due"],
+        status="active", gateway__in=["stripe", "efi"], provider_status__in=["active", "past_due", "paid"],
         current_period_end__gt=now, price_amount_minor__gt=0, currency="brl",
-    ).exclude(provider_subscription_id="")
-    recurring = active.filter(cancel_at_period_end=False, provider_status="active", cycle__in=DIVISORS)
+    ).filter(Q(gateway="efi") | ~Q(provider_subscription_id=""))
+    recurring = active.filter(gateway="stripe", cancel_at_period_end=False, provider_status="active", cycle__in=DIVISORS)
     recurring_count = recurring.count()
     mrr_minor = sum((Decimal(row["minor"]) / DIVISORS[row["cycle"]] for row in
                      recurring.values("cycle").annotate(minor=Sum("price_amount_minor"))), Decimal(0))
@@ -85,7 +85,7 @@ def financial_report(since, until, *, now=None):
         "mrr": money(mrr_minor), "arr": money(mrr_minor * 12),
         "active_subscriptions": active.count(),
         "recurring_subscriptions": recurring_count,
-        "scheduled_cancellations": active.filter(cancel_at_period_end=True).count(),
+        "scheduled_cancellations": active.filter(gateway="stripe", cancel_at_period_end=True).count(),
         "past_due_subscriptions": Subscription.objects.filter(gateway="stripe", provider_status__in=["past_due", "unpaid"]).count(),
         "pending_subscriptions": Subscription.objects.filter(status="pending_payment").count(),
         "pending_checkouts": BillingCheckout.objects.filter(status__in=["creating", "open", "processing"]).count(),
@@ -108,7 +108,7 @@ def financial_report(since, until, *, now=None):
             "comparison": "Período anterior adjacente de mesma duração. Variação indisponível quando a base é zero ou algum período possui exclusões. Compare também a cobertura dos dois períodos.",
             "coverage": "recorded = todos os recibos pagos registrados no período têm valor BRL; partial = soma conhecida com exclusões; unavailable = só há registros excluídos. Ausência de eventos externos não pode ser detectada por este relatório.",
             "mrr": "Fotografia atual de assinaturas Stripe ativas, pagas, não vencidas, em BRL, com preço confirmado e renovação habilitada. Valor contratado do ciclo / 1, 6 ou 12 meses; ARR = MRR × 12 antes do arredondamento monetário. Não inclui concessões locais, atrasos ou cancelamento agendado.",
-            "active_subscriptions": "Assinaturas Stripe pagas BRL com acesso vigente agora, incluindo cancelamento agendado e atraso ainda coberto por período pago. Não é uma reconstrução histórica.",
+            "active_subscriptions": "Assinaturas Stripe/Efí pagas BRL com acesso vigente agora, incluindo cancelamento agendado e atraso ainda coberto por período pago. Não é uma reconstrução histórica.",
             "new_paid_subscriptions": "Faturas iniciais confirmadas no período de pagamento, inclusive quando a assinatura foi cancelada posteriormente. Renovações não são reativações.",
             "attribution": "Plano/nome/ciclo são snapshots no recibo. Recibos anteriores sem snapshot ficam em Não identificado; não são reclassificados pela assinatura atual.",
             "unavailable": "Reativações, conversão histórica pendente → ativa, descontos, reembolsos e chargebacks não possuem fonte persistida suficiente; não são estimados.",

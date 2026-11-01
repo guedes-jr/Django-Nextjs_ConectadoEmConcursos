@@ -78,6 +78,7 @@ export default function ContentDetails({ kind }: { kind: "articles" | "news" }) 
               <h1 className="mt-4 text-2xl font-bold leading-tight text-slate-900 dark:text-slate-100">
                 {article.title}
               </h1>
+              {(article.author_name||article.reading_time)&&<p className="mt-3 text-sm text-slate-500">{[article.author_name,article.reading_time?`${article.reading_time} min de leitura`:""].filter(Boolean).join(" · ")}</p>}
               {article.image_url && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

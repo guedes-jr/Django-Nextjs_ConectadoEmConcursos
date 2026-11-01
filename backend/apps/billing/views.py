@@ -1,10 +1,11 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .checkout import cancel_subscription, expire_checkout, select_plan
+from .efi_checkout import NotificationThrottle
 from .models import Plan, Subscription
 from .serializers import PlanSerializer, SubscribeSerializer, SubscriptionSerializer
 from .stripe_gateway import verify_event
@@ -21,6 +22,11 @@ def plans(request):
 @permission_classes([permissions.IsAuthenticated])
 def subscription(request):
     if request.method == "GET":
+        from .checkout import pending_checkout
+        attempt = pending_checkout(request.user.pk)
+        if attempt and attempt.gateway == "efi" and attempt.session_id:
+            from .efi_checkout import refresh
+            refresh(attempt)
         current = Subscription.objects.filter(user=request.user).select_related("plan").first()
         return Response(SubscriptionSerializer(current).data if current else None)
     serializer = SubscribeSerializer(data=request.data)
@@ -33,6 +39,7 @@ def subscription(request):
     return Response({"subscription": SubscriptionSerializer(sub).data if sub else None,
                      "checkout_required": bool(attempt), "checkout_url": attempt.checkout_url if attempt and attempt.status == "open" else None,
                      "checkout_status": attempt.status if attempt else None,
+                     "checkout_gateway": attempt.gateway if attempt else None,
                      "detail": detail},
                     status=status.HTTP_202_ACCEPTED if attempt else status.HTTP_200_OK)
 
@@ -65,3 +72,16 @@ def stripe_webhook(request):
         return Response({"detail": "Evento excede o limite."}, status=413)
     event = verify_event(body, request.headers.get("Stripe-Signature", ""))
     return Response({"outcome": process_event(event)})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([NotificationThrottle])
+def efi_notification(request):
+    from .efi_checkout import process_notification
+    if len(request.body) > 4096:
+        return Response({"detail": "Notificação excede o limite."}, status=413)
+    if not hasattr(request.data, "get"):
+        raise ValidationError("Notificação inválida.")
+    return Response({"outcome": process_notification(request.data.get("notification"))})

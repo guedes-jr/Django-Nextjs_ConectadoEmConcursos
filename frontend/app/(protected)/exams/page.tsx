@@ -73,12 +73,13 @@ export default function ExamsPage() {
                 <div className="rounded-xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-950 dark:text-blue-300 max-[520px]:rounded-lg max-[520px]:p-2"><BookOpen className="h-5 w-5 max-[520px]:h-4 max-[520px]:w-4" /></div>
                 <div className="min-w-0">
                   <h2 className="font-semibold text-slate-900 dark:text-slate-100 max-[520px]:text-[15px]">{exam.banca} — {exam.title}</h2>
-                  <p className="mt-1 text-sm text-slate-500">{exam.institution || "Instituição não informada"} · {exam.role || "Cargo não informado"} · {exam.year}<span className="sm:hidden"> · {exam.question_count} questões</span></p>
+                  <p className="mt-1 text-sm text-slate-500">{exam.institution || "Instituição não informada"} · {exam.role || "Cargo não informado"} · {exam.year}<span className="sm:hidden"> · {exam.question_count} disponíveis</span></p>
                   <div className="mt-2 flex flex-wrap gap-2">{exam.disciplines.map((item) => <span key={item} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item}</span>)}</div>
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-sm text-slate-500">
-                <span className="hidden whitespace-nowrap sm:inline">{exam.question_count} questões</span>
+                {exam.pending_question_count>0&&<span className="text-xs text-amber-700 dark:text-amber-300">{exam.pending_question_count} em revisão</span>}
+                <span className="hidden whitespace-nowrap sm:inline">{exam.question_count} disponíveis</span>
                 <ChevronRight className="h-5 w-5 max-[520px]:h-4 max-[520px]:w-4" />
               </div>
             </Link>

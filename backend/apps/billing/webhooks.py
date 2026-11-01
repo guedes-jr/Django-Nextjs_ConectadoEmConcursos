@@ -26,7 +26,7 @@ def checkout_for(provider):
         attempt_id = UUID(value) if isinstance(value, str) else None
     except ValueError:
         attempt_id = None
-    attempt = BillingCheckout.objects.select_related("plan").filter(pk=attempt_id).first() if attempt_id else None
+    attempt = BillingCheckout.objects.select_related("plan").filter(pk=attempt_id, gateway="stripe").first() if attempt_id else None
     if not attempt:
         sub = Subscription.objects.filter(provider_subscription_id=provider["id"]).first()
         if sub and sub.checkout_id:
@@ -42,7 +42,7 @@ def linked_checkout(sub):
         query |= Q(pk=UUID(sub.checkout_id))
     except (ValueError, TypeError, AttributeError):
         pass
-    return BillingCheckout.objects.filter(query, user_id=sub.user_id).first()
+    return BillingCheckout.objects.filter(query, user_id=sub.user_id, gateway="stripe").first()
 
 
 def sync_status(sub, provider):
@@ -97,7 +97,7 @@ def process_event(event):
     elif kind.startswith("checkout.session.") and kind in SUPPORTED:
         session = gateway.request("GET", "checkout/sessions/" + gateway.stripe_id(obj.get("id"), "cs_"))
         try:
-            attempt = BillingCheckout.objects.filter(pk=UUID((session.get("metadata") or {}).get("checkout_id", ""))).first()
+            attempt = BillingCheckout.objects.filter(pk=UUID((session.get("metadata") or {}).get("checkout_id", "")), gateway="stripe").first()
         except (ValueError, TypeError, AttributeError):
             attempt = None
     if provider:

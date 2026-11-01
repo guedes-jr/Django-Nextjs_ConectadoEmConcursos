@@ -1,6 +1,8 @@
 # Pagamentos e assinaturas — etapa 5
 
-Implementação com Stripe Checkout hospedado, sem coleta de cartão pela aplicação.
+A integração Efí para Pix, boleto e cartão está documentada em [operação Efí](operacao-efi.md), incluindo a configuração pelo painel e compra por período sem renovação automática.
+
+As seções abaixo descrevem a implementação Stripe Checkout hospedado, preservada para contratos existentes, sem coleta de cartão pela aplicação.
 A integração fica desabilitada enquanto as chaves e os preços não forem configurados.
 O deploy e a homologação externa não foram executados nesta etapa.
 

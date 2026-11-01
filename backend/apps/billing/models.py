@@ -31,6 +31,7 @@ class Subscription(models.Model):
     class Gateway(models.TextChoices):
         LOCAL = "local", "Local"
         STRIPE = "stripe", "Stripe"
+        EFI = "efi", "Efí"
     class Cycle(models.TextChoices):
         MONTHLY = "mensal", "Mensal"
         SEMIANNUAL = "semestral", "Semestral"
@@ -110,6 +111,8 @@ class BillingCheckout(models.Model):
     cycle = models.CharField(max_length=10, choices=Subscription.Cycle.choices)
     amount_minor = models.PositiveBigIntegerField()
     currency = models.CharField(max_length=3, default="brl")
+    gateway = models.CharField(max_length=20, choices=Subscription.Gateway.choices, default="stripe")
+    sandbox = models.BooleanField(default=False)
     price_id = models.CharField(max_length=255)
     session_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
     checkout_url = models.URLField(max_length=2048, blank=True, default="")
@@ -133,3 +136,16 @@ class StripeWebhookEvent(models.Model):
     object_id = models.CharField(max_length=255)
     processed_at = models.DateTimeField(auto_now_add=True)
     outcome = models.CharField(max_length=32)
+
+
+class PaymentConfiguration(models.Model):
+    """Singleton, restricted to superusers; secrets encrypted at rest."""
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    gateway = models.CharField(max_length=20, choices=[("efi", "Efí"), ("stripe", "Stripe")], default="efi")
+    enabled = models.BooleanField(default=False)
+    sandbox = models.BooleanField(default=True)
+    client_id_encrypted = models.TextField(blank=True)
+    client_secret_encrypted = models.TextField(blank=True)
+    notification_url = models.URLField(max_length=600, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)

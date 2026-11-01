@@ -354,7 +354,7 @@ def business_reports(request):
     queue_average_age_hours = round(sum((snapshot_at - created).total_seconds() / 3600 for created in queue_dates) / len(queue_dates), 1) if queue_dates else 0
     payments = PaymentEvent.objects.filter(processed=True).annotate(event_time=Coalesce("paid_at", "provider_created_at", "created_at")).filter(event_time__gte=since, event_time__lt=until)
     retention = {str(window): _cohort_retention(until, window) for window in (7, 30, 90)}
-    paid_access = access_now.filter(gateway="stripe", currency="brl", price_amount_minor__gt=0, provider_status__in=["active", "past_due"]).exclude(provider_subscription_id="")
+    paid_access = access_now.filter(gateway__in=["stripe", "efi"], currency="brl", price_amount_minor__gt=0, provider_status__in=["active", "past_due", "paid"]).filter(Q(gateway="efi") | ~Q(provider_subscription_id=""))
     expiring = paid_access.filter(current_period_end__lte=snapshot_at + dt.timedelta(days=7)).count()
     dormant_paid = paid_access.exclude(user_id__in=_activity_user_ids(snapshot_at - dt.timedelta(days=30), snapshot_at)).count()
 
@@ -746,7 +746,7 @@ def assign_subscription(request, pk):
     status_ = request.data.get("status", Subscription.Status.ACTIVE if plan.monthly_price == 0 else Subscription.Status.PENDING)
     if status_ not in Subscription.Status.values: return Response({"status": "Status inválido."}, status=status.HTTP_400_BAD_REQUEST)
     period_end = parse_datetime(request.data.get("current_period_end", "")) if request.data.get("current_period_end") else None
-    if Subscription.objects.filter(user=user, gateway="stripe").exists() or BillingCheckout.objects.filter(user=user, status__in=["creating", "open", "processing"]).exists():
+    if Subscription.objects.filter(user=user, gateway__in=["stripe", "efi"]).exists() or BillingCheckout.objects.filter(user=user, status__in=["creating", "open", "processing"]).exists():
         return Response({"detail": "Assinatura gerenciada pelo provedor; use o fluxo de cobrança."}, status=409)
     sub, _ = Subscription.objects.update_or_create(user=user, defaults={"plan": plan, "cycle": cycle, "status": status_, "current_period_end": period_end})
     payload = {"id": sub.id, "status": sub.status, "plan": plan.name, "current_period_end": sub.current_period_end}
@@ -813,7 +813,7 @@ def update_subscription(request, pk):
         )
     User.objects.select_for_update().get(pk=sub.user_id)
     sub.refresh_from_db()
-    if sub.gateway == "stripe" or BillingCheckout.objects.filter(user_id=sub.user_id, status__in=["creating", "open", "processing"]).exists():
+    if sub.gateway in {"stripe", "efi"} or BillingCheckout.objects.filter(user_id=sub.user_id, status__in=["creating", "open", "processing"]).exists():
         return Response({"detail": "Assinatura gerenciada pelo provedor; use o fluxo de cobrança."}, status=409)
     data = request.data
     before = {"plan": sub.plan.slug, "cycle": sub.cycle, "status": sub.status}

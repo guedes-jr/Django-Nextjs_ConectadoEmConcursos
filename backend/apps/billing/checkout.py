@@ -40,13 +40,25 @@ def select_plan(user, plan, cycle, *, request=None):
     if amount < 0:
         raise ValidationError("Preço de plano inválido.")
     minor = int(amount * Decimal(100))
+    if minor:
+        from .configuration import current
+        config = current()
+        if not config["enabled"]:
+            raise gateway.GatewayUnavailable("Novas cobranças estão desativadas.")
+        pending = pending_checkout(user.pk)
+        provider = pending.gateway if pending else config["gateway"]
+        if provider == "efi":
+            from .efi_checkout import select_plan as efi_select
+            return efi_select(user, plan, cycle, minor)
+        if provider != "stripe":
+            raise gateway.GatewayUnavailable("Provedor de pagamento inválido.")
     with transaction.atomic():
         lock_user(user.pk)
         sub = Subscription.objects.filter(user=user).first()
         attempt = pending_checkout(user.pk)
         if managed(sub):
             raise gateway.BillingConflict("A assinatura atual é gerenciada pelo provedor. Cancele a renovação antes de contratar outro plano após o encerramento.")
-        if sub and sub.gateway == "stripe" and sub.current_period_end and sub.current_period_end > timezone.now() and sub.status == "active":
+        if sub and sub.gateway in {"stripe", "efi"} and sub.current_period_end and sub.current_period_end > timezone.now() and sub.status == "active":
             raise gateway.BillingConflict("Aguarde o término do período pago para contratar outro plano.")
         if attempt and (attempt.plan_id != plan.pk or attempt.cycle != cycle or not minor):
             raise gateway.BillingConflict("Há um checkout pendente. Encerre-o antes de escolher outro plano.")
@@ -97,6 +109,9 @@ def expire_checkout(user, *, request=None):
     attempt = pending_checkout(user.pk)
     if not attempt:
         return
+    if attempt.gateway == "efi":
+        from .efi_checkout import expire
+        return expire(attempt)
     if not attempt.session_id:
         # Recover an uncertain create with the very same idempotency key first.
         if (timezone.now() - attempt.created_at).total_seconds() > 23 * 3600:

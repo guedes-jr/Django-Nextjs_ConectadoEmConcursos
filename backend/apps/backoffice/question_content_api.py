@@ -1079,10 +1079,12 @@ def manual_questions(request):
         if value := request.query_params.get(key): qs = qs.filter(**{key: value})
     if request.query_params.get("origin") == "manual": qs = qs.filter(source__slug="manual")
     elif request.query_params.get("origin") == "imported": qs = qs.exclude(source__slug="manual")
+    if source := request.query_params.get("source"): qs = qs.filter(source__slug=source)
     if request.query_params.get("explanation") == "missing": qs = qs.filter(explanation="")
     try:
         if value := request.query_params.get("year"): qs = qs.filter(year=int(value))
         if value := request.query_params.get("question_id"): qs = qs.filter(pk=int(value))
+        if value := request.query_params.get("exam"): qs = qs.filter(exam_id=int(value))
         page_size = max(1, min(100, int(request.query_params.get("page_size", 12))))
         page = max(1, int(request.query_params.get("page", 1)))
     except (TypeError, ValueError): return Response({"detail": "Informe ano, ID e paginação válidos."}, status=400)

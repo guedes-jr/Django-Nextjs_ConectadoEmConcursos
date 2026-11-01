@@ -612,7 +612,7 @@ export default function QuestionsPage() {
               </article>
             );
           })}
-          {!loading && !error && questions.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-500 dark:border-slate-700">Nenhuma questão encontrada.</p>}
+          {!loading && !error && questions.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-500 dark:border-slate-700">Nenhuma questão aprovada encontrada. Questões cadastradas que ainda estão em revisão não aparecem nesta consulta.</p>}
         </section>
         {!loading && !error && questions.length > 0 && (
           <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900 ${comfortableWidth ? "mx-auto max-w-4xl" : ""}`}>

@@ -99,13 +99,15 @@ def concurso_repr(item: Concurso) -> dict:
     }
 
 
-def news_repr(item: NewsArticle) -> dict:
+def news_repr(item: NewsArticle, *, include_body=True) -> dict:
     return {
         "id": item.id,
         "slug": item.slug,
         "title": item.title,
         "summary": item.summary,
-        "body": item.body,
+        "body": item.body if include_body else "",
+        "author_name": item.source_metadata.get("author", ""),
+        "reading_time": item.source_metadata.get("reading_time_minutes"),
         "category": item.category,
         "image_url": item.image_url,
         "source_url": item.source_url,
@@ -214,7 +216,7 @@ def _content_list(request, origin):
     limit = min(max(limit, 1), 100)
     offset = max(offset, 0)
     count = queryset.count()
-    results = [news_repr(item) for item in queryset[offset: offset + limit]]
+    results = [news_repr(item, include_body=False) for item in queryset.defer("body")[offset: offset + limit]]
     return Response({"count": count, "results": results, "facets": facets})
 
 
@@ -254,7 +256,8 @@ def concurso_detail(request, pk):
     from .catalog import public_resources
     item = get_object_or_404(Concurso.objects.select_related("banca"), pk=pk, editorial_status=Concurso.EditorialStatus.PUBLISHED)
     exams = Exam.objects.filter(concurso=item, is_published=True).select_related("concurso").annotate(
-        question_count=Count("questions", filter=Q(questions__status=Question.Status.APPROVED), distinct=True))
+        question_count=Count("questions", filter=Q(questions__status=Question.Status.APPROVED), distinct=True),
+        pending_question_count=Count("questions", filter=Q(questions__status=Question.Status.PENDING), distinct=True))
     return Response({**concurso_repr(item), "description": item.description, "body": item.body,
                      "resources": public_resources(item), "exams": ExamSerializer(exams, many=True).data})
 

@@ -13,13 +13,14 @@ class ExamSerializer(serializers.ModelSerializer):
             return None
         return {"id": item.id, "title": item.title, "organization": item.organization, "official_url": item.official_url}
     question_count = serializers.IntegerField(read_only=True)
+    pending_question_count = serializers.IntegerField(read_only=True, default=0)
     disciplines = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
         fields = [
             "id", "title", "banca", "institution", "role", "year",
-            "question_count", "disciplines", "concurso", "level", "state",
+            "question_count", "pending_question_count", "disciplines", "concurso", "level", "state",
         ]
 
     def get_disciplines(self, exam):

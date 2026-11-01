@@ -86,3 +86,9 @@ backend/private/
 frontend/playwright-report/
 frontend/test-results/
 frontend/.next-e2e/
+
+# Payment credentials and client certificates
+*.p12
+*.pfx
+*.pem
+*.key

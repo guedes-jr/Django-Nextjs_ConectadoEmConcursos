@@ -306,3 +306,10 @@ STRIPE_PRICE_IDS = json.loads(os.getenv("STRIPE_PRICE_IDS", "{}"))
 LOGGING = {"version": 1, "disable_existing_loggers": False, "handlers": {"error_console": {"class": "logging.StreamHandler"}},
            "loggers": {"conectado.errors": {"handlers": ["error_console"], "level": "ERROR", "propagate": False}}}
 CORS_EXPOSE_HEADERS = ["X-Request-ID"]
+
+# Hosted Efí Cobranças checkout (Bolix/Pix, boleto and credit card).
+BILLING_GATEWAY = os.getenv("BILLING_GATEWAY", "stripe")
+EFI_CLIENT_ID = os.getenv("EFI_CLIENT_ID", "")
+EFI_CLIENT_SECRET = os.getenv("EFI_CLIENT_SECRET", "")
+EFI_SANDBOX = os.getenv("EFI_SANDBOX", "1") == "1"
+EFI_NOTIFICATION_URL = os.getenv("EFI_NOTIFICATION_URL", "")

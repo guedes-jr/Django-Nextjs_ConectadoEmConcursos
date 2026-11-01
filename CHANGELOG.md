@@ -6,6 +6,12 @@ uma versão, tag ou publicação.
 
 ## [Unreleased]
 
+- Checkout Efí para Pix via Bolix, boleto e cartão, com compra por período, confirmação de pagamento, reconciliação idempotente e configuração protegida no painel administrativo.
+
+- Importação auditada de artigos em CSV, preservando corpo completo, imagens, autoria, metadados e estados de publicação. Listagens de leitura não carregam os corpos completos; autoria e tempo de leitura aparecem no detalhe.
+
+- Provas distinguem questões disponíveis das cadastradas em revisão; administração permite filtrar questões por prova e fonte.
+
 - Redefinição direta de senha na lista e ficha de usuários, com confirmação, motivo, política de senhas, hierarquia administrativa, revogação de acessos e auditoria sem credenciais.
 
 - Upload de vários PDFs por concurso, com título, tipo e cargo por arquivo; documentos gerais separados dos documentos do cargo. Cadastro auditável de lotes locais, com questões pendentes e preservação de gabaritos gerais e individuais.

@@ -12,6 +12,7 @@ export type Exam = {
   state?: string;
   concurso?: {id:number;title:string;organization:string;official_url:string}|null;
   question_count: number;
+  pending_question_count: number;
   disciplines: string[];
 };
 

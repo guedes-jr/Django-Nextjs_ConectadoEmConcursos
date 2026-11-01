@@ -16,3 +16,17 @@ class ManualQuestionsApiTests(TestCase):
   response=self.client.post('/api/backoffice/content/questions/manual/',{'statement':'x','banca':'FGV','discipline':'D','year':2026,'options':['A','B'],'correct_answer':0},format='json'); self.assertEqual(response.status_code,201); self.assertEqual(response.data['status'], Question.Status.DRAFT)
   published=self.client.post(f"/api/backoffice/content/questions/manual/{response.data['id']}/publish/",{},format='json'); self.assertEqual(published.status_code,200); self.assertEqual(published.data['status'],Question.Status.APPROVED)
   self.assertTrue(Question.objects.filter(pk=response.data['id'],status=Question.Status.APPROVED).exists())
+
+ def test_filter_imported_pending_questions_by_exam_and_source(self):
+  from apps.questions.models import Exam, QuestionSource
+  source=QuestionSource.objects.create(slug='local-exams-test',name='Provas locais')
+  first=Exam.objects.create(title='Cargo A',banca='FGV',year=2010)
+  second=Exam.objects.create(title='Cargo B',banca='FGV',year=2010)
+  for exam in [first,second]:
+   Question.objects.create(source=source,exam=exam,status='pending',statement=f'Questão do cargo {exam.pk}',discipline='Português',banca='FGV',year=2010,options=['A','B'],correct_answer=0)
+  url='/api/backoffice/content/questions/manual/'
+  response=self.client.get(url,{'source':source.slug,'exam':first.pk,'status':'pending','page':1})
+  self.assertEqual(response.status_code,200)
+  self.assertEqual(response.data['count'],1)
+  self.assertEqual(response.data['results'][0]['exam_id'],first.pk)
+  self.assertEqual(self.client.get(url,{'exam':'invalid'}).status_code,400)

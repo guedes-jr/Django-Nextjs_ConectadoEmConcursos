@@ -108,3 +108,17 @@ class ConcursoHubTests(TestCase):
         self.assertEqual(self.contest.source_url,'https://example.test/noticia')
         self.assertEqual(self.contest.description,'Apresentação editorial')
         self.assertEqual(self.client.patch(f'/api/backoffice/content/editorial/concursos/{self.contest.pk}/',{'source_url':'https://example.test/novo'},format='json').status_code,409)
+
+    def test_pending_count_explains_registered_questions_without_exposing_them(self):
+        self.question(1, status='approved')
+        self.question(2, status='pending')
+        self.question(3, status='draft')
+        self.question(4, status='rejected')
+        detail = self.client.get(f'/api/exams/{self.exam.pk}/').data
+        self.assertEqual(detail['question_count'], 1)
+        self.assertEqual(detail['pending_question_count'], 1)
+        hub = self.client.get(f'/api/concursos/{self.contest.pk}/').data
+        item = next(x for x in hub['exams'] if x['id'] == self.exam.pk)
+        self.assertEqual(item['pending_question_count'], 1)
+        response = self.client.get('/api/questions/', {'exam': self.exam.pk})
+        self.assertEqual(response.data['count'], 1)

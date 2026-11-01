@@ -11,6 +11,8 @@ export type NewsArticle = {
   image_url: string;
   source_url: string;
   source: string;
+  author_name?: string;
+  reading_time?: number|null;
   published_at: string | null;
 };
 

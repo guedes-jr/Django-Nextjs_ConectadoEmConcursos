@@ -67,6 +67,7 @@ const navGroups = [
       { href: "/admin/notificacoes", label: "Notificações", icon: Bell },
       { href: "/admin/auditoria", label: "Auditoria", icon: History },
       { href: "/admin/diagnostico", label: "Diagnóstico", icon: Activity },
+      { href: "/admin/configuracoes/pagamentos", label: "Pagamentos", icon: CreditCard },
       { href: "/admin/configuracoes/smtp", label: "E-mail (SMTP)", icon: Mail },
     ],
   },
