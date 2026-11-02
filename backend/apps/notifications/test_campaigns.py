@@ -20,7 +20,12 @@ class CampaignTests(APITestCase):
         cls.editor.groups.add(Group.objects.get(name="Editor"))
         cls.user = get_user_model().objects.create_user(username="campaign-user")
         cls.plan = Plan.objects.create(slug="campaign-plan", name="Plano", monthly_price=10)
-        Subscription.objects.create(user=cls.user, plan=cls.plan, status=Subscription.Status.ACTIVE)
+        Subscription.objects.update_or_create(
+            user=cls.user, defaults={
+                'plan': cls.plan,
+                'status': Subscription.Status.ACTIVE,
+            },
+        )
 
     def setUp(self):
         self.client.force_authenticate(self.admin)
@@ -46,7 +51,12 @@ class CampaignTests(APITestCase):
         self.assertEqual(materialize_recipients(notice["id"]), 1)
         self.assertEqual(list(NotificationRecipient.objects.filter(notification_id=notice["id"]).values_list("user_id", flat=True)), [self.user.pk])
         new_user = get_user_model().objects.create_user(username="campaign-later")
-        Subscription.objects.create(user=new_user, plan=self.plan, status=Subscription.Status.ACTIVE)
+        Subscription.objects.update_or_create(
+            user=new_user, defaults={
+                'plan': self.plan,
+                'status': Subscription.Status.ACTIVE,
+            },
+        )
         self.assertEqual(materialize_recipients(notice["id"]), 0)
         self.assertEqual(NotificationRecipient.objects.filter(notification_id=notice["id"]).count(), 1)
 
@@ -72,7 +82,7 @@ class CampaignTests(APITestCase):
         wrong = get_user_model().objects.create_user(username="campaign-pending")
         inactive = get_user_model().objects.create_user(username="campaign-inactive", is_active=False)
         for user, status in ((wrong, "pending_payment"), (inactive, "active")):
-            Subscription.objects.create(user=user, plan=self.plan, status=status)
+            Subscription.objects.update_or_create(user=user, defaults={'plan': self.plan, 'status': status})[0]
         item = AdminNotification.objects.create(title="Segmento", scope="segment", status="published", segment_plan_slug=self.plan.slug, segment_subscription_status="active")
         self.assertEqual(materialize_recipients(item.pk), 1)
         self.assertEqual(item.recipients.get().user_id, self.user.pk)

@@ -53,10 +53,11 @@ class ChatAPITests(TestCase):
     )
     @patch("apps.chat.services.requests.post")
     def test_openai_request_does_not_store_response(self, mocked_post):
-        Subscription.objects.create(
-            user=self.user,
-            plan=Plan.objects.get(slug="padrao"),
-            status=Subscription.Status.ACTIVE,
+        Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': Plan.objects.get(slug='padrao'),
+                'status': Subscription.Status.ACTIVE,
+            },
         )
         provider_response = Mock()
         provider_response.raise_for_status.return_value = None

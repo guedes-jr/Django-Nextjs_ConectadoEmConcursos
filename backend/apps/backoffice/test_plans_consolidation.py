@@ -51,7 +51,14 @@ class PlansConsolidationTests(Base):
         self.sub.current_period_end = timezone.now() + timedelta(days=2)
         self.sub.save()
         other = get_user_model().objects.create_user("expired")
-        Subscription.objects.create(user=other, plan=self.padrao, status="active", cycle="mensal", current_period_end=timezone.now() - timedelta(days=1))
+        Subscription.objects.update_or_create(
+            user=other, defaults={
+                'plan': self.padrao,
+                'status': 'active',
+                'cycle': 'mensal',
+                'current_period_end': timezone.now() - timedelta(days=1),
+            },
+        )
         response = self.client.get("/api/backoffice/plans/overview/")
         self.assertIsNone(response.data["mrr_estimated"])
         self.assertTrue(all(row["mrr_estimated"] is None for row in response.data["plans"]))

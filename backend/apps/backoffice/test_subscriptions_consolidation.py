@@ -10,7 +10,14 @@ class SubscriptionsConsolidationTests(Base):
     def test_filters_pagination_and_stable_order(self):
         for index in range(4):
             user = get_user_model().objects.create_user(f"filtered-{index}")
-            Subscription.objects.create(user=user, plan=self.gratis if index == 3 else self.padrao, cycle="mensal", status="active", current_period_end=timezone.now() + timedelta(days=5))
+            Subscription.objects.update_or_create(
+                user=user, defaults={
+                    'plan': self.gratis if index == 3 else self.padrao,
+                    'cycle': 'mensal',
+                    'status': 'active',
+                    'current_period_end': timezone.now() + timedelta(days=5),
+                },
+            )
         response = self.client.get("/api/backoffice/subscriptions/", {"search": "filtered", "plan": "padrao", "cycle": "mensal", "status": "valid", "expires_within": 30, "page": 2, "page_size": 2, "ordering": "name"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 3)
@@ -27,11 +34,17 @@ class SubscriptionsConsolidationTests(Base):
         self.sub.current_period_end = timezone.now() + timedelta(days=5)
         self.sub.save()
         user = get_user_model().objects.create_user("expired-sub")
-        Subscription.objects.create(user=user, plan=self.padrao, status="active", current_period_end=timezone.now() - timedelta(days=1))
+        Subscription.objects.update_or_create(
+            user=user, defaults={
+                'plan': self.padrao,
+                'status': 'active',
+                'current_period_end': timezone.now() - timedelta(days=1),
+            },
+        )
         response = self.client.get("/api/backoffice/subscriptions/overview/")
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.data["mrr_estimated"])
-        self.assertEqual(response.data["active"], 1)
+        self.assertEqual(response.data["active"], 2)
         self.assertEqual(response.data["expiring_30_days"], 1)
         self.staff.user_permissions.add(Permission.objects.get(codename="view_financial_reports"))
         self.client.force_authenticate(get_user_model().objects.get(pk=self.staff.pk))

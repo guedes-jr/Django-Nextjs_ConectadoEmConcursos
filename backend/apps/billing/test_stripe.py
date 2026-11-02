@@ -63,7 +63,12 @@ class StripeBillingTests(TestCase):
             return self.deliver(self.event(event_id=event_id))
 
     def test_paid_checkout_preserves_existing_access_and_reuses_attempt(self):
-        sub = Subscription.objects.create(user=self.user, plan=self.free, status="active")
+        sub = Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': self.free,
+                'status': 'active',
+            },
+        )[0]
         session = {"id": "cs_test_checkout", "status": "open", "url": "https://checkout.stripe.com/c/pay/test", "expires_at": self.now+3600}
         with patch.object(gateway, "create_session", return_value=session) as create:
             first = self.client.post("/api/subscription/", {"plan": "padrao", "cycle": "mensal"})
@@ -85,7 +90,7 @@ class StripeBillingTests(TestCase):
                 self.assertEqual(response.status_code, 503)
         self.assertEqual(create.call_args_list[0].args[0].pk, create.call_args_list[1].args[0].pk)
         self.assertEqual(BillingCheckout.objects.count(), 1)
-        self.assertFalse(Subscription.objects.exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
 
     def test_draft_and_cycle_price_validation(self):
         self.plan.status = "draft"
@@ -177,7 +182,7 @@ class StripeBillingTests(TestCase):
         self.client.force_authenticate(self.user)
         with patch.object(gateway, "request", return_value=self.provider(cancel_at_period_end=True)):
             self.assertEqual(self.client.post("/api/subscription/cancel/").status_code, 200)
-        self.assertTrue(Subscription.objects.get().cancel_at_period_end)
+        self.assertTrue(Subscription.objects.get(user=self.user).cancel_at_period_end)
         self.assertEqual(user_plan_slug(self.user), "padrao")
         self.assertEqual(self.client.post("/api/subscription/", {"plan": "gratis", "cycle": "mensal"}).status_code, 409)
 
@@ -187,7 +192,7 @@ class StripeBillingTests(TestCase):
         invoice["lines"]["data"][0]["pricing"]["price_details"]["price"] = "price_other"
         self.assertEqual(self.paid(invoice=invoice).status_code, 400)
         self.assertFalse(StripeWebhookEvent.objects.exists())
-        self.assertFalse(Subscription.objects.exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
 
     def test_expire_pending_checkout_must_confirm_provider_expiration(self):
         self.attempt_record()
@@ -235,14 +240,14 @@ class StripeBillingTests(TestCase):
         # Provider metadata may be removed; the durable local link still resolves.
         with patch.object(gateway, "request", return_value=self.provider(metadata={}, cancel_at_period_end=True)):
             self.assertEqual(self.deliver(self.event("customer.subscription.updated", event_id="evt_metadata_removed", object_id="sub_test")).status_code, 200)
-        self.assertTrue(Subscription.objects.get().cancel_at_period_end)
+        self.assertTrue(Subscription.objects.get(user=self.user).cancel_at_period_end)
 
     def test_payment_already_canceled_is_recorded_without_granting_access(self):
         self.attempt_record()
         self.assertEqual(self.paid(provider=self.provider(status="canceled")).status_code, 200)
         self.assertEqual(PaymentEvent.objects.get().amount_minor, 3990)
         self.assertEqual(user_plan_slug(self.user), "gratis")
-        self.assertFalse(Subscription.objects.exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
 
     def test_extra_invoice_items_and_basil_proration_are_rejected(self):
         self.attempt_record()
@@ -259,7 +264,12 @@ class StripeBillingTests(TestCase):
         self.user.is_staff = True
         self.user.save()
         self.user.groups.add(Group.objects.get(name="Administrador"))
-        sub = Subscription.objects.create(user=self.user, plan=self.free, status="active")
+        sub = Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': self.free,
+                'status': 'active',
+            },
+        )[0]
         attempt = self.attempt_record()
         response = self.client.patch(f"/api/backoffice/subscriptions/{sub.pk}/", {"status": "canceled"})
         self.assertEqual(response.status_code, 409)
@@ -278,7 +288,7 @@ class StripeBillingTests(TestCase):
             self.assertEqual(self.client.post("/api/subscription/cancel/").status_code, 200)
         with patch.object(gateway, "request", return_value=self.provider(cancel_at_period_end=False)):
             self.deliver(self.event("customer.subscription.updated", event_id="evt_stale_cancel", object_id="sub_test"))
-        self.assertTrue(Subscription.objects.get().cancel_at_period_end)
+        self.assertTrue(Subscription.objects.get(user=self.user).cancel_at_period_end)
 
     def test_late_old_payment_is_kept_without_replacing_new_subscription(self):
         old = self.attempt_record()

@@ -19,7 +19,12 @@ class GroundedAssistantTests(APITestCase):
         self.other = get_user_model().objects.create_user("other-grounded")
         self.client.force_authenticate(self.user)
         self.client.default_format = "json"
-        Subscription.objects.create(user=self.user, plan=Plan.objects.get(slug="padrao"), status="active")
+        Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': Plan.objects.get(slug='padrao'),
+                'status': 'active',
+            },
+        )
         self.conversation = Conversation.objects.create(user=self.user)
         self.question = Question.objects.create(discipline="Português", banca="FGV", year=2026,
             statement="Sobre concordância verbal", options=["Correta", "Incorreta"], correct_answer=0,

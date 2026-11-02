@@ -110,7 +110,7 @@ class FinancialReportTests(TestCase):
                     provider_subscription_id=f"sub_{self.sequence}", price_amount_minor=minor, currency="brl",
                     current_period_end=timezone.now() + dt.timedelta(days=30))
         data.update(extra)
-        return Subscription.objects.create(**data)
+        return Subscription.objects.update_or_create(user=data["user"], defaults={key: value for key, value in data.items() if key != "user"})[0]
 
     def test_mrr_normalizes_locked_cycle_price_and_excludes_nonrecurring_states(self):
         self.create_subscription("mensal", 3990)

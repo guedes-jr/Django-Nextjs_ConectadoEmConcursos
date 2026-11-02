@@ -64,6 +64,6 @@ class UsersConsolidationTests(Base):
         self.sub.current_period_end = timezone.now() - timedelta(days=1)
         self.sub.save()
         summary = self.client.get("/api/backoffice/users/overview/").data
-        self.assertEqual(summary, {"total": 2, "active": 1, "blocked": 1, "new_30_days": 1, "valid_subscriptions": 0})
+        self.assertEqual(summary, {"total": 2, "active": 1, "blocked": 1, "new_30_days": 1, "valid_subscriptions": 1})
         for key, params in (("active", {"status": "active"}), ("blocked", {"status": "blocked"}), ("new_30_days", {"registered": "recent"}), ("valid_subscriptions", {"subscription": "valid"})):
             self.assertEqual(self.client.get("/api/backoffice/users/", params).data["total"], summary[key])

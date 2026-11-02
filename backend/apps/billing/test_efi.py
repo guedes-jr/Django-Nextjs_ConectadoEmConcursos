@@ -53,7 +53,7 @@ class EfiBillingTests(TestCase):
             result = self.choose()
         self.assertEqual(result.status_code, 202)
         self.assertEqual(result.data["checkout_gateway"], "efi")
-        self.assertFalse(Subscription.objects.filter(user=self.user).exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
         attempt = BillingCheckout.objects.get(user=self.user)
         with patch.object(gateway, "request", return_value=self.charge(attempt, "link", total=attempt.amount_minor)):
             result = self.choose()
@@ -75,14 +75,14 @@ class EfiBillingTests(TestCase):
         attempt = self.attempt(session_id="1234", status="open")
         for state in ["approved", "waiting", "settled"]:
             self.assertEqual(self.notify(attempt, state).status_code, 200)
-            self.assertFalse(Subscription.objects.filter(user=self.user).exists())
+            self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
             self.assertFalse(PaymentEvent.objects.exists())
 
     def test_wrong_amount_or_custom_id_does_not_activate(self):
         attempt = self.attempt(session_id="1234", status="open")
         self.assertEqual(self.notify(attempt, total=1).status_code, 400)
         self.assertEqual(self.notify(attempt, custom_id="another-order").status_code, 400)
-        self.assertFalse(Subscription.objects.exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
 
     def test_uncertain_creation_is_recovered_by_notification_without_duplicate(self):
         with patch.object(gateway, "request", side_effect=GatewayUnavailable()):
@@ -160,8 +160,16 @@ class EfiBillingTests(TestCase):
     def test_late_payment_preserves_newer_plan_and_records_reconciliation(self):
         from datetime import timedelta
         other_plan = Plan.objects.get(slug="avancado")
-        current = Subscription.objects.create(user=self.user, plan=other_plan, cycle="anual", status="active", gateway="efi",
-            checkout_id="newer-order", current_period_end=timezone.now() + timedelta(days=365))
+        current = Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': other_plan,
+                'cycle': 'anual',
+                'status': 'active',
+                'gateway': 'efi',
+                'checkout_id': 'newer-order',
+                'current_period_end': timezone.now() + timedelta(days=365),
+            },
+        )[0]
         end = current.current_period_end
         attempt = self.attempt(session_id="1234", status="expired")
         self.notify(attempt)
@@ -186,7 +194,7 @@ class EfiBillingTests(TestCase):
         attempt = self.attempt(session_id="1234", status="open")
         with override_settings(DEBUG=False):
             self.assertEqual(self.notify(attempt).status_code, 503)
-        self.assertFalse(Subscription.objects.filter(user=self.user).exists())
+        self.assertEqual(Subscription.objects.get(user=self.user).plan.slug, "gratis")
 
     def test_month_end_and_leap_year(self):
         start = datetime(2028, 1, 31, tzinfo=dt_timezone.utc)

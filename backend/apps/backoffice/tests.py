@@ -25,7 +25,13 @@ class Base(TestCase):
         self.client.force_authenticate(self.staff)
         self.gratis = Plan.objects.get(slug="gratis")
         self.padrao = Plan.objects.get(slug="padrao")
-        self.sub = Subscription.objects.create(user=self.user, plan=self.padrao, cycle="anual", status=Subscription.Status.PENDING)
+        self.sub = Subscription.objects.update_or_create(
+            user=self.user, defaults={
+                'plan': self.padrao,
+                'cycle': 'anual',
+                'status': Subscription.Status.PENDING,
+            },
+        )[0]
 
 
 class OverviewTests(Base):
@@ -39,7 +45,7 @@ class OverviewTests(Base):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["users"]["total"], 2)
         self.assertEqual(response.data["subscriptions"]["pending_payment"], 1)
-        self.assertEqual(response.data["subscriptions"]["total"], 1)
+        self.assertEqual(response.data["subscriptions"]["total"], 2)
 
 
 class SubscriptionAdminTests(Base):
