@@ -22,6 +22,9 @@
   atualizações, trata atualização já iniciada e limpa timers/listeners ao desmontar.
   A primeira ativação não recarrega a página. Atualizações seguintes recarregam as
   abas controladas após o botão Atualizar; o aviso orienta salvar o trabalho antes.
+  Fechar o aviso adia o lembrete por 24 horas, inclusive após recarregar a página
+  e em outras abas. Se o armazenamento estiver bloqueado, a dispensa vale enquanto
+  a página permanecer aberta.
 - Prompt Chromium trata erro de instalação; iOS recebe instruções manuais e modo
   standalone esconde o banner. Dispensa é persistida por sete dias. Eventos nativos
   e aceitação final dependem do navegador/sistema operacional.

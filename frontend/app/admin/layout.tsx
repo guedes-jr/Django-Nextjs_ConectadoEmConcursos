@@ -184,7 +184,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {open && (
         <button
           type="button"
@@ -228,7 +228,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         <main
           className={cn(
-            "mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8",
+            "admin-content mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8",
             (pathname.startsWith("/admin/questoes") || pathname.startsWith("/admin/fila-questoes") || pathname.startsWith("/admin/fontes-questoes")) && "max-w-none",
           )}
         >

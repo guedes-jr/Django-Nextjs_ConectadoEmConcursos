@@ -1115,3 +1115,47 @@ html:not(.dark) .landing-page .cta-premium-section {
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
 }
+
+/* Administrative pages also serve the legacy /plataform routes. Keep older
+   neutral utility colors readable without overriding explicit dark variants. */
+html.dark .admin-content :where(.text-slate-900, .text-slate-800, .text-gray-900, .text-gray-800):not([class*="dark:text-"]) {
+  color: #f1f5f9;
+}
+html.dark .admin-content :where(.text-slate-700, .text-slate-600, .text-gray-700, .text-gray-600):not([class*="dark:text-"]) {
+  color: #cbd5e1;
+}
+html.dark .admin-content :where(.text-slate-500, .text-gray-500):not([class*="dark:text-"]) {
+  color: #94a3b8;
+}
+html.dark .admin-content :where(.bg-white, .bg-slate-50, .bg-slate-100, .bg-gray-50, .bg-gray-100):not([class*="dark:bg-"]) {
+  background-color: #131b2c;
+}
+html.dark .admin-content :where(.border-slate-200, .border-gray-200):not([class*="dark:border-"]) {
+  border-color: #334155;
+}
+
+/* Explicit action colors take precedence over the shared bordered-card rules. */
+.routine-button.routine-primary,
+html.dark .routine-button.routine-primary {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.routine-button.routine-primary:hover,
+html.dark .routine-button.routine-primary:hover {
+  background-color: #1d4ed8;
+}
+.routine-button.routine-destructive,
+html.dark .routine-button.routine-destructive {
+  background-color: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+.routine-button.routine-destructive:hover,
+html.dark .routine-button.routine-destructive:hover {
+  background-color: #b91c1c;
+}
+.routine-button.routine-danger { color: #be123c; }
+html.dark .routine-button.routine-danger { color: #fda4af; }
+html.dark .admin-content input::placeholder,
+html.dark .admin-content textarea::placeholder { color: #94a3b8; }

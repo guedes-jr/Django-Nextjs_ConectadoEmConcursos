@@ -3,6 +3,20 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 
+const UPDATE_DISMISSED_KEY = "cq-pwa-update-dismissed-at";
+const UPDATE_REMINDER_DELAY = 24 * 60 * 60 * 1000;
+let dismissedUntil = 0;
+
+function updateDismissed() {
+  try {
+    const dismissedAt = Number(window.localStorage.getItem(UPDATE_DISMISSED_KEY));
+    if (Number.isFinite(dismissedAt) && dismissedAt > 0) {
+      dismissedUntil = dismissedAt + UPDATE_REMINDER_DELAY;
+    }
+  } catch { /* Keep the in-memory dismissal when storage is unavailable. */ }
+  return Date.now() < dismissedUntil;
+}
+
 export function ServiceWorkerRegister() {
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
 
@@ -15,6 +29,13 @@ export function ServiceWorkerRegister() {
     let disposed = false;
     let interval: number | undefined;
     const cleanups: (() => void)[] = [];
+    const showUpdate = (worker: ServiceWorker) => {
+      if (!disposed && !updateDismissed()) setWaiting(worker);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === UPDATE_DISMISSED_KEY && updateDismissed()) setWaiting(null);
+    };
+    window.addEventListener("storage", onStorage);
 
     const onControllerChange = () => {
       if (!controlled) { controlled = true; return; }
@@ -34,7 +55,7 @@ export function ServiceWorkerRegister() {
 
         if (disposed) return;
         if (registration.waiting && navigator.serviceWorker.controller) {
-          setWaiting(registration.waiting);
+          showUpdate(registration.waiting);
         }
 
         const onUpdateFound = () => {
@@ -42,7 +63,7 @@ export function ServiceWorkerRegister() {
           if (!installing) return;
           const onStateChange = () => {
             if (!disposed && installing.state === "installed" && navigator.serviceWorker.controller) {
-              setWaiting(registration.waiting ?? installing);
+              showUpdate(registration.waiting ?? installing);
             }
           };
           installing.addEventListener("statechange", onStateChange);
@@ -67,6 +88,7 @@ export function ServiceWorkerRegister() {
       if (interval !== undefined) window.clearInterval(interval);
       cleanups.forEach(cleanup => cleanup());
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
@@ -75,6 +97,15 @@ export function ServiceWorkerRegister() {
   const activateUpdate = () => {
     setWaiting(null);
     waiting.postMessage({ type: "SKIP_WAITING" });
+  };
+
+  const dismissUpdate = () => {
+    const dismissedAt = Date.now();
+    dismissedUntil = dismissedAt + UPDATE_REMINDER_DELAY;
+    try {
+      window.localStorage.setItem(UPDATE_DISMISSED_KEY, String(dismissedAt));
+    } catch { /* Dismissal still works for this page when storage is blocked. */ }
+    setWaiting(null);
   };
 
   return (
@@ -97,7 +128,7 @@ export function ServiceWorkerRegister() {
         <button
           type="button"
           aria-label="Dispensar"
-          onClick={() => setWaiting(null)}
+          onClick={dismissUpdate}
           className="shrink-0 rounded-lg p-1 text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
         >
           <X size={16} />
